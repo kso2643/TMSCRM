@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charSet="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>HR · Industrial CRM</title>
+<link rel="stylesheet" href="/_next/static/css/808bab28f4c17593.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script>
+  try {
+    if (localStorage.getItem('crm_theme') === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
+  } catch (e) {}
+</script>
+<script src="/appointments-reminder-app.js" defer></script></head>
+<body class="font-sans antialiased bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors">
+
+<script src="/app-shell.js"></script>
+<script src="/hr-app.js"></script>
+<script>
+  (function () {
+    var user = null;
+    try { user = JSON.parse(localStorage.getItem('crm_user') || 'null'); } catch (e) {}
+    if (user && !window.HR.isAdmin()) {
+      // Same boundary the /admin/users/ route enforces — don't render a
+      // directory of everyone's PAN/bank details for a role that isn't
+      // ADMIN tier.
+      document.body.innerHTML =
+        '<div class="min-h-screen flex items-center justify-center p-6 text-center">' +
+        '<div><p class="text-lg font-semibold text-slate-900 dark:text-slate-100">Admins only</p>' +
+        '<p class="text-sm text-muted mt-1">This page needs Administrator access.</p>' +
+        '<a href="/dashboard/" class="btn-primary inline-flex mt-4">Back to dashboard</a></div></div>';
+      return;
+    }
+    AppShell.mount({ activeHref: '/hr/', title: 'HR' }, function (content) {
+      window.HR.mount(content);
+    });
+  })();
+</script>
+</body>
+</html>

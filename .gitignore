@@ -1,0 +1,7 @@
+# Real secrets — never commit. Copy api/.env.example to api/.env on the server.
+api/.env
+.DS_Store
+Thumbs.db
+*.log
+api/uploads/*/*
+!api/uploads/*/.gitkeep

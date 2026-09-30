@@ -1,0 +1,436 @@
+<?php
+/**
+ * ╔══════════════════════════════════════════════════════════╗
+ * ║  Industrial CRM  —  PHP/MySQL Backend Entry Point        ║
+ * ║  Drop-in replacement for the original Node/Express API   ║
+ * ║  All /api/* routes map 1-to-1 with the Express version   ║
+ * ╚══════════════════════════════════════════════════════════╝
+ *
+ * Place this file at the root of the backend-php/ folder.
+ * Apache: configure AllowOverride All and see .htaccess.
+ * PHP built-in server: php -S localhost:5000 index.php
+ *
+ * All the original Express/Node dependencies are replaced by
+ * pure-PHP equivalents with no Composer packages:
+ *   express         → this router
+ *   jsonwebtoken    → includes/JWT.php
+ *   bcryptjs        → PHP's password_hash()/password_verify()
+ *   multer          → PHP's built-in $_FILES
+ *   pdfkit          → includes/SimplePdf.php
+ *   xlsx (SheetJS)  → includes/XlsxWriter.php + XlsxReader.php
+ *   prisma          → PDO/MySQL calls in every controller
+ *   cors            → sendCorsHeaders() below
+ *   dotenv          → load_env() in config.php
+ */
+
+declare(strict_types=1);
+
+require __DIR__ . '/config/config.php';
+require __DIR__ . '/config/database.php';
+
+require __DIR__ . '/includes/Helpers.php';
+require __DIR__ . '/includes/Response.php';
+require __DIR__ . '/includes/JWT.php';
+require __DIR__ . '/includes/Auth.php';
+require __DIR__ . '/includes/ActivityLogger.php';
+require __DIR__ . '/includes/XlsxWriter.php';
+require __DIR__ . '/includes/XlsxReader.php';
+require __DIR__ . '/includes/SimplePdf.php';
+require __DIR__ . '/includes/ApjQuotationPdf.php';
+require __DIR__ . '/includes/TMSQuotationPdf.php';
+
+require __DIR__ . '/controllers/AuthController.php';
+require __DIR__ . '/controllers/UserController.php';
+require __DIR__ . '/controllers/CustomerController.php';
+require __DIR__ . '/controllers/MeetingController.php';
+require __DIR__ . '/controllers/ProductController.php';
+require __DIR__ . '/controllers/StockController.php';
+require __DIR__ . '/controllers/AttendanceController.php';
+require __DIR__ . '/controllers/FuelExpenseController.php';
+require __DIR__ . '/controllers/AppointmentController.php';
+require __DIR__ . '/controllers/OrderController.php';
+require __DIR__ . '/controllers/QuotationController.php';
+require __DIR__ . '/controllers/DashboardAnalyticsController.php';
+require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
+require __DIR__ . '/controllers/ExportController.php';
+require __DIR__ . '/controllers/PayrollController.php';  // Payroll, Salary Advances, Advance Recovery, Employee Ledger
+
+// ── CORS — mirrors the Express CORS config exactly ───────────────────
+function sendCorsHeaders(): void
+{
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? FRONTEND_URL;
+    // Allow the configured frontend origin and any localhost dev port
+    $allowed = FRONTEND_URL;
+    if (preg_match('/^https?:\/\/localhost(:\d+)?$/', $origin) || $origin === $allowed) {
+        header('Access-Control-Allow-Origin: ' . $origin);
+    } else {
+        header('Access-Control-Allow-Origin: ' . $allowed);
+    }
+    header('Access-Control-Allow-Credentials: true');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Vary: Origin');
+}
+
+sendCorsHeaders();
+
+// Handle CORS pre-flight — all routes
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+// ── Health check ─────────────────────────────────────────────────────
+$rawUri = $_SERVER['REQUEST_URI'] ?? '/';
+$path   = strtok(parse_url($rawUri, PHP_URL_PATH), '?') ?: '/';
+
+if ($path === '/health') {
+    header('Content-Type: application/json');
+    echo json_encode(['status' => 'OK', 'timestamp' => date('c'), 'env' => APP_ENV]);
+    exit;
+}
+
+// ── Static uploads (/uploads/meetings/filename.jpg, etc.) ────────────
+if (str_starts_with($path, '/uploads/')) {
+    $filePath = BASE_PATH . $path;
+    if (!is_file($filePath)) { http_response_code(404); exit; }
+    $mime = mime_content_type($filePath) ?: 'application/octet-stream';
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . filesize($filePath));
+    readfile($filePath);
+    exit;
+}
+
+// ── API router ────────────────────────────────────────────────────────
+$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+
+// Strip /api prefix
+if (!str_starts_with($path, '/api/') && $path !== '/api') {
+    sendError("Route $path not found", 404);
+}
+$apiPath = substr($path, 4); // e.g. "/users/abc123/reset-password"
+
+// Split into segments: ['users', 'abc123', 'reset-password']
+$segs = array_values(array_filter(explode('/', $apiPath), fn($s) => $s !== ''));
+
+$c0 = $segs[0] ?? '';
+$c1 = $segs[1] ?? '';
+$c2 = $segs[2] ?? '';
+$c3 = $segs[3] ?? '';
+
+// Tiny router — match from most-specific to least-specific.
+// Convention: segment variables (IDs) are captured as $c1, $c2, etc.
+// Exactly mirrors the Express routes in index.js + all *.routes.js.
+
+try {
+    // ── Auth ───────────────────────────────────────────────────────
+    if ($c0 === 'auth') {
+        $ctrl = new AuthController();
+        match (true) {
+            $method === 'POST' && $c1 === 'login'           => $ctrl->login(),
+            $method === 'GET'  && $c1 === 'me'              => $ctrl->me(),
+            $method === 'PUT'  && $c1 === 'change-password' => $ctrl->changePassword(),
+            $method === 'PUT'  && $c1 === 'profile'         => $ctrl->updateProfile(),
+            $method === 'POST' && $c1 === 'logout'          => $ctrl->logout(),
+            default => sendError("Route /api/auth/$c1 not found", 404),
+        };
+    }
+
+    // ── Users ──────────────────────────────────────────────────────
+    elseif ($c0 === 'users') {
+        $ctrl = new UserController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'export'             => $ctrl->export(),
+            $method === 'GET'   && $c1 === ''                   => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                   => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === ''     => $ctrl->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''     => $ctrl->update($c1),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === ''     => $ctrl->delete($c1),
+            $method === 'PATCH' && $c2 === 'reset-password'     => $ctrl->resetPassword($c1),
+            $method === 'PATCH' && $c2 === 'toggle-lock'        => $ctrl->toggleLock($c1),
+            $method === 'PATCH' && $c2 === 'reactivate'         => $ctrl->reactivate($c1),
+            default => sendError("Route /api/users not matched ($method $c1/$c2)", 404),
+        };
+    }
+
+    // ── Customers ─────────────────────────────────────────────────
+    elseif ($c0 === 'customers') {
+        $ctrl = new CustomerController(); $exp = new ExportController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'meta'  && $c2 === 'filters' => $ctrl->filterMeta(),
+            $method === 'GET'   && $c1 === 'with-location'              => $ctrl->withLocation(),
+            $method === 'GET'   && $c1 === 'export'                     => $exp->exportCustomers(),
+            $method === 'GET'   && $c1 === ''                           => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                           => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === ''             => $ctrl->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
+            $method === 'DELETE'&& $c1 !== ''                           => $ctrl->delete($c1),
+            default => sendError("Route /api/customers/$c1 not found", 404),
+        };
+    }
+
+    // ── Meetings ──────────────────────────────────────────────────
+    elseif ($c0 === 'meetings') {
+        $ctrl = new MeetingController(); $exp = new ExportController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'today-followups'            => $ctrl->todayFollowups(),
+            $method === 'GET'   && $c1 === 'alerts'                     => $ctrl->alerts(),
+            $method === 'PATCH' && $c1 === 'alerts' && $c3 === 'read'   => $ctrl->markAlertRead($c2),
+            $method === 'GET'   && $c1 === 'export'                     => $exp->exportMeetings(),
+            $method === 'GET'   && $c1 === 'customer' && $c3 === 'visits' => $ctrl->customerVisits($c2),
+            $method === 'GET'   && $c1 === ''                           => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                           => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === ''             => $ctrl->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
+            $method === 'POST'  && $c2 === 'checkin'                    => $ctrl->checkIn($c1),
+            $method === 'PATCH' && $c2 === 'timer'                      => $ctrl->timer($c1),
+            $method === 'POST'  && $c2 === 'attachments'                => $ctrl->uploadAttachment($c1),
+            default => sendError("Route /api/meetings/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Products + Stock ──────────────────────────────────────────
+    elseif ($c0 === 'products') {
+        $pc = new ProductController(); $sc = new StockController(); $exp = new ExportController();
+        match (true) {
+            // Stock sub-routes (must precede /:id)
+            $method === 'GET'   && $c1 === 'stock' && $c2 === 'alerts'   => $sc->alerts(),
+            $method === 'GET'   && $c1 === 'stock' && $c2 === 'stats'    => $sc->stats(),
+            $method === 'GET'   && $c1 === 'stock' && $c2 === 'template' => $sc->template(),
+            $method === 'POST'  && $c1 === 'stock' && $c2 === 'import'   => $sc->import(),
+            $method === 'GET'   && $c1 === 'stock' && $c2 === ''         => $sc->index(),
+            $method === 'POST'  && $c1 === 'stock' && $c2 === ''         => $sc->create(),
+            $method === 'PUT'   && $c1 === 'stock' && $c2 !== ''         => $sc->update($c2),
+            $method === 'DELETE'&& $c1 === 'stock' && $c2 !== ''         => $sc->delete($c2),
+            // Product sub-routes
+            $method === 'GET'   && $c1 === 'export'                      => $exp->exportProducts(),
+            $method === 'GET'   && $c1 === 'search'                      => $pc->search(),
+            $method === 'GET'   && $c1 === 'code' && $c2 !== ''          => $pc->byCode($c2),
+            $method === 'GET'   && $c1 === ''                            => $pc->index(),
+            $method === 'POST'  && $c1 === ''                            => $pc->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === ''              => $pc->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''              => $pc->update($c1),
+            default => sendError("Route /api/products/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Attendance ───────────────────────────────────────────────
+    elseif ($c0 === 'attendance') {
+        $ctrl = new AttendanceController(); $exp = new ExportController();
+        match (true) {
+            $method === 'POST'  && $c1 === 'checkin'                     => $ctrl->checkIn(),
+            $method === 'POST'  && $c1 === 'checkout'                    => $ctrl->checkOut(),
+            $method === 'POST'  && $c1 === 'ping'                        => $ctrl->ping(),
+            $method === 'GET'   && $c1 === 'today'                       => $ctrl->today(),
+            $method === 'GET'   && $c1 === 'live'                        => $ctrl->live(),
+            $method === 'GET'   && $c1 === 'all'                         => $ctrl->all(),
+            $method === 'GET'   && $c1 === 'export'                      => $exp->exportAttendance(),
+            $method === 'GET'   && $c1 === ''                            => $ctrl->index(),
+            $method === 'GET'   && $c2 === 'locations'                   => $ctrl->locations($c1),
+            $method === 'PATCH' && $c2 === 'approve'                     => $ctrl->approve($c1),
+            default => sendError("Route /api/attendance/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Fuel Expense ───────────────────────────────────────────────
+    elseif ($c0 === 'fuel-expense') {
+        $ctrl = new FuelExpenseController(); $exp = new ExportController();
+        match (true) {
+            $method === 'POST'  && $c1 === 'start'                        => $ctrl->start(),
+            $method === 'POST'  && $c1 === 'close'                        => $ctrl->close(),
+            $method === 'GET'   && $c1 === 'today'                        => $ctrl->today(),
+            $method === 'GET'   && $c1 === 'all'                          => $ctrl->all(),
+            $method === 'GET'   && $c1 === 'export'                       => $exp->exportFuelExpense(),
+            $method === 'GET'   && $c1 === ''                             => $ctrl->index(),
+            $method === 'PATCH' && $c1 !== '' && $c2 === ''               => $ctrl->update($c1),
+            default => sendError("Route /api/fuel-expense/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Vehicle Profile (per-employee mileage / fuel price on file) ─
+    elseif ($c0 === 'vehicle-profile') {
+        $ctrl = new FuelExpenseController();
+        match (true) {
+            $method === 'GET' && $c1 === '' => $ctrl->getProfile(),
+            $method === 'PUT' && $c1 === '' => $ctrl->updateProfile(),
+            default => sendError("Route /api/vehicle-profile/$c1 not found", 404),
+        };
+    }
+
+    // ── Appointments — engineer scheduling calendar ────────────────
+    elseif ($c0 === 'appointments') {
+        $ctrl = new AppointmentController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'meta'                     => $ctrl->meta(),
+            $method === 'GET'   && $c1 === 'engineers'                => $ctrl->engineers(),
+            $method === 'GET'   && $c1 === 'reminders'                => $ctrl->reminders(),
+            $method === 'PATCH' && $c1 === 'alerts' && $c3 === 'read' => $ctrl->markAlertRead($c2),
+            $method === 'GET'   && $c1 === ''                         => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                         => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === ''           => $ctrl->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''           => $ctrl->update($c1),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === ''           => $ctrl->delete($c1),
+            default => sendError("Route /api/appointments/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Customer Orders — verbal & PO tracking ──────────────────────
+    elseif ($c0 === 'orders') {
+        $ctrl = new OrderController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'meta'                          => $ctrl->meta(),
+            $method === 'GET'   && $c1 === 'engineers'                     => $ctrl->engineers(),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'document'        => $ctrl->downloadDocument($c1),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'document'        => $ctrl->uploadDocument($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'delivery'        => $ctrl->updateDelivery($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'eta'             => $ctrl->updateEta($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'procurement'     => $ctrl->updateProcurement($c1),
+            $method === 'GET'   && $c1 === ''                              => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                              => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === ''                => $ctrl->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''                => $ctrl->update($c1),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === ''                => $ctrl->delete($c1),
+            default => sendError("Route /api/orders/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Leaves ───────────────────────────────────────────────────
+    elseif ($c0 === 'leaves') {
+        $ctrl = new LeaveController(); $exp = new ExportController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'export'  => $exp->exportLeaves(),
+            $method === 'GET'   && $c1 === ''        => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''        => $ctrl->create(),
+            $method === 'PATCH' && $c2 === 'approve' => $ctrl->approve($c1),
+            default => sendError("Route /api/leaves/$c1 not found", 404),
+        };
+    }
+
+    // ── Payroll ──────────────────────────────────────────────────
+    elseif ($c0 === 'payroll') {
+        $ctrl = new PayrollController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'stats'          => $ctrl->stats(),
+            $method === 'GET'   && $c1 === 'export'         => $ctrl->export(),
+            $method === 'GET'   && $c1 === ''               => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''               => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === '' => $ctrl->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === '' => $ctrl->update($c1),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === '' => $ctrl->delete($c1),
+            $method === 'PATCH' && $c2 === 'mark-paid'      => $ctrl->markPaid($c1),
+            default => sendError("Route /api/payroll/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Salary Advances ──────────────────────────────────────────
+    elseif ($c0 === 'salary-advances') {
+        $ctrl = new PayrollController();
+        match (true) {
+            $method === 'GET'   && $c1 === ''         => $ctrl->listAdvances(),
+            $method === 'POST'  && $c1 === ''         => $ctrl->createAdvance(),
+            $method === 'PATCH' && $c2 === 'cancel'   => $ctrl->cancelAdvance($c1),
+            $method === 'GET'   && $c2 === 'pdf'      => $ctrl->advancePdf($c1),
+            $method === 'PUT'   && $c2 === 'recovery' => $ctrl->saveRecovery($c1),
+            default => sendError("Route /api/salary-advances/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Advance Recovery ─────────────────────────────────────────
+    elseif ($c0 === 'advance-recovery') {
+        $ctrl = new PayrollController();
+        match (true) {
+            $method === 'GET' && $c1 === '' => $ctrl->recoveryList(),
+            default => sendError("Route /api/advance-recovery/$c1 not found", 404),
+        };
+    }
+
+    // ── Employee Ledger ──────────────────────────────────────────
+    elseif ($c0 === 'employee-ledger') {
+        $ctrl = new PayrollController();
+        match (true) {
+            $method === 'GET' && $c1 !== '' && $c2 === 'pdf'   => $ctrl->employeeLedgerPdf($c1),
+            $method === 'GET' && $c1 !== '' && $c2 === 'excel' => $ctrl->employeeLedgerExcel($c1),
+            $method === 'GET' && $c1 !== '' && $c2 === ''      => $ctrl->employeeLedger($c1),
+            default => sendError("Route /api/employee-ledger/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Dashboard ────────────────────────────────────────────────
+    elseif ($c0 === 'dashboard') {
+        $ctrl = new DashboardController();
+        match (true) {
+            $method === 'GET' && $c1 === 'admin'   => $ctrl->admin(),
+            $method === 'GET' && $c1 === 'user'    => $ctrl->user(),
+            $method === 'GET' && $c1 === 'payroll' => $ctrl->payroll(),
+            default => sendError("Route /api/dashboard/$c1 not found", 404),
+        };
+    }
+
+    // ── Activity ─────────────────────────────────────────────────
+    elseif ($c0 === 'activity') {
+        $ctrl = new ActivityController(); $exp = new ExportController();
+        match (true) {
+            $method === 'GET' && $c1 === 'export' => $exp->exportActivity(),
+            $method === 'GET' && $c1 === ''       => $ctrl->index(),
+            default => sendError("Route /api/activity/$c1 not found", 404),
+        };
+    }
+
+    // ── Quotations ───────────────────────────────────────────────
+    elseif ($c0 === 'quotations') {
+        $ctrl = new QuotationController(); $exp = new ExportController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'stats'                   => $ctrl->stats(),
+            $method === 'GET'   && $c1 === 'export'                  => $exp->exportQuotations(),
+            $method === 'GET'   && $c1 === ''                        => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                        => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === ''          => $ctrl->show($c1),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''          => $ctrl->update($c1),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === ''          => $ctrl->delete($c1),
+            $method === 'GET'   && $c2 === 'pdf'                     => $ctrl->generatePdf($c1),
+            $method === 'PATCH' && $c2 === 'approve'                 => $ctrl->approve($c1),
+            default => sendError("Route /api/quotations/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Categories ───────────────────────────────────────────────
+    elseif ($c0 === 'categories') {
+        $ctrl = new CategoryController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''        => $ctrl->index(),
+            $method === 'POST'   && $c1 === ''        => $ctrl->create(),
+            $method === 'PUT'    && $c1 !== ''        => $ctrl->update($c1),
+            $method === 'DELETE' && $c1 !== ''        => $ctrl->delete($c1),
+            default => sendError("Route /api/categories/$c1 not found", 404),
+        };
+    }
+
+    // ── Analytics ────────────────────────────────────────────────
+    elseif ($c0 === 'analytics') {
+        $ctrl = new AnalyticsController();
+        match (true) {
+            $method === 'GET' && $c1 === 'overview'     => $ctrl->overview(),
+            $method === 'GET' && $c1 === 'monthly'      => $ctrl->monthly(),
+            $method === 'GET' && $c1 === 'employee'     => $ctrl->employee(),
+            $method === 'GET' && $c1 === 'segmentation' => $ctrl->customerSegmentation(),
+            $method === 'GET' && $c1 === 'win-loss'     => $ctrl->winLoss(),
+            default => sendError("Route /api/analytics/$c1 not found", 404),
+        };
+    }
+
+    else {
+        sendError("Route /api/$c0 not found", 404);
+    }
+
+} catch (Throwable $e) {
+    error_log('Unhandled error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+    $payload = ['success' => false, 'message' => 'Internal server error'];
+    if (APP_ENV === 'development') {
+        $payload['error'] = $e->getMessage();
+        $payload['trace'] = explode("\n", $e->getTraceAsString());
+    }
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode($payload);
+    exit;
+}

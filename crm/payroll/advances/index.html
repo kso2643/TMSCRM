@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salary Advances · Industrial CRM</title>
+<link rel="stylesheet" href="../payroll-common.css">
+<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script></head>
+<body>
+
+  <!-- ============ ACCESS GATE ============ -->
+  <div id="login-screen">
+    <div class="login-card">
+      <div class="login-logo">IC</div>
+      <h1 id="gate-title">Checking access…</h1>
+      <p id="gate-message">Hang on a moment.</p>
+      <a href="../../" class="btn btn-ghost btn-block" id="gate-link" style="display:none;text-decoration:none;">&larr; Back to CRM</a>
+    </div>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="app">
+    <div class="app-header">
+      <div class="brand">
+        <div class="brand-mark">IC</div>
+        <div class="brand-text">
+          <div class="t1">Industrial CRM</div>
+          <div class="t2">Payroll</div>
+        </div>
+        <a href="../../" class="back-link">&larr; Back to CRM</a>
+      </div>
+      <div class="header-right">
+        <div class="user-chip">
+          <div class="user-avatar" id="user-avatar">A</div>
+          <span id="user-name">—</span>
+        </div>
+        <button class="logout-btn" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+
+    <div class="payroll-nav" id="payroll-nav"></div>
+
+    <div class="container">
+      <div class="toolbar" style="margin-bottom:2px;">
+        <div>
+          <h1 class="page-title" style="margin-bottom:0;">Salary Advances</h1>
+          <p class="page-sub">Give advances and track automatic recovery.</p>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn btn-primary" id="toggle-form-btn">+ New Advance</button>
+      </div>
+
+      <div id="page-error" class="error-box"></div>
+
+      <!-- New advance form -->
+      <div class="table-card" id="new-form-card" style="display:none;padding:20px;margin-bottom:22px;">
+        <form id="new-form">
+          <div class="form-grid">
+            <div class="field full">
+              <label for="f-employee">Employee</label>
+              <select id="f-employee" required></select>
+            </div>
+            <div class="field">
+              <label for="f-date">Advance Date</label>
+              <input type="date" id="f-date" required>
+            </div>
+            <div class="field">
+              <label for="f-amount">Advance Amount (₹)</label>
+              <input type="number" id="f-amount" min="1" step="1" required>
+            </div>
+            <div class="field">
+              <label for="f-recovery-type">Recovery Type</label>
+              <select id="f-recovery-type">
+                <option value="MONTHLY_FIXED">Monthly Fixed Amount</option>
+                <option value="MANUAL">Manual Recovery</option>
+              </select>
+            </div>
+            <div class="field" id="f-monthly-wrap">
+              <label for="f-monthly">Monthly Recovery (₹)</label>
+              <input type="number" id="f-monthly" min="1" step="1">
+            </div>
+            <div class="field">
+              <label for="f-start-month">Recovery Start Month</label>
+              <select id="f-start-month"></select>
+            </div>
+            <div class="field">
+              <label for="f-start-year">Recovery Start Year</label>
+              <input type="number" id="f-start-year">
+            </div>
+            <div class="field full">
+              <label for="f-reason">Reason</label>
+              <textarea id="f-reason" rows="2"></textarea>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px;">
+            <button type="button" class="btn btn-ghost" id="cancel-form-btn">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="save-btn">Create Advance</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="toolbar">
+        <select id="filter-status">
+          <option value="">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="COMPLETED">Completed</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+      </div>
+
+      <div id="loading" style="color:var(--muted);font-size:13.5px;">Loading…</div>
+      <div id="empty-state" class="empty-state" style="display:none;">
+        <h3>No salary advances yet</h3>
+        <p>Advances given to employees will show up here, with automatic recovery tracking.</p>
+      </div>
+      <div class="rows-list" id="rows-list"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script src="../payroll-common.js"></script>
+<script>
+(function () {
+  "use strict";
+  const PC = PayrollCommon;
+  let currentAdvances = [];
+
+  PC.boot(function () {
+    PC.renderNav("advances");
+    setupForm();
+    document.getElementById("filter-status").addEventListener("change", refresh);
+    document.getElementById("toggle-form-btn").addEventListener("click", () => toggleForm(true));
+    document.getElementById("cancel-form-btn").addEventListener("click", () => toggleForm(false));
+    document.getElementById("new-form").addEventListener("submit", handleCreate);
+    refresh();
+  });
+
+  function toggleForm(show) {
+    document.getElementById("new-form-card").style.display = show ? "block" : "none";
+    document.getElementById("toggle-form-btn").textContent = show ? "Close" : "+ New Advance";
+  }
+
+  async function setupForm() {
+    const now = new Date();
+    document.getElementById("f-date").value = now.toISOString().slice(0, 10);
+
+    const mSel = document.getElementById("f-start-month");
+    mSel.innerHTML = PC.MONTHS.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+    mSel.value = now.getMonth() + 1;
+    document.getElementById("f-start-year").value = now.getFullYear();
+
+    document.getElementById("f-recovery-type").addEventListener("change", (e) => {
+      document.getElementById("f-monthly-wrap").style.display = e.target.value === "MONTHLY_FIXED" ? "block" : "none";
+    });
+
+    await PC.loadEmployeeOptions(document.getElementById("f-employee"), "Choose employee…");
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    const btn = document.getElementById("save-btn");
+    const recoveryType = document.getElementById("f-recovery-type").value;
+    const body = {
+      userId: document.getElementById("f-employee").value,
+      advanceDate: document.getElementById("f-date").value,
+      advanceAmount: Number(document.getElementById("f-amount").value),
+      reason: document.getElementById("f-reason").value,
+      recoveryType,
+      recoveryStartMonth: Number(document.getElementById("f-start-month").value),
+      recoveryStartYear: Number(document.getElementById("f-start-year").value),
+    };
+    if (recoveryType === "MONTHLY_FIXED") {
+      body.monthlyRecoveryAmount = Number(document.getElementById("f-monthly").value);
+    }
+    if (!body.userId) { showError("Choose an employee."); return; }
+
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      await PC.api("/salary-advances", { method: "POST", body });
+      document.getElementById("new-form").reset();
+      toggleForm(false);
+      PC.toast("Advance created.");
+      refresh();
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Create Advance";
+    }
+  }
+
+  function showError(msg) {
+    const box = document.getElementById("page-error");
+    box.textContent = msg;
+    box.style.display = "block";
+  }
+
+  async function refresh() {
+    document.getElementById("page-error").style.display = "none";
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("empty-state").style.display = "none";
+    document.getElementById("rows-list").innerHTML = "";
+    const status = document.getElementById("filter-status").value;
+    try {
+      const params = status ? "?" + new URLSearchParams({ status }) : "";
+      const data = await PC.api("/salary-advances" + params);
+      currentAdvances = data.advances || [];
+      render();
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      document.getElementById("loading").style.display = "none";
+    }
+  }
+
+  function render() {
+    const list = document.getElementById("rows-list");
+    if (!currentAdvances.length) {
+      document.getElementById("empty-state").style.display = "block";
+      list.innerHTML = "";
+      return;
+    }
+    list.innerHTML = currentAdvances.map(rowCard).join("");
+  }
+
+  function rowCard(a) {
+    const pct = Math.max(0, Math.min(100, Math.round(a.recoveryPercent || 0)));
+    const closing = a.expectedClosingDate
+      ? `<div class="stat-sub">Closes ${new Date(a.expectedClosingDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</div>`
+      : "";
+    return `
+      <div class="row-card">
+        <div style="width:120px;">
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+          <div class="progress-label">${pct}% recovered</div>
+        </div>
+        <div class="grow">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="emp-name">${PC.escapeHtml(a.employeeName || a.userId)}</span>
+            <span class="pill pill-${a.status.toLowerCase()}">${PC.escapeHtml(a.status)}</span>
+          </div>
+          <div class="emp-sub">${PC.escapeHtml(a.employeeCode || "")} · ${PC.escapeHtml(a.department || "")} · Given ${new Date(a.advanceDate).toLocaleDateString("en-IN")}</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="amount">${PC.money(a.remainingAmount)} <span style="color:var(--muted);font-weight:400;">remaining</span></div>
+          <div class="stat-sub">of ${PC.money(a.advanceAmount)}</div>
+          ${closing}
+        </div>
+        <div class="row-actions" style="flex-direction:column;">
+          <a class="btn btn-ghost" href="/payroll/ledger/?userId=${encodeURIComponent(a.userId)}">Ledger</a>
+          <button type="button" class="btn btn-ghost" onclick="PayrollAdvances.downloadPdf('${a.id}')">PDF</button>
+          ${a.status === "ACTIVE" ? `<button type="button" class="btn btn-ghost" style="color:var(--danger);" onclick="PayrollAdvances.cancelAdvance('${a.id}')">Cancel</button>` : ""}
+        </div>
+      </div>`;
+  }
+
+  async function cancelAdvance(id) {
+    if (!confirm("Cancel this salary advance? This cannot be undone.")) return;
+    try {
+      await PC.api(`/salary-advances/${id}/cancel`, { method: "PATCH" });
+      PC.toast("Advance cancelled.");
+      refresh();
+    } catch (err) {
+      PC.toast(err.message, true);
+    }
+  }
+
+  function downloadPdf(id) {
+    PC.downloadFile(`/salary-advances/${id}/pdf`, `advance-${id}.pdf`);
+  }
+
+  // Exposed for inline onclick= handlers.
+  window.PayrollAdvances = { cancelAdvance, downloadPdf };
+})();
+</script>
+</body>
+</html>

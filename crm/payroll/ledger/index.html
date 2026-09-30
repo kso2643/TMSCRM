@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Employee Ledger · Industrial CRM</title>
+<link rel="stylesheet" href="../payroll-common.css">
+<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script></head>
+<body>
+
+  <!-- ============ ACCESS GATE ============ -->
+  <div id="login-screen">
+    <div class="login-card">
+      <div class="login-logo">IC</div>
+      <h1 id="gate-title">Checking access…</h1>
+      <p id="gate-message">Hang on a moment.</p>
+      <a href="../../" class="btn btn-ghost btn-block" id="gate-link" style="display:none;text-decoration:none;">&larr; Back to CRM</a>
+    </div>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="app">
+    <div class="app-header">
+      <div class="brand">
+        <div class="brand-mark">IC</div>
+        <div class="brand-text">
+          <div class="t1">Industrial CRM</div>
+          <div class="t2">Payroll</div>
+        </div>
+        <a href="../../" class="back-link">&larr; Back to CRM</a>
+      </div>
+      <div class="header-right">
+        <div class="user-chip">
+          <div class="user-avatar" id="user-avatar">A</div>
+          <span id="user-name">—</span>
+        </div>
+        <button class="logout-btn" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+
+    <div class="payroll-nav" id="payroll-nav"></div>
+
+    <div class="container">
+      <h1 class="page-title">Employee Ledger</h1>
+      <p class="page-sub">Salary, advance, and recovery history for one employee.</p>
+
+      <!-- Shown when no ?userId= is in the URL yet -->
+      <div class="table-card employee-picker" id="picker" style="padding:20px;display:none;">
+        <div class="field" style="flex:1;min-width:240px;margin-bottom:0;">
+          <label for="picker-select">Choose an employee</label>
+          <select id="picker-select"></select>
+        </div>
+        <button type="button" class="btn btn-primary" id="picker-go">View Ledger</button>
+      </div>
+
+      <div id="page-error" class="error-box"></div>
+      <div id="loading" style="display:none;color:var(--muted);font-size:13.5px;">Loading…</div>
+
+      <div id="ledger-content" style="display:none;">
+        <div class="table-card" style="padding:18px;margin-bottom:20px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div>
+            <div style="font-weight:700;font-size:17px;" id="emp-name"></div>
+            <div class="stat-sub" id="emp-sub"></div>
+          </div>
+          <div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+            <div class="stat-sub" id="emp-joined"></div>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="btn btn-ghost" id="excel-btn">Excel</button>
+              <button type="button" class="btn btn-primary" id="pdf-btn">PDF</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats-grid" id="summary-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:6px;"></div>
+
+        <div class="section-heading">Salary history</div>
+        <div id="salary-section"></div>
+
+        <div class="section-heading">Advance history</div>
+        <div id="advance-section"></div>
+
+        <div class="section-heading">Recovery history</div>
+        <div id="recovery-section"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script src="../payroll-common.js"></script>
+<script>
+(function () {
+  "use strict";
+  const PC = PayrollCommon;
+  let userId = null;
+
+  PC.boot(function () {
+    PC.renderNav("ledger");
+    userId = new URLSearchParams(location.search).get("userId");
+    if (userId) {
+      loadLedger(userId);
+    } else {
+      showPicker();
+    }
+  });
+
+  async function showPicker() {
+    document.getElementById("picker").style.display = "flex";
+    const sel = document.getElementById("picker-select");
+    await PC.loadEmployeeOptions(sel, "Choose employee…");
+    document.getElementById("picker-go").addEventListener("click", () => {
+      const id = sel.value;
+      if (!id) { PC.toast("Choose an employee first.", true); return; }
+      const url = new URL(location.href);
+      url.searchParams.set("userId", id);
+      history.pushState({}, "", url);
+      userId = id;
+      document.getElementById("picker").style.display = "none";
+      loadLedger(id);
+    });
+  }
+
+  async function loadLedger(id) {
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("page-error").style.display = "none";
+    document.getElementById("ledger-content").style.display = "none";
+    try {
+      const data = await PC.api(`/employee-ledger/${id}`);
+      render(data);
+      document.getElementById("ledger-content").style.display = "block";
+    } catch (err) {
+      const box = document.getElementById("page-error");
+      box.textContent = err.message;
+      box.style.display = "block";
+    } finally {
+      document.getElementById("loading").style.display = "none";
+    }
+  }
+
+  function render(data) {
+    const { employee, payrollHistory, advanceHistory, recoveryHistory, summary } = data;
+
+    document.getElementById("emp-name").textContent = employee.name;
+    document.getElementById("emp-sub").textContent = [employee.employeeCode, employee.department, employee.designation].filter(Boolean).join(" · ");
+    document.getElementById("emp-joined").textContent = employee.dateOfJoining
+      ? "Joined " + new Date(employee.dateOfJoining).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+      : "";
+
+    document.getElementById("pdf-btn").onclick = () => PC.downloadFile(`/employee-ledger/${userId}/pdf`, `ledger-${userId}.pdf`);
+    document.getElementById("excel-btn").onclick = () => PC.downloadFile(`/employee-ledger/${userId}/excel`, `ledger-${userId}.xlsx`);
+
+    document.getElementById("summary-grid").innerHTML = [
+      statCard("Total Salary Paid", PC.money(summary.totalSalaryPaid), "paid"),
+      statCard("Total Advance Given", PC.money(summary.totalAdvanceGiven)),
+      statCard("Total Recovered", PC.money(summary.totalRecovered), "paid"),
+      statCard("Pending Balance", PC.money(summary.totalPendingBalance), summary.totalPendingBalance > 0 ? "pending" : null),
+    ].join("");
+
+    document.getElementById("salary-section").innerHTML = payrollHistory.length
+      ? simpleTable(
+          ["Month", "Gross", "Deductions", "Net Salary", "Status"],
+          payrollHistory.map((p) => [
+            monthLabel(p.month, p.year),
+            PC.money(p.grossSalary),
+            PC.money(p.totalDeductions),
+            `<b>${PC.money(p.netSalary)}</b>`,
+            pill(p.status),
+          ])
+        )
+      : emptyState("No payroll processed yet", "Monthly salary runs for this employee will appear here.");
+
+    document.getElementById("advance-section").innerHTML = advanceHistory.length
+      ? `<div class="rows-list">${advanceHistory.map(advanceCard).join("")}</div>`
+      : emptyState("No salary advances", "Advances given to this employee will appear here.");
+
+    document.getElementById("recovery-section").innerHTML = recoveryHistory.length
+      ? simpleTable(
+          ["Month", "Amount", "Mode", "Status", "Remarks"],
+          recoveryHistory.map((r) => [
+            monthLabel(r.month, r.year),
+            PC.money(r.amountRecovered),
+            r.recoveryMode === "MANUAL" ? "Manual" : "Automatic",
+            pill(r.status),
+            PC.escapeHtml(r.remarks || "—"),
+          ])
+        )
+      : emptyState("No recoveries recorded", "Monthly deductions — automatic or manual — will appear here.");
+  }
+
+  function statCard(label, value, tone) {
+    return `<div class="stat-card"><div class="stat-label">${PC.escapeHtml(label)}</div><div class="stat-value${tone ? " tone-" + tone : ""}">${value}</div></div>`;
+  }
+
+  function pill(status) {
+    return `<span class="pill pill-${String(status).toLowerCase()}">${PC.escapeHtml(status)}</span>`;
+  }
+
+  function monthLabel(m, y) {
+    return PC.MONTHS[m - 1].slice(0, 3) + " " + y;
+  }
+
+  function emptyState(title, body) {
+    return `<div class="empty-state" style="border:1px dashed var(--border);border-radius:var(--radius);background:var(--card);margin-bottom:8px;"><h3>${PC.escapeHtml(title)}</h3><p>${PC.escapeHtml(body)}</p></div>`;
+  }
+
+  function simpleTable(columns, rows) {
+    return `
+      <div class="table-card" style="margin-bottom:8px;">
+        <table>
+          <thead><tr>${columns.map((c) => `<th>${PC.escapeHtml(c)}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map((r) => `<tr>${r.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function advanceCard(a) {
+    const pct = Math.max(0, Math.min(100, Math.round(a.recoveryPercent || 0)));
+    return `
+      <div class="row-card">
+        <div style="width:100px;">
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+          <div class="progress-label">${pct}% recovered</div>
+        </div>
+        <div class="grow">
+          <div>${new Date(a.advanceDate).toLocaleDateString("en-IN")} · ${PC.money(a.advanceAmount)}</div>
+          <div class="emp-sub">${PC.money(a.remainingAmount)} remaining</div>
+        </div>
+        ${pill(a.status)}
+      </div>`;
+  }
+})();
+</script>
+</body>
+</html>

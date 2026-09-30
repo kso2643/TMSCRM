@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payroll Dashboard · Industrial CRM</title>
+<link rel="stylesheet" href="../payroll-common.css">
+<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script></head>
+<body>
+
+  <!-- ============ ACCESS GATE ============ -->
+  <div id="login-screen">
+    <div class="login-card">
+      <div class="login-logo">IC</div>
+      <h1 id="gate-title">Checking access…</h1>
+      <p id="gate-message">Hang on a moment.</p>
+      <a href="../../" class="btn btn-ghost btn-block" id="gate-link" style="display:none;text-decoration:none;">&larr; Back to CRM</a>
+    </div>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="app">
+    <div class="app-header">
+      <div class="brand">
+        <div class="brand-mark">IC</div>
+        <div class="brand-text">
+          <div class="t1">Industrial CRM</div>
+          <div class="t2">Payroll</div>
+        </div>
+        <a href="../../" class="back-link">&larr; Back to CRM</a>
+      </div>
+      <div class="header-right">
+        <div class="user-chip">
+          <div class="user-avatar" id="user-avatar">A</div>
+          <span id="user-name">—</span>
+        </div>
+        <button class="logout-btn" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+
+    <div class="payroll-nav" id="payroll-nav"></div>
+
+    <div class="container">
+      <h1 class="page-title">Payroll Dashboard</h1>
+      <p class="page-sub">Trends and totals across salary, advances, and recoveries.</p>
+
+      <div id="dash-error" class="error-box"></div>
+      <div id="dash-loading" style="color:var(--muted);font-size:13.5px;">Loading…</div>
+
+      <div id="dash-content" style="display:none;">
+        <div class="stats-grid" id="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));"></div>
+        <div class="charts-grid">
+          <div class="chart-card"><h3>Monthly Salary Trend</h3><div id="chart-salary"></div></div>
+          <div class="chart-card"><h3>Advance Trend</h3><div id="chart-advance"></div></div>
+          <div class="chart-card"><h3>Recovery Trend</h3><div id="chart-recovery"></div></div>
+          <div class="chart-card"><h3>Department Salary</h3><div id="chart-dept"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script src="../payroll-common.js"></script>
+<script>
+(function () {
+  "use strict";
+  const PC = PayrollCommon;
+
+  PC.boot(function () {
+    PC.renderNav("dashboard");
+    load();
+  });
+
+  function statCard(label, value, tone, sublabel) {
+    return `
+      <div class="stat-card">
+        <div class="stat-label">${PC.escapeHtml(label)}</div>
+        <div class="stat-value${tone ? " tone-" + tone : ""}">${value}</div>
+        ${sublabel ? `<div class="stat-sub">${sublabel}</div>` : ""}
+      </div>`;
+  }
+
+  async function load() {
+    try {
+      const data = await PC.api("/dashboard/payroll");
+      render(data);
+      document.getElementById("dash-loading").style.display = "none";
+      document.getElementById("dash-content").style.display = "block";
+    } catch (err) {
+      document.getElementById("dash-loading").style.display = "none";
+      const box = document.getElementById("dash-error");
+      box.textContent = err.message;
+      box.style.display = "block";
+    }
+  }
+
+  function render(data) {
+    const c = data.cards;
+    document.getElementById("stats-grid").innerHTML = [
+      statCard("Total Employees", String(c.totalEmployees)),
+      statCard("Salary This Month", PC.money(c.salaryThisMonth), "paid"),
+      statCard("Total Advances", PC.money(c.totalAdvances)),
+      statCard("Pending Recoveries", PC.money(c.pendingRecoveries), "pending"),
+      statCard("Completed Recoveries", String(c.completedRecoveries), "paid"),
+      statCard("Upcoming Recoveries", String(c.upcomingRecoveries), "pending"),
+      statCard("Employees with Advances", String(c.employeesWithOutstandingAdvances)),
+    ].join("");
+
+    renderLineChart("chart-salary", data.monthlySalaryTrend, "#16233f");
+    renderLineChart("chart-advance", data.advanceTrend, "#a8763e");
+    renderLineChart("chart-recovery", data.recoveryTrend, "#2b6e4e");
+    renderBarChart("chart-dept", data.departmentSalaryChart, "department", "#16233f");
+  }
+
+  // ── Minimal inline-SVG charts (no external chart library) ───────────
+  const W = 320, H = 190, PAD_L = 46, PAD_R = 10, PAD_T = 10, PAD_B = 26;
+  const INNER_W = W - PAD_L - PAD_R, INNER_H = H - PAD_T - PAD_B;
+
+  function scaleValues(values) {
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const range = max - min || 1;
+    return { max, min, range };
+  }
+
+  function renderLineChart(elId, rows, color) {
+    const el = document.getElementById(elId);
+    if (!rows || !rows.length) { el.innerHTML = emptyChart(); return; }
+    const values = rows.map((r) => r.total);
+    const { min, range } = scaleValues(values);
+    const stepX = rows.length > 1 ? INNER_W / (rows.length - 1) : 0;
+    const pts = rows.map((r, i) => [
+      PAD_L + i * stepX,
+      PAD_T + INNER_H - ((r.total - min) / range) * INNER_H,
+    ]);
+    const points = pts.map((p) => p.join(",")).join(" ");
+    const dots = pts.map((p) => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="${color}"/>`).join("");
+    const labels = rows.map((r, i) => `<text x="${pts[i][0]}" y="${H - 6}" font-size="9" fill="#64748b" text-anchor="middle">${PC.escapeHtml(r.month)}</text>`).join("");
+    const gridY = [0, 0.5, 1].map((f) => PAD_T + INNER_H * f);
+    const grid = gridY.map((y) => `<line x1="${PAD_L}" y1="${y}" x2="${W - PAD_R}" y2="${y}" stroke="#e6e1d6" stroke-width="1"/>`).join("");
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${grid}<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5"/>${dots}${labels}</svg>`;
+  }
+
+  function renderBarChart(elId, rows, labelKey, color) {
+    const el = document.getElementById(elId);
+    if (!rows || !rows.length) { el.innerHTML = emptyChart(); return; }
+    const values = rows.map((r) => r.total);
+    const { max } = scaleValues(values);
+    const bw = (INNER_W / rows.length) * 0.6;
+    const gap = (INNER_W / rows.length) * 0.4;
+    const bars = rows.map((r, i) => {
+      const bh = (r.total / max) * INNER_H;
+      const x = PAD_L + i * (bw + gap) + gap / 2;
+      const y = PAD_T + INNER_H - bh;
+      return `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="3" fill="${color}"/>`;
+    }).join("");
+    const labels = rows.map((r, i) => {
+      const x = PAD_L + i * (bw + gap) + gap / 2 + bw / 2;
+      return `<text x="${x}" y="${H - 6}" font-size="9" fill="#64748b" text-anchor="middle">${PC.escapeHtml(String(r[labelKey]).slice(0, 8))}</text>`;
+    }).join("");
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}">${bars}${labels}</svg>`;
+  }
+
+  function emptyChart() {
+    return `<div style="height:${H}px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;">No data yet</div>`;
+  }
+})();
+</script>
+</body>
+</html>

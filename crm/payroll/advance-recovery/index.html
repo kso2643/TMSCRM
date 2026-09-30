@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advance Recovery · Industrial CRM</title>
+<link rel="stylesheet" href="../payroll-common.css">
+<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script></head>
+<body>
+
+  <!-- ============ ACCESS GATE ============ -->
+  <div id="login-screen">
+    <div class="login-card">
+      <div class="login-logo">IC</div>
+      <h1 id="gate-title">Checking access…</h1>
+      <p id="gate-message">Hang on a moment.</p>
+      <a href="../../" class="btn btn-ghost btn-block" id="gate-link" style="display:none;text-decoration:none;">&larr; Back to CRM</a>
+    </div>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="app">
+    <div class="app-header">
+      <div class="brand">
+        <div class="brand-mark">IC</div>
+        <div class="brand-text">
+          <div class="t1">Industrial CRM</div>
+          <div class="t2">Payroll</div>
+        </div>
+        <a href="../../" class="back-link">&larr; Back to CRM</a>
+      </div>
+      <div class="header-right">
+        <div class="user-chip">
+          <div class="user-avatar" id="user-avatar">A</div>
+          <span id="user-name">—</span>
+        </div>
+        <button class="logout-btn" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+
+    <div class="payroll-nav" id="payroll-nav"></div>
+
+    <div class="container">
+      <h1 class="page-title">Advance Recovery — <span id="period-label"></span></h1>
+      <p class="page-sub">Record each employee's monthly advance recovery.</p>
+
+      <div id="page-error" class="error-box"></div>
+
+      <div class="toolbar">
+        <select id="filter-month"></select>
+        <input type="number" id="filter-year" style="width:100px;">
+        <input type="text" id="filter-department" placeholder="Department">
+        <input type="text" id="filter-userid" placeholder="Employee ID">
+      </div>
+
+      <div id="loading" style="color:var(--muted);font-size:13.5px;">Loading…</div>
+      <div id="empty-state" class="empty-state" style="display:none;">
+        <h3>Nothing to recover this month</h3>
+        <p>No active advances match these filters for the selected month.</p>
+      </div>
+
+      <div class="table-card" id="table-card" style="display:none;">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th class="num">Advance Amount</th>
+              <th class="num">Recovered</th>
+              <th class="num">Remaining</th>
+              <th class="num">This Month</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script src="../payroll-common.js"></script>
+<script>
+(function () {
+  "use strict";
+  const PC = PayrollCommon;
+  let editingId = null;
+  let currentRows = [];
+
+  PC.boot(function () {
+    PC.renderNav("recovery");
+    const now = new Date();
+    const mSel = document.getElementById("filter-month");
+    mSel.innerHTML = PC.MONTHS.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+    mSel.value = now.getMonth() + 1;
+    document.getElementById("filter-year").value = now.getFullYear();
+
+    ["filter-month", "filter-year", "filter-department", "filter-userid"].forEach((id) =>
+      document.getElementById(id).addEventListener("change", () => { editingId = null; refresh(); })
+    );
+    refresh();
+  });
+
+  function currentFilters() {
+    return {
+      month: Number(document.getElementById("filter-month").value),
+      year: Number(document.getElementById("filter-year").value),
+      department: document.getElementById("filter-department").value.trim(),
+      userId: document.getElementById("filter-userid").value.trim(),
+    };
+  }
+
+  async function refresh() {
+    const f = currentFilters();
+    document.getElementById("period-label").textContent = PC.MONTHS[f.month - 1] + " " + f.year;
+    document.getElementById("page-error").style.display = "none";
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("empty-state").style.display = "none";
+    document.getElementById("table-card").style.display = "none";
+
+    const params = { month: String(f.month), year: String(f.year) };
+    if (f.department) params.department = f.department;
+    if (f.userId) params.userId = f.userId;
+
+    try {
+      const data = await PC.api("/advance-recovery?" + new URLSearchParams(params));
+      currentRows = data.rows || [];
+      render();
+    } catch (err) {
+      const box = document.getElementById("page-error");
+      box.textContent = err.message;
+      box.style.display = "block";
+    } finally {
+      document.getElementById("loading").style.display = "none";
+    }
+  }
+
+  function pill(status) {
+    return `<span class="pill pill-${String(status).toLowerCase()}">${PC.escapeHtml(status)}</span>`;
+  }
+
+  function render() {
+    if (!currentRows.length) {
+      document.getElementById("empty-state").style.display = "block";
+      return;
+    }
+    document.getElementById("table-card").style.display = "block";
+    const body = document.getElementById("table-body");
+    body.innerHTML = currentRows.map((row) => {
+      const thisMonth = row.currentMonthRecovery !== null
+        ? PC.money(row.currentMonthRecovery)
+        : `<span style="color:var(--muted);">Not processed</span>`;
+      const statusHtml = row.currentMonthStatus ? pill(row.currentMonthStatus) : pill(row.status);
+      const editRow = editingId === row.advanceId
+        ? `<tr><td colspan="7" style="padding:0;">${editRowHtml(row)}</td></tr>`
+        : "";
+      return `
+        <tr>
+          <td>
+            <div class="emp-name">${PC.escapeHtml(row.employeeName)}</div>
+            <div class="emp-sub">${PC.escapeHtml(row.employeeCode)} · ${PC.escapeHtml(row.department)}</div>
+          </td>
+          <td class="num">${PC.money(row.advanceAmount)}</td>
+          <td class="num">${PC.money(row.recovered)}</td>
+          <td class="num">${PC.money(row.remaining)}</td>
+          <td class="num">${thisMonth}</td>
+          <td>${statusHtml}</td>
+          <td><button type="button" class="btn btn-ghost" onclick="PayrollRecovery.toggleEdit('${row.advanceId}')">${editingId === row.advanceId ? "Close" : "Edit"}</button></td>
+        </tr>
+        ${editRow}`;
+    }).join("");
+  }
+
+  function editRowHtml(row) {
+    return `
+      <div class="inline-edit" id="edit-${row.advanceId}">
+        <label style="width:140px;">Amount (₹)<div><input class="pr-amt" type="number" id="edit-amount-${row.advanceId}" value="${row.currentMonthRecovery ?? ""}"></div></label>
+        <label style="width:130px;">Status<div>
+          <select id="edit-status-${row.advanceId}">
+            <option value="PAID">Paid</option>
+            <option value="UNPAID">Unpaid</option>
+          </select>
+        </div></label>
+        <label style="flex:1;min-width:220px;">Remarks <span id="remarks-req-${row.advanceId}"></span><div>
+          <input type="text" id="edit-remarks-${row.advanceId}" value="${PC.escapeHtml(row.remarks || "")}" placeholder="e.g. Employee on Leave, Salary Hold, Resigned" list="recovery-remarks-suggestions">
+        </div></label>
+        <button type="button" class="btn btn-primary" onclick="PayrollRecovery.saveEdit('${row.advanceId}')" id="save-edit-${row.advanceId}">Save</button>
+        <div id="edit-error-${row.advanceId}" style="color:var(--danger);font-size:12.5px;width:100%;display:none;"></div>
+      </div>
+      <datalist id="recovery-remarks-suggestions">
+        <option value="Employee on Leave"></option>
+        <option value="Salary Hold"></option>
+        <option value="Recovery Deferred"></option>
+        <option value="Management Approval"></option>
+        <option value="Medical Leave"></option>
+        <option value="Resigned"></option>
+      </datalist>`;
+  }
+
+  function toggleEdit(advanceId) {
+    editingId = editingId === advanceId ? null : advanceId;
+    render();
+    if (editingId) {
+      const statusSel = document.getElementById(`edit-status-${editingId}`);
+      statusSel.addEventListener("change", () => {
+        document.getElementById(`remarks-req-${editingId}`).textContent = statusSel.value === "UNPAID" ? "(required)" : "";
+      });
+    }
+  }
+
+  async function saveEdit(advanceId) {
+    const f = currentFilters();
+    const amount = Number(document.getElementById(`edit-amount-${advanceId}`).value) || 0;
+    const status = document.getElementById(`edit-status-${advanceId}`).value;
+    const remarks = document.getElementById(`edit-remarks-${advanceId}`).value;
+    const errBox = document.getElementById(`edit-error-${advanceId}`);
+    errBox.style.display = "none";
+
+    if (status === "UNPAID" && !remarks.trim()) {
+      errBox.textContent = "Remarks are required when marking a month unpaid.";
+      errBox.style.display = "block";
+      return;
+    }
+    const btn = document.getElementById(`save-edit-${advanceId}`);
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      await PC.api(`/salary-advances/${advanceId}/recovery`, {
+        method: "PUT",
+        body: { month: f.month, year: f.year, amount, status, remarks },
+      });
+      editingId = null;
+      PC.toast("Recovery saved.");
+      refresh();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = "block";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Save";
+    }
+  }
+
+  window.PayrollRecovery = { toggleEdit, saveEdit };
+})();
+</script>
+</body>
+</html>

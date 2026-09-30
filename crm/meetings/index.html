@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Meetings &amp; Follow-ups — APJ Tech CRM</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   DESIGN TOKENS — matches the existing dashboard's slate/blue palette
+   (same family as the "badge-green" / "text-slate-500" / "input text-sm"
+   classes already used across the compiled app, and the light theme
+   already established in the Quotations standalone page) rather than
+   inventing a new visual identity for what has to feel like the same app.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --blue: #2563eb;
+  --blue-dark: #1a4fa0;
+  --blue-light: #eff6ff;
+  --dark: #0f172a;
+  --muted: #64748b;
+  --muted-light: #94a3b8;
+  --border: #e2e8f0;
+  --bg: #f1f5f9;
+  --white: #ffffff;
+  --green: #166534;
+  --green-light: #f0fdf4;
+  --amber: #92400e;
+  --amber-light: #fffbeb;
+  --red: #b91c1c;
+  --red-light: #fef2f2;
+  --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-lg: 0 10px 40px rgba(15,23,42,.12);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--dark);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+button { font-family: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* ── Layout shell ─────────────────────────────────────────────────────── */
+#app { max-width: 1180px; margin: 0 auto; padding: 20px 20px 80px; }
+#app.is-hidden { display: none; }
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; margin-bottom: 20px; flex-wrap: wrap;
+}
+.topbar-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.back-link {
+  font-size: .82rem; color: var(--muted); text-decoration: none;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.back-link:hover { color: var(--blue); }
+h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
+.topbar-right { display: flex; align-items: center; gap: 10px; font-size: .8rem; color: var(--muted); }
+.user-chip {
+  display: flex; align-items: center; gap: 7px; background: var(--white);
+  border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px 5px 6px;
+}
+.user-chip .avatar {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--blue);
+  color: #fff; font-size: .68rem; font-weight: 700; display: flex;
+  align-items: center; justify-content: center; flex-shrink: 0;
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tab-btn {
+  background: none; border: none; padding: 10px 16px; font-size: .88rem; font-weight: 600;
+  color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px;
+  display: flex; align-items: center; gap: 7px;
+}
+.tab-btn:hover { color: var(--dark); }
+.tab-btn.is-active { color: var(--blue); border-bottom-color: var(--blue); }
+.tab-count {
+  background: var(--border); color: var(--muted); font-size: .7rem; font-weight: 700;
+  border-radius: 999px; padding: 1px 7px; min-width: 20px; text-align: center;
+}
+.tab-btn.is-active .tab-count { background: var(--blue-light); color: var(--blue); }
+
+/* ── Filter bar ───────────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px; margin-bottom: 16px;
+}
+.filter-bar input[type="text"],
+.filter-bar input[type="date"],
+.filter-bar select {
+  font-family: inherit; font-size: .82rem; color: var(--dark);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 7px 10px; background: var(--white); height: 34px;
+}
+.filter-bar input[type="text"] { width: 200px; }
+.filter-search-wrap { position: relative; }
+.filter-search-wrap svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted-light); pointer-events: none; }
+.filter-search-wrap input { padding-left: 30px; width: 200px; }
+.filter-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-light); margin-right: -2px; }
+.filter-name-group { display: flex; gap: 8px; align-items: center; padding-left: 8px; border-left: 1px solid var(--border); flex-wrap: wrap; }
+.btn-clear {
+  background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 7px 12px; font-size: .8rem; font-weight: 600; color: var(--muted); height: 34px;
+}
+.btn-clear:hover { background: var(--bg); color: var(--dark); }
+.active-filter-count {
+  background: var(--blue); color: #fff; font-size: .68rem; font-weight: 700;
+  border-radius: 999px; padding: 0 6px; margin-left: 5px;
+}
+
+/* ── Meeting list ─────────────────────────────────────────────────────── */
+.meeting-list { display: flex; flex-direction: column; gap: 8px; }
+.meeting-card {
+  background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.meeting-card:hover { border-color: var(--blue); box-shadow: var(--shadow); }
+.meeting-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.meeting-company { font-weight: 700; font-size: .94rem; }
+.meeting-contact { color: var(--muted); font-size: .8rem; margin-top: 1px; }
+.meeting-date { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+.badge {
+  display: inline-flex; align-items: center; font-size: .7rem; font-weight: 700;
+  border-radius: 999px; padding: 3px 9px; line-height: 1.3; white-space: nowrap;
+}
+.badge-status { background: var(--blue-light); color: var(--blue-dark); }
+.badge-type { background: var(--bg); color: var(--muted); }
+.badge-lost, .badge-overdue { background: var(--red-light); color: var(--red); }
+.badge-closed { background: var(--green-light); color: var(--green); }
+.badge-today { background: var(--amber-light); color: var(--amber); }
+.meeting-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.meeting-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: .76rem; color: var(--muted-light); margin-top: 2px; }
+.meeting-meta b { color: var(--muted); font-weight: 600; }
+.followup-line {
+  display: flex; align-items: center; gap: 8px; margin-top: 4px; padding-top: 8px;
+  border-top: 1px dashed var(--border); font-size: .8rem;
+}
+.followup-line .fu-when { font-weight: 600; }
+.checkin-link {
+  margin-left: auto; color: var(--blue); text-decoration: none; font-size: .74rem; font-weight: 600;
+}
+.checkin-link:hover { text-decoration: underline; }
+
+/* ── States: loading / empty / error ─────────────────────────────────── */
+.state-block {
+  text-align: center; padding: 56px 20px; color: var(--muted); background: var(--white);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.state-block .state-title { font-weight: 700; color: var(--dark); margin-bottom: 4px; font-size: .95rem; }
+.state-block .state-sub { font-size: .82rem; }
+.spinner {
+  width: 22px; height: 22px; border: 2.5px solid var(--border); border-top-color: var(--blue);
+  border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.6s; } }
+
+/* ── Pagination ───────────────────────────────────────────────────────── */
+.pagination { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 18px; font-size: .82rem; color: var(--muted); }
+.pagination button {
+  background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px 12px; font-size: .8rem; font-weight: 600; color: var(--dark);
+}
+.pagination button:disabled { opacity: .4; cursor: default; }
+.pagination button:not(:disabled):hover { border-color: var(--blue); color: var(--blue); }
+
+/* ── Detail / edit drawer ─────────────────────────────────────────────── */
+.drawer-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,.4); z-index: 1000;
+  display: flex; justify-content: flex-end;
+}
+.drawer-backdrop.is-hidden { display: none; }
+.drawer {
+  width: min(460px, 100vw); background: var(--white); height: 100%; overflow-y: auto;
+  box-shadow: var(--shadow-lg); display: flex; flex-direction: column;
+}
+.drawer-header {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 18px 20px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--white); z-index: 1;
+}
+.drawer-header h2 { font-size: 1.05rem; font-weight: 700; }
+.drawer-header p { font-size: .8rem; color: var(--muted); margin-top: 2px; }
+.drawer-close { background: none; border: none; font-size: 1.3rem; line-height: 1; color: var(--muted); padding: 4px; }
+.drawer-close:hover { color: var(--dark); }
+.drawer-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; flex: 1; }
+.field-group { display: flex; flex-direction: column; gap: 5px; }
+.field-group label { font-size: .74rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.field-group select, .field-group textarea, .field-group input {
+  font-family: inherit; font-size: .86rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 10px; color: var(--dark); width: 100%;
+}
+.field-group textarea { resize: vertical; min-height: 70px; }
+.field-row { display: flex; gap: 10px; }
+.field-row .field-group { flex: 1; }
+.readonly-field { font-size: .84rem; padding: 2px 0; }
+.readonly-field .rf-label { color: var(--muted); font-size: .74rem; display: block; margin-bottom: 1px; }
+.audit-strip {
+  background: var(--bg); border-radius: var(--radius-sm); padding: 10px 12px; font-size: .76rem; color: var(--muted);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.drawer-footer {
+  padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px;
+  position: sticky; bottom: 0; background: var(--white);
+}
+.btn-primary {
+  background: var(--blue); color: #fff; border: none; border-radius: var(--radius-sm);
+  padding: 10px 18px; font-size: .86rem; font-weight: 700; flex: 1;
+}
+.btn-primary:hover { background: var(--blue-dark); }
+.btn-primary:disabled { opacity: .55; cursor: default; }
+.btn-secondary {
+  background: var(--white); color: var(--muted); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 16px; font-size: .86rem; font-weight: 600;
+}
+.btn-secondary:hover { background: var(--bg); }
+.save-feedback { font-size: .78rem; padding: 8px 12px; border-radius: var(--radius-sm); margin: 0 20px 12px; }
+.save-feedback.ok { background: var(--green-light); color: var(--green); }
+.save-feedback.err { background: var(--red-light); color: var(--red); }
+
+@media (max-width: 640px) {
+  .filter-bar { flex-direction: column; align-items: stretch; }
+  .filter-bar input[type="text"], .filter-search-wrap input, .filter-bar select { width: 100%; }
+  .filter-name-group { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 8px; width: 100%; }
+  .drawer { width: 100vw; }
+}
+</style>
+<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script></head>
+<body>
+
+<div id="auth-gate" class="state-block" style="max-width:420px;margin:80px auto;">
+  <div class="spinner"></div>
+  <div class="state-title">Checking your session…</div>
+</div>
+
+<div id="app" class="is-hidden">
+  <div class="topbar">
+    <div class="topbar-left">
+      <a class="back-link" href="/dashboard">&larr; Dashboard</a>
+      <h1 class="page-title">Meetings &amp; Follow-ups</h1>
+    </div>
+    <div class="topbar-right">
+      <div class="user-chip">
+        <span class="avatar" id="user-avatar">–</span>
+        <span id="user-name">–</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn is-active" data-tab="meetings" id="tab-btn-meetings">
+      All Meetings <span class="tab-count" id="count-meetings">–</span>
+    </button>
+    <button class="tab-btn" data-tab="followups" id="tab-btn-followups">
+      Follow-ups <span class="tab-count" id="count-followups">–</span>
+    </button>
+  </div>
+
+  <div class="filter-bar" id="filter-bar">
+    <div class="filter-search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" id="f-search" placeholder="Search customer or contact…" />
+    </div>
+    <select id="f-status"><option value="">All statuses</option></select>
+    <select id="f-type"><option value="">All types</option></select>
+    <input type="date" id="f-date-from" title="From date" />
+    <input type="date" id="f-date-to" title="To date" />
+    <div class="filter-name-group" id="filter-name-group">
+      <span class="filter-label">Filter by name</span>
+      <select id="f-owner"><option value="">Owner: anyone</option></select>
+      <select id="f-updater"><option value="">Updated by: anyone</option></select>
+    </div>
+    <button class="btn-clear" id="btn-clear-filters">Clear filters<span class="active-filter-count" id="active-filter-count" style="display:none;"></span></button>
+  </div>
+
+  <div id="list-region"></div>
+  <div id="pagination-region"></div>
+</div>
+
+<div class="drawer-backdrop is-hidden" id="drawer-backdrop">
+  <div class="drawer" id="drawer">
+    <!-- populated by JS -->
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ═════════════════════════════════════════════════════════════════════
+     CONFIG — VALID_STATUSES / VALID_TYPES start as a fallback copy of
+     MeetingController.php's lists, then get overwritten with the live
+     values from GET /meetings/meta at startup (see api.meetings.meta()
+     and init() below). Kept as `var`, not `const` — deliberately
+     reassigned once the fetch resolves. If that request ever fails,
+     these fallback values keep the dropdowns working exactly as before.
+     ═════════════════════════════════════════════════════════════════════ */
+  var API_BASE = "https://api.apjtech.in/api";
+  var DISPLAY_TZ = "Asia/Kolkata";
+
+  var VALID_STATUSES = [
+    "NEW_LEAD","FOLLOW_UP_PENDING","TRIAL_PLANNED","TRIAL_COMPLETED",
+    "QUOTATION_SUBMITTED","WAITING_APPROVAL","NEGOTIATION","PURCHASE_ORDER",
+    "TECHNICAL_DISCUSSION_COMPLETED","PENDING_CUSTOMER_RESPONSE","LOST","CLOSED"
+  ];
+  var VALID_TYPES = ["VISIT","CALL","ONLINE","TRIAL_SUPPORT","QUOTATION_DISCUSSION","TECHNICAL_DISCUSSION"];
+  var VALID_PRIORITIES = ["LOW","MEDIUM","HIGH"];
+  var ADMIN_ROLES = ["ADMIN","SUPER_ADMIN","MANAGER"];
+
+  function humanize(v) {
+    if (!v) return "";
+    return v.split("_").map(function (w) { return w.charAt(0) + w.slice(1).toLowerCase(); }).join(" ");
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     AUTH — same crm_token / crm_user localStorage pattern as the
+     Quotations standalone page, so a session already open in the main
+     app keeps working here with no separate login step.
+     ═════════════════════════════════════════════════════════════════════ */
+  function getToken() { return localStorage.getItem("crm_token"); }
+  function getStoredUser() {
+    try { return JSON.parse(localStorage.getItem("crm_user") || "null"); } catch (e) { return null; }
+  }
+  function isAdmin(user) { return !!user && ADMIN_ROLES.indexOf(user.role) !== -1; }
+
+  function requireAuth() {
+    var token = getToken();
+    if (!token) { window.location.href = "/login"; return false; }
+    return true;
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     API CLIENT
+     ═════════════════════════════════════════════════════════════════════ */
+  function apiFetch(path, opts) {
+    opts = opts || {};
+    var headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    var token = getToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return fetch(API_BASE + path, Object.assign({}, opts, { headers: headers }))
+      .then(function (res) {
+        if (res.status === 401) {
+          localStorage.removeItem("crm_token");
+          localStorage.removeItem("crm_user");
+          window.location.href = "/login";
+          throw new Error("Session expired");
+        }
+        return res.json().then(function (body) {
+          if (!res.ok || body.success === false) {
+            throw new Error((body && body.message) || "Request failed (" + res.status + ")");
+          }
+          return body;
+        });
+      });
+  }
+
+  function qs(params) {
+    var parts = [];
+    Object.keys(params).forEach(function (k) {
+      var v = params[k];
+      if (v !== undefined && v !== null && v !== "") parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(v));
+    });
+    return parts.length ? "?" + parts.join("&") : "";
+  }
+
+  var api = {
+    meetings: {
+      list: function (params) { return apiFetch("/meetings" + qs(params)); },
+      update: function (id, body) {
+        return apiFetch("/meetings/" + encodeURIComponent(id), { method: "PUT", body: JSON.stringify(body) });
+      },
+      meta: function () { return apiFetch("/meetings/meta"); }
+    },
+    users: {
+      list: function () { return apiFetch("/users" + qs({ limit: 200 })); }
+    }
+  };
+
+  /* ═════════════════════════════════════════════════════════════════════
+     TIME FORMATTING — mirrors fmt_time_12h()/fmt_freetext_time_12h() in
+     the backend's includes/Helpers.php exactly, so this page shows the
+     same IST + AM/PM times as the fixed report exports, not a second,
+     possibly-different implementation.
+     ═════════════════════════════════════════════════════════════════════ */
+  function toIsoUtc(value) {
+    if (!value) return null;
+    return /[Zz]|[+-]\d\d:?\d\d$/.test(value) ? value : value.replace(" ", "T") + "Z";
+  }
+  function fmtDate(value) {
+    var iso = toIsoUtc(value);
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: DISPLAY_TZ });
+  }
+  // .toLocaleTimeString's am/pm casing is itself locale/environment-dependent
+  // (this sandbox's ICU renders "am"/"pm" lowercase for en-IN; other engines
+  // may not) — normalizing explicitly avoids reintroducing the exact class of
+  // inconsistency this project started from. fmt_time_12h() in the PHP
+  // backend always emits uppercase, so this keeps the two in agreement.
+  function normalizeAmPm(s) { return s.replace(/\b(am|pm)\b/i, function (m) { return m.toUpperCase(); }); }
+  function fmtTime(value) {
+    var iso = toIsoUtc(value);
+    if (!iso) return "—";
+    return normalizeAmPm(new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: DISPLAY_TZ }));
+  }
+  function fmtDateTime(value) {
+    var iso = toIsoUtc(value);
+    if (!iso) return "—";
+    return fmtDate(value) + ", " + fmtTime(value);
+  }
+  // Meeting.followUpTime is free-text "HH:MM" (not a real DATETIME) — same
+  // logic as fmt_freetext_time_12h() in PHP. The API already returns this
+  // pre-formatted as followUpTimeDisplay; this is here as a fallback only.
+  function fmtFreeTextTime(value) {
+    if (!value) return "";
+    var m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(value).trim());
+    if (!m) return value;
+    var h = parseInt(m[1], 10), suffix = h >= 12 ? "PM" : "AM", h12 = h % 12 || 12;
+    return (h12 < 10 ? "0" + h12 : h12) + ":" + m[2] + " " + suffix;
+  }
+  function toDateInputValue(value) {
+    var iso = toIsoUtc(value);
+    if (!iso) return "";
+    var d = new Date(iso);
+    // en-CA gives YYYY-MM-DD directly, in the display timezone, for <input type="date">.
+    return d.toLocaleDateString("en-CA", { timeZone: DISPLAY_TZ });
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     STATE
+     ═════════════════════════════════════════════════════════════════════ */
+  var state = {
+    tab: "meetings",         // "meetings" | "followups"
+    page: 1,
+    limit: 20,
+    filters: { search: "", status: "", type: "", dateFrom: "", dateTo: "", userId: "", updatedById: "" },
+    users: [],
+    currentUser: null,
+    lastItems: [],
+    totals: { meetings: null, followups: null }
+  };
+  var debounceTimer = null;
+
+  /* ═════════════════════════════════════════════════════════════════════
+     RENDER: filter option lists (built once)
+     ═════════════════════════════════════════════════════════════════════ */
+  function populateStaticFilterOptions() {
+    var statusSel = document.getElementById("f-status");
+    VALID_STATUSES.forEach(function (s) {
+      var o = document.createElement("option"); o.value = s; o.textContent = humanize(s); statusSel.appendChild(o);
+    });
+    var typeSel = document.getElementById("f-type");
+    VALID_TYPES.forEach(function (t) {
+      var o = document.createElement("option"); o.value = t; o.textContent = humanize(t); typeSel.appendChild(o);
+    });
+  }
+
+  function populateUserFilterOptions() {
+    var ownerSel = document.getElementById("f-owner");
+    var updaterSel = document.getElementById("f-updater");
+    state.users.forEach(function (u) {
+      var o1 = document.createElement("option"); o1.value = u.id; o1.textContent = u.name;
+      var o2 = document.createElement("option"); o2.value = u.id; o2.textContent = u.name;
+      ownerSel.appendChild(o1); updaterSel.appendChild(o2);
+    });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     RENDER: list
+     ═════════════════════════════════════════════════════════════════════ */
+  function statusBadgeClass(status) {
+    if (status === "LOST") return "badge-lost";
+    if (status === "CLOSED") return "badge-closed";
+    return "badge-status";
+  }
+
+  function followupUrgency(nextFollowUp) {
+    var iso = toIsoUtc(nextFollowUp);
+    if (!iso) return null;
+    var due = new Date(iso), now = new Date();
+    var dueDay = due.toLocaleDateString("en-CA", { timeZone: DISPLAY_TZ });
+    var today = now.toLocaleDateString("en-CA", { timeZone: DISPLAY_TZ });
+    if (due < now && dueDay !== today) return { label: "Overdue", cls: "badge-overdue" };
+    if (dueDay === today) return { label: "Due today", cls: "badge-today" };
+    return { label: "Upcoming", cls: "badge-type" };
+  }
+
+  function meetingCardHtml(m) {
+    var customer = m.customer || {};
+    var badges = '<span class="badge ' + statusBadgeClass(m.status) + '">' + escapeHtml(humanize(m.status)) + "</span>" +
+                 '<span class="badge badge-type">' + escapeHtml(humanize(m.meetingType)) + "</span>";
+
+    var followupHtml = "";
+    if (m.nextFollowUp) {
+      var urgency = followupUrgency(m.nextFollowUp);
+      var timeText = m.followUpTimeDisplay || fmtFreeTextTime(m.followUpTime) || "";
+      followupHtml =
+        '<div class="followup-line">' +
+          (urgency ? '<span class="badge ' + urgency.cls + '">' + urgency.label + "</span>" : "") +
+          '<span class="fu-when">' + escapeHtml(fmtDate(m.nextFollowUp)) + (timeText ? " · " + escapeHtml(timeText) : "") + "</span>" +
+          (m.followUpPriority ? '<span class="badge badge-type">' + escapeHtml(humanize(m.followUpPriority)) + " priority</span>" : "") +
+          '<a class="checkin-link" href="/meetings/checkin?meetingId=' + encodeURIComponent(m.id) + '" onclick="event.stopPropagation()">Check-in &rarr;</a>' +
+        "</div>";
+    }
+
+    var metaBits = ['<span><b>By</b> ' + escapeHtml((m.user && m.user.name) || "—") + "</span>"];
+    if (m.assignedTo && m.assignedTo.name) metaBits.push('<span><b>Assigned</b> ' + escapeHtml(m.assignedTo.name) + "</span>");
+    if (m.updatedBy && m.updatedBy.name) metaBits.push('<span><b>Updated by</b> ' + escapeHtml(m.updatedBy.name) + "</span>");
+
+    return (
+      '<div class="meeting-card" data-id="' + escapeHtml(m.id) + '">' +
+        '<div class="meeting-card-top">' +
+          "<div>" +
+            '<div class="meeting-company">' + escapeHtml(customer.companyName || "Unknown customer") + "</div>" +
+            (customer.contactPerson ? '<div class="meeting-contact">' + escapeHtml(customer.contactPerson) + "</div>" : "") +
+          "</div>" +
+          '<div class="meeting-date">' + escapeHtml(fmtDate(m.meetingDate)) + "</div>" +
+        "</div>" +
+        '<div class="meeting-badges">' + badges + "</div>" +
+        '<div class="meeting-meta">' + metaBits.join("") + "</div>" +
+        followupHtml +
+      "</div>"
+    );
+  }
+
+  function renderList(items) {
+    var region = document.getElementById("list-region");
+    if (!items.length) {
+      region.innerHTML =
+        '<div class="state-block">' +
+          '<div class="state-title">' + (hasActiveFilters() ? "No meetings match these filters" : "No meetings yet") + "</div>" +
+          '<div class="state-sub">' + (hasActiveFilters() ? "Try clearing a filter to widen the search." : "Meetings logged from the check-in flow will show up here.") + "</div>" +
+        "</div>";
+      return;
+    }
+    region.innerHTML = '<div class="meeting-list">' + items.map(meetingCardHtml).join("") + "</div>";
+    Array.prototype.forEach.call(region.querySelectorAll(".meeting-card"), function (card) {
+      card.addEventListener("click", function () { openDrawer(card.getAttribute("data-id")); });
+    });
+  }
+
+  function renderLoading() {
+    document.getElementById("list-region").innerHTML =
+      '<div class="state-block"><div class="spinner"></div><div class="state-title">Loading…</div></div>';
+    document.getElementById("pagination-region").innerHTML = "";
+  }
+
+  function renderError(err) {
+    document.getElementById("list-region").innerHTML =
+      '<div class="state-block">' +
+        '<div class="state-title">Couldn\u2019t load meetings</div>' +
+        '<div class="state-sub">' + escapeHtml(err.message || String(err)) + "</div>" +
+      "</div>";
+  }
+
+  function renderPagination(data) {
+    var region = document.getElementById("pagination-region");
+    if (!data || data.totalPages <= 1) { region.innerHTML = ""; return; }
+    region.innerHTML =
+      '<div class="pagination">' +
+        '<button id="pg-prev" ' + (data.page <= 1 ? "disabled" : "") + ">&larr; Prev</button>" +
+        "<span>Page " + data.page + " of " + data.totalPages + " · " + data.total + " total</span>" +
+        '<button id="pg-next" ' + (data.page >= data.totalPages ? "disabled" : "") + ">Next &rarr;</button>" +
+      "</div>";
+    var prev = document.getElementById("pg-prev"), next = document.getElementById("pg-next");
+    if (prev) prev.addEventListener("click", function () { state.page -= 1; fetchList(); });
+    if (next) next.addEventListener("click", function () { state.page += 1; fetchList(); });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     FILTERS
+     ═════════════════════════════════════════════════════════════════════ */
+  function hasActiveFilters() {
+    var f = state.filters;
+    return !!(f.search || f.status || f.type || f.dateFrom || f.dateTo || f.userId || f.updatedById);
+  }
+  function updateActiveFilterCount() {
+    var f = state.filters;
+    var n = ["search","status","type","dateFrom","dateTo","userId","updatedById"].filter(function (k) { return !!f[k]; }).length;
+    var el = document.getElementById("active-filter-count");
+    if (n > 0) { el.style.display = ""; el.textContent = n; } else { el.style.display = "none"; }
+  }
+
+  function currentQueryParams() {
+    var f = state.filters;
+    // NOTE: owner/updater are no longer admin-gated on the frontend — every
+    // role can see and use them now. MeetingController.php still has its own
+    // admin-only check on userId/updatedById (it silently ignores them for
+    // non-admins) — that needs removing server-side too, or this will look
+    // wired up but quietly do nothing for non-admin users.
+    return {
+      search: f.search || undefined,
+      status: f.status || (state.tab === "followups" && !f.status ? "FOLLOW_UP_PENDING" : undefined),
+      type: f.type || undefined,
+      dateFrom: f.dateFrom || undefined,
+      dateTo: f.dateTo || undefined,
+      userId: f.userId || undefined,
+      updatedById: f.updatedById || undefined,
+      page: state.page,
+      limit: state.limit
+    };
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     DATA FETCH
+     ═════════════════════════════════════════════════════════════════════ */
+  function fetchList() {
+    renderLoading();
+    return api.meetings.list(currentQueryParams()).then(function (res) {
+      var data = res.data;
+      state.lastItems = data.items;
+      state.totals[state.tab] = data.total;
+      document.getElementById(state.tab === "meetings" ? "count-meetings" : "count-followups").textContent = data.total;
+      // The other tab's count is refreshed lazily the first time it's opened,
+      // to avoid two parallel fetches on every filter change.
+      renderList(data.items);
+      renderPagination(data);
+    }).catch(function (err) {
+      renderError(err);
+    });
+  }
+
+  function refreshOtherTabCount() {
+    var otherTab = state.tab === "meetings" ? "followups" : "meetings";
+    if (state.totals[otherTab] !== null) return;
+    var params = Object.assign({}, currentQueryParams(), { page: 1, limit: 1 });
+    if (otherTab === "followups" && !state.filters.status) params.status = "FOLLOW_UP_PENDING";
+    if (otherTab === "meetings") params.status = state.filters.status || undefined;
+    api.meetings.list(params).then(function (res) {
+      state.totals[otherTab] = res.data.total;
+      document.getElementById(otherTab === "meetings" ? "count-meetings" : "count-followups").textContent = res.data.total;
+    }).catch(function () { /* non-critical — leave the count blank */ });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     DETAIL / EDIT DRAWER
+     ═════════════════════════════════════════════════════════════════════ */
+  function findMeeting(id) {
+    var found = null;
+    state.lastItems.forEach(function (m) { if (m.id === id) found = m; });
+    return found;
+  }
+
+  function openDrawer(id) {
+    var m = findMeeting(id);
+    if (!m) return;
+    var customer = m.customer || {};
+    var drawer = document.getElementById("drawer");
+
+    var extraFields = ["notes","summary","actionItems","customerRequirements","competitorInfo","opportunities","trialFeedback"]
+      .filter(function (k) { return m[k]; })
+      .map(function (k) {
+        return '<div class="readonly-field"><span class="rf-label">' + humanize(k) + "</span>" + escapeHtml(m[k]) + "</div>";
+      }).join("");
+
+    drawer.innerHTML =
+      '<div class="drawer-header">' +
+        "<div>" +
+          "<h2>" + escapeHtml(customer.companyName || "Meeting") + "</h2>" +
+          "<p>" + escapeHtml(customer.contactPerson || "") + (customer.contactPerson ? " · " : "") + escapeHtml(fmtDate(m.meetingDate)) + "</p>" +
+        "</div>" +
+        '<button class="drawer-close" id="drawer-close" aria-label="Close">&times;</button>' +
+      "</div>" +
+      '<div class="drawer-body">' +
+        '<div class="audit-strip">' +
+          "<span><b>Logged by</b> " + escapeHtml((m.user && m.user.name) || "—") + "</span>" +
+          (m.assignedTo ? "<span><b>Assigned to</b> " + escapeHtml(m.assignedTo.name) + "</span>" : "") +
+          "<span><b>Last updated by</b> " + escapeHtml((m.updatedBy && m.updatedBy.name) || "Not tracked (edited before this feature shipped, or never edited)") + "</span>" +
+        "</div>" +
+        '<div class="field-group"><label>Status</label><select id="edit-status"></select></div>' +
+        '<div class="field-row">' +
+          '<div class="field-group"><label>Next follow-up date</label><input type="date" id="edit-followup-date" value="' + toDateInputValue(m.nextFollowUp) + '" /></div>' +
+          '<div class="field-group"><label>Follow-up time</label><input type="time" id="edit-followup-time" value="' + escapeHtml(/^\d{2}:\d{2}$/.test(m.followUpTime || "") ? m.followUpTime : "") + '" /></div>' +
+        "</div>" +
+        '<div class="field-group"><label>Follow-up priority</label><select id="edit-priority"></select></div>' +
+        '<div class="field-group"><label>Notes</label><textarea id="edit-notes" placeholder="Add or update notes…">' + escapeHtml(m.notes || "") + "</textarea></div>" +
+        (extraFields ? '<div class="field-group"><label>Additional details on file (read-only here)</label>' + extraFields + "</div>" : "") +
+      "</div>" +
+      '<div id="drawer-feedback"></div>' +
+      '<div class="drawer-footer">' +
+        '<button class="btn-secondary" id="drawer-cancel">Cancel</button>' +
+        '<button class="btn-primary" id="drawer-save">Save changes</button>' +
+      "</div>";
+
+    var statusSel = document.getElementById("edit-status");
+    VALID_STATUSES.forEach(function (s) {
+      var o = document.createElement("option"); o.value = s; o.textContent = humanize(s);
+      if (s === m.status) o.selected = true;
+      statusSel.appendChild(o);
+    });
+    var prioritySel = document.getElementById("edit-priority");
+    var blank = document.createElement("option"); blank.value = ""; blank.textContent = "—"; prioritySel.appendChild(blank);
+    VALID_PRIORITIES.forEach(function (p) {
+      var o = document.createElement("option"); o.value = p; o.textContent = humanize(p);
+      if (p === m.followUpPriority) o.selected = true;
+      prioritySel.appendChild(o);
+    });
+
+    document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+    document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
+    document.getElementById("drawer-save").addEventListener("click", function () { saveMeeting(m.id); });
+
+    document.getElementById("drawer-backdrop").classList.remove("is-hidden");
+  }
+
+  function closeDrawer() {
+    document.getElementById("drawer-backdrop").classList.add("is-hidden");
+  }
+
+  function saveMeeting(id) {
+    var saveBtn = document.getElementById("drawer-save");
+    var feedback = document.getElementById("drawer-feedback");
+    var dateVal = document.getElementById("edit-followup-date").value;
+    var timeVal = document.getElementById("edit-followup-time").value;
+
+    var body = {
+      status: document.getElementById("edit-status").value,
+      notes: document.getElementById("edit-notes").value,
+      followUpPriority: document.getElementById("edit-priority").value || undefined
+    };
+    // Only send nextFollowUp if a date was actually set — sending an empty
+    // string would fail to parse server-side (to_dt() expects a real value).
+    if (dateVal) body.nextFollowUp = dateVal + (timeVal ? "T" + timeVal + ":00" : "T00:00:00");
+    if (timeVal) body.followUpTime = timeVal;
+
+    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    feedback.innerHTML = "";
+
+    api.meetings.update(id, body).then(function () {
+      feedback.innerHTML = '<div class="save-feedback ok">Saved. This edit is now attributed to you in the audit log.</div>';
+      state.totals = { meetings: null, followups: null }; // counts may have shifted (e.g. status change moves it between tabs)
+      setTimeout(function () { closeDrawer(); fetchList(); }, 700);
+    }).catch(function (err) {
+      feedback.innerHTML = '<div class="save-feedback err">' + escapeHtml(err.message || "Couldn\u2019t save. Try again.") + "</div>";
+      saveBtn.disabled = false; saveBtn.textContent = "Save changes";
+    });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     EVENT WIRING
+     ═════════════════════════════════════════════════════════════════════ */
+  function debounced(fn, ms) {
+    return function () {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(fn, ms);
+    };
+  }
+
+  function onFilterChange() {
+    state.page = 1;
+    updateActiveFilterCount();
+    fetchList();
+  }
+
+  function initFilterEvents() {
+    document.getElementById("f-search").addEventListener("input", debounced(function () {
+      state.filters.search = document.getElementById("f-search").value.trim();
+      onFilterChange();
+    }, 350));
+    document.getElementById("f-status").addEventListener("change", function () {
+      state.filters.status = this.value; onFilterChange();
+    });
+    document.getElementById("f-type").addEventListener("change", function () {
+      state.filters.type = this.value; onFilterChange();
+    });
+    document.getElementById("f-date-from").addEventListener("change", function () {
+      state.filters.dateFrom = this.value; onFilterChange();
+    });
+    document.getElementById("f-date-to").addEventListener("change", function () {
+      state.filters.dateTo = this.value; onFilterChange();
+    });
+    document.getElementById("f-owner").addEventListener("change", function () {
+      state.filters.userId = this.value; onFilterChange();
+    });
+    document.getElementById("f-updater").addEventListener("change", function () {
+      state.filters.updatedById = this.value; onFilterChange();
+    });
+    document.getElementById("btn-clear-filters").addEventListener("click", function () {
+      state.filters = { search: "", status: "", type: "", dateFrom: "", dateTo: "", userId: "", updatedById: "" };
+      ["f-search","f-status","f-type","f-date-from","f-date-to","f-owner","f-updater"].forEach(function (id) {
+        document.getElementById(id).value = "";
+      });
+      onFilterChange();
+    });
+  }
+
+  function initTabs() {
+    ["meetings","followups"].forEach(function (tab) {
+      var btn = document.getElementById("tab-btn-" + tab);
+      btn.addEventListener("click", function () {
+        if (state.tab === tab) return;
+        state.tab = tab;
+        state.page = 1;
+        document.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.remove("is-active"); });
+        btn.classList.add("is-active");
+        // The Follow-ups tab defaults to status=FOLLOW_UP_PENDING (see currentQueryParams) unless
+        // the person has explicitly picked a different status filter themselves.
+        fetchList().then(refreshOtherTabCount);
+      });
+    });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     INIT
+     ═════════════════════════════════════════════════════════════════════ */
+  function init() {
+    if (!requireAuth()) return;
+    state.currentUser = getStoredUser();
+
+    document.getElementById("auth-gate").style.display = "none";
+    document.getElementById("app").classList.remove("is-hidden");
+
+    if (state.currentUser) {
+      document.getElementById("user-name").textContent = state.currentUser.name || "";
+      document.getElementById("user-avatar").textContent = (state.currentUser.name || "?").charAt(0).toUpperCase();
+    }
+
+    initFilterEvents();
+    initTabs();
+    document.getElementById("drawer-backdrop").addEventListener("click", function (e) {
+      if (e.target === this) closeDrawer();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeDrawer();
+    });
+
+    var startupTasks = [
+      fetchList(),
+      api.users.list().then(function (res) {
+        state.users = res.data.items;
+        populateUserFilterOptions();
+      }).catch(function () { /* dropdowns just stay empty if this fails — list itself still works */ }),
+      api.meetings.meta().then(function (res) {
+        if (res.data.statuses && res.data.statuses.length) VALID_STATUSES = res.data.statuses;
+        if (res.data.types && res.data.types.length) VALID_TYPES = res.data.types;
+      }).catch(function () { /* keep the built-in fallback lists above if this fails */ })
+        .then(populateStaticFilterOptions)
+    ];
+    Promise.all(startupTasks).then(function () { refreshOtherTabCount(); });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

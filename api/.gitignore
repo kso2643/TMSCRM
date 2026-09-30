@@ -1,0 +1,11 @@
+# Real secrets — never commit this. Copy .env.example to .env instead.
+.env
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log
+
+# Local uploads (keep the folder, not its contents)
+uploads/meetings/*
+!uploads/meetings/.gitkeep

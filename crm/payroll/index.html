@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payroll · Industrial CRM</title>
+<style>
+  :root{
+    --ink:#0f172a; --sidebar:#161e2e; --primary:#161e2e; --primary-hover:#232f47;
+    --accent:#2563eb; --accent-soft:#dbeafe;
+    --success:#16a34a; --success-soft:#dcfce7;
+    --warn:#b45309; --warn-soft:#fef3c7;
+    --danger:#dc2626; --danger-soft:#fee2e2;
+    --neutral-soft:#f1f5f9; --neutral-text:#475569;
+    --bg:#f6f7fb; --card:#ffffff; --border:#e5e9f0;
+    --text:#0f172a; --muted:#64748b;
+    --radius:10px; --shadow:0 1px 2px rgba(15,23,42,.04), 0 1px 8px rgba(15,23,42,.04);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;background:var(--bg);color:var(--text);}
+  button{font-family:inherit;}
+  input,select{font-family:inherit;}
+
+  /* ---------- Login ---------- */
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .login-card{width:100%;max-width:360px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:36px 32px;box-shadow:var(--shadow);}
+  .login-logo{width:44px;height:44px;border-radius:11px;background:var(--sidebar);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;margin-bottom:18px;}
+  .login-card h1{font-size:19px;margin:0 0 4px;}
+  .login-card p{color:var(--muted);font-size:13.5px;margin:0 0 24px;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12.5px;font-weight:600;color:var(--neutral-text);margin-bottom:6px;}
+  .field input, .field select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;color:var(--text);}
+  .field input:focus, .field select:focus{outline:2px solid #93c5fd;outline-offset:0;border-color:var(--accent);}
+  .btn{border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+  .btn-primary{background:var(--primary);color:#fff;}
+  .btn-primary:hover{background:var(--primary-hover);}
+  .btn-primary:disabled{opacity:.6;cursor:default;}
+  .btn-block{width:100%;justify-content:center;}
+  .btn-ghost{background:transparent;color:var(--neutral-text);border:1px solid var(--border);}
+  .btn-ghost:hover{background:var(--neutral-soft);}
+  .btn-danger-text{background:transparent;color:var(--danger);border:none;padding:6px 8px;}
+  .error-box{background:var(--danger-soft);color:#991b1b;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:16px;display:none;}
+
+  /* ---------- App shell ---------- */
+  #app{display:none;min-height:100vh;}
+  .app-header{background:var(--sidebar);color:#fff;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;}
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand-mark{width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;}
+  .brand-text .t1{font-size:14.5px;font-weight:700;line-height:1.2;}
+  .brand-text .t2{font-size:12px;color:#94a3b8;line-height:1.2;}
+  .back-link{color:#94a3b8;text-decoration:none;font-size:13px;margin-left:18px;padding-left:18px;border-left:1px solid #334155;}
+  .back-link:hover{color:#fff;}
+  .header-right{display:flex;align-items:center;gap:14px;}
+  .user-chip{display:flex;align-items:center;gap:8px;font-size:13px;}
+  .user-avatar{width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;}
+  .logout-btn{background:rgba(255,255,255,.08);color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:12.5px;cursor:pointer;}
+  .logout-btn:hover{background:rgba(255,255,255,.16);}
+
+  .container{max-width:1240px;margin:0 auto;padding:28px;}
+  .page-title{font-size:22px;font-weight:700;margin:0 0 2px;}
+  .page-sub{color:var(--muted);font-size:13.5px;margin:0 0 22px;}
+
+  .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px;}
+  .stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);}
+  .stat-label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em;margin-bottom:8px;}
+  .stat-value{font-size:22px;font-weight:700;}
+  .stat-sub{font-size:12px;color:var(--muted);margin-top:4px;}
+
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;}
+  .toolbar select, .toolbar input[type=text]{padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13.5px;background:#fff;color:var(--text);}
+  .toolbar .spacer{flex:1;}
+
+  .table-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  thead th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;padding:12px 16px;border-bottom:1px solid var(--border);background:#fafbfd;white-space:nowrap;}
+  tbody td{padding:13px 16px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:#fafbfd;}
+  .emp-cell{display:flex;align-items:center;gap:10px;}
+  .emp-avatar{width:30px;height:30px;border-radius:50%;background:var(--neutral-soft);color:var(--neutral-text);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;}
+  .emp-name{font-weight:600;}
+  .emp-sub{font-size:12px;color:var(--muted);}
+  .num{text-align:right;font-variant-numeric:tabular-nums;}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;letter-spacing:.02em;}
+  .pill-draft{background:var(--neutral-soft);color:var(--neutral-text);}
+  .pill-processed{background:var(--accent-soft);color:#1d4ed8;}
+  .pill-paid{background:var(--success-soft);color:#15803d;}
+  .row-actions{display:flex;gap:4px;}
+  .icon-btn{width:30px;height:30px;border-radius:7px;border:none;background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .icon-btn:hover{background:var(--neutral-soft);color:var(--text);}
+  .icon-btn.danger:hover{background:var(--danger-soft);color:var(--danger);}
+  .empty-state{padding:60px 20px;text-align:center;color:var(--muted);}
+  .empty-state h3{color:var(--text);font-size:15px;margin:0 0 6px;}
+  .empty-state p{font-size:13.5px;margin:0 0 18px;}
+
+  .pagination{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;font-size:13px;color:var(--muted);}
+  .pagination .btn-ghost{padding:6px 12px;font-size:12.5px;}
+
+  /* ---------- Modal ---------- */
+  .modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;z-index:50;}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:640px;box-shadow:0 20px 50px rgba(15,23,42,.25);}
+  .modal-header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+  .modal-header h2{font-size:16.5px;margin:0;}
+  .modal-close{background:none;border:none;font-size:20px;color:var(--muted);cursor:pointer;line-height:1;}
+  .modal-body{padding:22px 24px;max-height:64vh;overflow-y:auto;}
+  .modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px;}
+  .form-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin:20px 0 10px;}
+  .form-section-title:first-child{margin-top:0;}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;}
+  .form-grid .full{grid-column:1/-1;}
+  .readonly-ctx{background:var(--neutral-soft);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:4px;}
+  .readonly-ctx b{font-weight:700;}
+  .preview-strip{display:flex;gap:20px;background:#f8fafc;border:1px dashed var(--border);border-radius:8px;padding:12px 14px;margin-top:16px;font-size:13px;}
+  .preview-strip div span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px;}
+  .preview-strip b{font-size:15px;}
+
+  .toast{position:fixed;bottom:24px;right:24px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:9px;font-size:13.5px;box-shadow:0 8px 24px rgba(0,0,0,.2);display:none;z-index:100;max-width:360px;}
+  .toast.error{background:var(--danger);}
+
+  @media (max-width: 860px){
+    .stats-grid{grid-template-columns:1fr 1fr;}
+    .form-grid{grid-template-columns:1fr;}
+    .container{padding:18px;}
+    table{font-size:12.5px;}
+    thead th, tbody td{padding:10px;}
+  }
+  @media (max-width: 560px){
+    .stats-grid{grid-template-columns:1fr;}
+  }
+
+  /* ---------- Cross-page nav (added) ---------- */
+  .payroll-nav{background:#0d1424;display:flex;gap:2px;padding:0 28px;overflow-x:auto;}
+  .payroll-nav a{display:inline-block;padding:12px 16px;color:#94a3b8;text-decoration:none;font-size:13px;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap;}
+  .payroll-nav a:hover{color:#fff;}
+  .payroll-nav a.active{color:#fff;border-bottom-color:var(--accent);}
+</style>
+<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script></head>
+<body>
+
+  <!-- ============ ACCESS GATE ============ -->
+  <!-- No separate sign-in here: this page reuses the session from the main
+       CRM login. If that session is missing or isn't an admin, we show a
+       short message instead of a form. -->
+  <div id="login-screen">
+    <div class="login-card">
+      <div class="login-logo">IC</div>
+      <h1 id="gate-title">Checking access…</h1>
+      <p id="gate-message">Hang on a moment.</p>
+      <a href="../" class="btn btn-ghost btn-block" id="gate-link" style="display:none;text-decoration:none;">&larr; Back to CRM</a>
+    </div>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="app">
+    <div class="app-header">
+      <div class="brand">
+        <div class="brand-mark">IC</div>
+        <div class="brand-text">
+          <div class="t1">Industrial CRM</div>
+          <div class="t2">Payroll</div>
+        </div>
+        <a href="../" class="back-link">&larr; Back to CRM</a>
+      </div>
+      <div class="header-right">
+        <div class="user-chip">
+          <div class="user-avatar" id="user-avatar">A</div>
+          <span id="user-name">—</span>
+        </div>
+        <button class="logout-btn" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+
+    <!-- Added: links to the new Dashboard / Advances / Recovery / Ledger pages. -->
+    <div class="payroll-nav">
+      <a href="/payroll/" class="active">Payroll Records</a>
+      <a href="/payroll/dashboard/">Dashboard</a>
+      <a href="/payroll/advances/">Advances</a>
+      <a href="/payroll/advance-recovery/">Recovery</a>
+      <a href="/payroll/ledger/">Ledger</a>
+    </div>
+
+    <div class="container">
+      <h1 class="page-title">Payroll</h1>
+      <p class="page-sub" id="period-sub">Manage salary records by employee and pay period.</p>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Employees</div>
+          <div class="stat-value" id="stat-employees">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Processed this period</div>
+          <div class="stat-value" id="stat-processed">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pending this period</div>
+          <div class="stat-value" id="stat-pending">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Net payout</div>
+          <div class="stat-value" id="stat-net">—</div>
+          <div class="stat-sub" id="stat-gross-sub">&nbsp;</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <select id="filter-month"></select>
+        <select id="filter-year"></select>
+        <select id="filter-status">
+          <option value="">All statuses</option>
+          <option value="DRAFT">Draft</option>
+          <option value="PROCESSED">Processed</option>
+          <option value="PAID">Paid</option>
+        </select>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="export-btn">Export .xlsx</button>
+        <button class="btn btn-primary" id="new-record-btn">+ New payroll record</button>
+      </div>
+
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Period</th>
+              <th class="num">Gross</th>
+              <th class="num">Deductions</th>
+              <th class="num">Net</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <div id="empty-state" class="empty-state" style="display:none;">
+          <h3>No payroll records for these filters</h3>
+          <p>Try a different period or status, or create a new record.</p>
+          <button class="btn btn-primary" id="empty-new-btn">+ New payroll record</button>
+        </div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL ============ -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">New payroll record</h2>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="error-box" id="modal-error"></div>
+
+        <div id="create-fields">
+          <div class="form-grid">
+            <div class="field full">
+              <label for="f-employee">Employee</label>
+              <select id="f-employee"></select>
+            </div>
+            <div class="field">
+              <label for="f-month">Month</label>
+              <select id="f-month"></select>
+            </div>
+            <div class="field">
+              <label for="f-year">Year</label>
+              <select id="f-year"></select>
+            </div>
+          </div>
+        </div>
+
+        <div id="edit-context" class="readonly-ctx" style="display:none;"></div>
+
+        <div class="form-section-title">Earnings</div>
+        <div class="form-grid">
+          <div class="field"><label>Basic salary</label><input type="number" id="f-basic" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>HRA</label><input type="number" id="f-hra" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>Conveyance allowance</label><input type="number" id="f-conv" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>Medical allowance</label><input type="number" id="f-med" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>Special allowance</label><input type="number" id="f-special" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>Other allowance</label><input type="number" id="f-otherallow" value="0" min="0" step="0.01"></div>
+        </div>
+
+        <div class="form-section-title">Deductions</div>
+        <div class="form-grid">
+          <div class="field"><label>PF deduction</label><input type="number" id="f-pf" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>ESI deduction</label><input type="number" id="f-esi" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>Professional tax</label><input type="number" id="f-ptax" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>TDS</label><input type="number" id="f-tds" value="0" min="0" step="0.01"></div>
+          <div class="field"><label>Other deductions</label><input type="number" id="f-otherded" value="0" min="0" step="0.01"></div>
+        </div>
+
+        <div class="form-section-title">Attendance & status</div>
+        <div class="form-grid">
+          <div class="field"><label>Working days</label><input type="number" id="f-workdays" min="0" step="1" placeholder="e.g. 26"></div>
+          <div class="field"><label>Present days</label><input type="number" id="f-presentdays" min="0" step="0.5" placeholder="e.g. 25"></div>
+          <div class="field"><label>LOP days</label><input type="number" id="f-lop" value="0" min="0" step="0.5"></div>
+          <div class="field">
+            <label>Status</label>
+            <select id="f-status">
+              <option value="DRAFT">Draft</option>
+              <option value="PROCESSED">Processed</option>
+              <option value="PAID">Paid</option>
+            </select>
+          </div>
+          <div class="field full"><label>Remarks</label><input type="text" id="f-remarks" placeholder="Optional note"></div>
+        </div>
+
+        <div class="preview-strip">
+          <div><span>Gross</span><b id="preview-gross">₹0.00</b></div>
+          <div><span>Deductions</span><b id="preview-deductions">₹0.00</b></div>
+          <div><span>Net pay</span><b id="preview-net">₹0.00</b></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modal-save">Save record</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ── Config ────────────────────────────────────────────────────────
+  // If this page is ever moved to a different address than the rest of
+  // the CRM, this is the one line that needs to stay correct.
+  const API_BASE = "https://api.apjtech.in/api";
+
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const money = n => "₹" + (Number(n)||0).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  // ── State ─────────────────────────────────────────────────────────
+  let state = {
+    token: null,
+    user: null,
+    employees: [],
+    page: 1,
+    totalPages: 1,
+    editingId: null,   // null = creating new
+  };
+
+  // ── API helper ────────────────────────────────────────────────────
+  async function api(path, {method="GET", body=null, isPublic=false} = {}) {
+    const headers = {"Content-Type":"application/json"};
+    if (!isPublic) {
+      if (!state.token) throw new Error("Not signed in.");
+      headers["Authorization"] = "Bearer " + state.token;
+    }
+    const res = await fetch(API_BASE + path, {
+      method, headers, body: body ? JSON.stringify(body) : undefined,
+    });
+    let json;
+    try { json = await res.json(); } catch(e){ json = {success:false, message:"Unexpected response from server."}; }
+    if (res.status === 401 && !isPublic) { doLogout(); }
+    if (!json.success) throw new Error(json.message || "Something went wrong.");
+    return json.data;
+  }
+
+  function showToast(msg, isError){
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast" + (isError ? " error" : "");
+    t.style.display = "block";
+    clearTimeout(t._timer);
+    t._timer = setTimeout(()=>{ t.style.display="none"; }, 3500);
+  }
+
+  // ── Auth ──────────────────────────────────────────────────────────
+  // This page has no sign-in of its own. It reuses the same "crm_token" /
+  // "crm_user" session the main CRM app stores in localStorage — if you're
+  // already signed in as an admin there, this page picks that up directly.
+  function doLogout(){
+    localStorage.removeItem("crm_token");
+    localStorage.removeItem("crm_user");
+    window.location.href = "/login";
+  }
+  document.getElementById("logout-btn").addEventListener("click", doLogout);
+
+  function boot(){
+    const token = localStorage.getItem("crm_token");
+    const userRaw = localStorage.getItem("crm_user");
+    if (!token || !userRaw) { window.location.href = "/login"; return; }
+    let user;
+    try { user = JSON.parse(userRaw); } catch(e){ window.location.href = "/login"; return; }
+    if (!["ADMIN","SUPER_ADMIN"].includes(user.role)) {
+      document.getElementById("gate-title").textContent = "Admins only";
+      document.getElementById("gate-message").textContent =
+        "Your account (" + user.role + ") doesn't have access to Payroll.";
+      document.getElementById("gate-link").style.display = "inline-flex";
+      return;
+    }
+    state.token = token;
+    state.user = user;
+    enterApp();
+  }
+
+  function enterApp(){
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    document.getElementById("user-name").textContent = state.user.name;
+    document.getElementById("user-avatar").textContent = (state.user.name||"?").trim().charAt(0).toUpperCase();
+    initFilters();
+    loadEmployees();
+    refreshAll();
+  }
+
+  // ── Filters setup ─────────────────────────────────────────────────
+  function initFilters(){
+    const now = new Date();
+    const mSel = document.getElementById("filter-month");
+    const ySel = document.getElementById("filter-year");
+    mSel.innerHTML = '<option value="">All months</option>' + MONTHS.map((m,i)=>`<option value="${i+1}">${m}</option>`).join("");
+    mSel.value = now.getMonth()+1;
+    const curY = now.getFullYear();
+    let yOpts = "";
+    for (let y = curY-2; y <= curY+1; y++) yOpts += `<option value="${y}">${y}</option>`;
+    ySel.innerHTML = yOpts;
+    ySel.value = curY;
+
+    document.getElementById("filter-month").addEventListener("change", ()=>{ state.page=1; refreshAll(); });
+    document.getElementById("filter-year").addEventListener("change", ()=>{ state.page=1; refreshAll(); });
+    document.getElementById("filter-status").addEventListener("change", ()=>{ state.page=1; loadPayroll(); });
+  }
+
+  function refreshAll(){ loadStats(); loadPayroll(); }
+
+  // ── Employees (for the picker) ───────────────────────────────────
+  async function loadEmployees(){
+    try {
+      const data = await api("/users?limit=200&isActive=true");
+      state.employees = data.items || [];
+      const sel = document.getElementById("f-employee");
+      sel.innerHTML = state.employees.map(u =>
+        `<option value="${u.id}">${escapeHtml(u.name)}${u.employeeCode ? " · "+escapeHtml(u.employeeCode) : ""}</option>`
+      ).join("");
+    } catch(err){ showToast(err.message, true); }
+  }
+
+  // ── Stats ─────────────────────────────────────────────────────────
+  async function loadStats(){
+    const year = document.getElementById("filter-year").value || new Date().getFullYear();
+    const month = document.getElementById("filter-month").value || (new Date().getMonth()+1);
+    try {
+      const d = await api(`/payroll/stats?year=${year}&month=${month}`);
+      document.getElementById("stat-employees").textContent = d.totalEmployees;
+      document.getElementById("stat-processed").textContent = d.processedCount;
+      document.getElementById("stat-pending").textContent = d.pendingCount;
+      document.getElementById("stat-net").textContent = money(d.totalNet);
+      document.getElementById("stat-gross-sub").textContent = "Gross " + money(d.totalGross);
+      document.getElementById("period-sub").textContent =
+        `Showing ${MONTHS[month-1]} ${year} · ${d.byStatus.PAID} paid, ${d.byStatus.PROCESSED} processed, ${d.byStatus.DRAFT} draft`;
+    } catch(err){ showToast(err.message, true); }
+  }
+
+  // ── Payroll table ─────────────────────────────────────────────────
+  async function loadPayroll(){
+    const year = document.getElementById("filter-year").value;
+    const month = document.getElementById("filter-month").value;
+    const status = document.getElementById("filter-status").value;
+    const params = new URLSearchParams({page: state.page, limit: 10});
+    if (year) params.set("year", year);
+    if (month) params.set("month", month);
+    if (status) params.set("status", status);
+
+    try {
+      const data = await api("/payroll?" + params.toString());
+      renderTable(data.items);
+      renderPagination(data.page, data.totalPages, data.total);
+    } catch(err){ showToast(err.message, true); }
+  }
+
+  function renderTable(items){
+    const body = document.getElementById("table-body");
+    const empty = document.getElementById("empty-state");
+    if (!items.length) {
+      body.innerHTML = "";
+      empty.style.display = "block";
+      return;
+    }
+    empty.style.display = "none";
+    body.innerHTML = items.map(p => {
+      const emp = p.employee || {};
+      const initial = (emp.name||"?").trim().charAt(0).toUpperCase();
+      return `
+      <tr>
+        <td>
+          <div class="emp-cell">
+            <div class="emp-avatar">${initial}</div>
+            <div>
+              <div class="emp-name">${escapeHtml(emp.name||"—")}</div>
+              <div class="emp-sub">${escapeHtml(emp.designation || emp.department || emp.employeeCode || "")}</div>
+            </div>
+          </div>
+        </td>
+        <td>${MONTHS[p.month-1]} ${p.year}</td>
+        <td class="num">${money(p.grossSalary)}</td>
+        <td class="num">${money(p.totalDeductions)}</td>
+        <td class="num"><b>${money(p.netSalary)}</b></td>
+        <td>${statusPill(p.status)}</td>
+        <td>
+          <div class="row-actions">
+            <button class="icon-btn" title="Edit" onclick="PayrollApp.openEdit('${p.id}')">✎</button>
+            ${p.status !== "PAID" ? `<button class="icon-btn" title="Mark paid" onclick="PayrollApp.markPaid('${p.id}')">✓</button>` : ""}
+            <button class="icon-btn danger" title="Delete" onclick="PayrollApp.remove('${p.id}')">🗑</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  function statusPill(s){
+    if (s === "PAID") return '<span class="pill pill-paid">Paid</span>';
+    if (s === "PROCESSED") return '<span class="pill pill-processed">Processed</span>';
+    return '<span class="pill pill-draft">Draft</span>';
+  }
+
+  function renderPagination(page, totalPages, total){
+    const el = document.getElementById("pagination");
+    if (total === 0) { el.innerHTML = ""; return; }
+    el.innerHTML = `
+      <span>${total} record${total===1?"":"s"} · page ${page} of ${totalPages}</span>
+      <div>
+        <button class="btn btn-ghost" ${page<=1?"disabled":""} onclick="PayrollApp.goPage(${page-1})">Previous</button>
+        <button class="btn btn-ghost" ${page>=totalPages?"disabled":""} onclick="PayrollApp.goPage(${page+1})">Next</button>
+      </div>`;
+  }
+
+  function goPage(p){ state.page = p; loadPayroll(); }
+
+  // ── Export ────────────────────────────────────────────────────────
+  document.getElementById("export-btn").addEventListener("click", ()=>{
+    const year = document.getElementById("filter-year").value;
+    const month = document.getElementById("filter-month").value;
+    const params = new URLSearchParams();
+    if (year) params.set("year", year);
+    if (month) params.set("month", month);
+    // File download with an auth header needs a fetch + blob, not a plain link
+    // (the api() helper expects JSON, so the binary export is fetched directly here).
+    fetch(API_BASE + "/payroll/export?" + params.toString(), {
+      headers: {"Authorization": "Bearer " + state.token}
+    }).then(r => r.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "payroll-export.xlsx"; a.click();
+      URL.revokeObjectURL(url);
+    }).catch(()=> showToast("Export failed.", true));
+  });
+
+  // ── Modal: open/close ────────────────────────────────────────────
+  function openCreate(){
+    state.editingId = null;
+    document.getElementById("modal-title").textContent = "New payroll record";
+    document.getElementById("create-fields").style.display = "block";
+    document.getElementById("edit-context").style.display = "none";
+    document.getElementById("modal-error").style.display = "none";
+    const mSel = document.getElementById("f-month");
+    mSel.innerHTML = MONTHS.map((m,i)=>`<option value="${i+1}">${m}</option>`).join("");
+    const now = new Date();
+    mSel.value = now.getMonth()+1;
+    const ySel = document.getElementById("f-year");
+    const curY = now.getFullYear();
+    let yOpts = ""; for (let y=curY-1;y<=curY+1;y++) yOpts += `<option value="${y}">${y}</option>`;
+    ySel.innerHTML = yOpts; ySel.value = curY;
+    resetMoneyFields();
+    document.getElementById("modal-overlay").style.display = "flex";
+    computePreview();
+  }
+
+  async function openEdit(id){
+    try {
+      const data = await api("/payroll/" + id);
+      const p = data.payroll;
+      state.editingId = id;
+      document.getElementById("modal-title").textContent = "Edit payroll record";
+      document.getElementById("create-fields").style.display = "none";
+      const ctx = document.getElementById("edit-context");
+      ctx.style.display = "block";
+      ctx.innerHTML = `<b>${escapeHtml(p.employee.name)}</b> — ${MONTHS[p.month-1]} ${p.year}`;
+      document.getElementById("modal-error").style.display = "none";
+
+      setVal("f-basic", p.basicSalary); setVal("f-hra", p.hra); setVal("f-conv", p.conveyanceAllowance);
+      setVal("f-med", p.medicalAllowance); setVal("f-special", p.specialAllowance); setVal("f-otherallow", p.otherAllowance);
+      setVal("f-pf", p.pfDeduction); setVal("f-esi", p.esiDeduction); setVal("f-ptax", p.professionalTax);
+      setVal("f-tds", p.tds); setVal("f-otherded", p.otherDeductions);
+      setVal("f-workdays", p.workingDays ?? ""); setVal("f-presentdays", p.presentDays ?? ""); setVal("f-lop", p.lopDays ?? 0);
+      document.getElementById("f-status").value = p.status;
+      document.getElementById("f-remarks").value = p.remarks || "";
+
+      document.getElementById("modal-overlay").style.display = "flex";
+      computePreview();
+    } catch(err){ showToast(err.message, true); }
+  }
+
+  function setVal(id, v){ document.getElementById(id).value = v; }
+  function resetMoneyFields(){
+    ["f-basic","f-hra","f-conv","f-med","f-special","f-otherallow","f-pf","f-esi","f-ptax","f-tds","f-otherded"].forEach(id=>setVal(id,0));
+    setVal("f-workdays",""); setVal("f-presentdays",""); setVal("f-lop",0);
+    document.getElementById("f-status").value = "DRAFT";
+    document.getElementById("f-remarks").value = "";
+  }
+
+  function closeModal(){ document.getElementById("modal-overlay").style.display = "none"; }
+  document.getElementById("new-record-btn").addEventListener("click", openCreate);
+  document.getElementById("empty-new-btn").addEventListener("click", openCreate);
+  document.getElementById("modal-close").addEventListener("click", closeModal);
+  document.getElementById("modal-cancel").addEventListener("click", closeModal);
+  document.getElementById("modal-overlay").addEventListener("click", (e)=>{ if(e.target.id==="modal-overlay") closeModal(); });
+
+  // ── Live preview (mirrors the server's calc) ─────────────────────
+  const MONEY_IDS = ["f-basic","f-hra","f-conv","f-med","f-special","f-otherallow","f-pf","f-esi","f-ptax","f-tds","f-otherded"];
+  MONEY_IDS.forEach(id => document.getElementById(id).addEventListener("input", computePreview));
+
+  function computePreview(){
+    const n = id => Number(document.getElementById(id).value) || 0;
+    const gross = n("f-basic")+n("f-hra")+n("f-conv")+n("f-med")+n("f-special")+n("f-otherallow");
+    const deductions = n("f-pf")+n("f-esi")+n("f-ptax")+n("f-tds")+n("f-otherded");
+    document.getElementById("preview-gross").textContent = money(gross);
+    document.getElementById("preview-deductions").textContent = money(deductions);
+    document.getElementById("preview-net").textContent = money(gross-deductions);
+  }
+
+  // ── Save (create or update) ───────────────────────────────────────
+  document.getElementById("modal-save").addEventListener("click", async ()=>{
+    const btn = document.getElementById("modal-save");
+    const errBox = document.getElementById("modal-error");
+    errBox.style.display = "none";
+    const n = id => Number(document.getElementById(id).value) || 0;
+    const body = {
+      basicSalary:n("f-basic"), hra:n("f-hra"), conveyanceAllowance:n("f-conv"), medicalAllowance:n("f-med"),
+      specialAllowance:n("f-special"), otherAllowance:n("f-otherallow"),
+      pfDeduction:n("f-pf"), esiDeduction:n("f-esi"), professionalTax:n("f-ptax"), tds:n("f-tds"), otherDeductions:n("f-otherded"),
+      workingDays: document.getElementById("f-workdays").value || null,
+      presentDays: document.getElementById("f-presentdays").value || null,
+      lopDays: n("f-lop"),
+      status: document.getElementById("f-status").value,
+      remarks: document.getElementById("f-remarks").value,
+    };
+    if (!state.editingId) {
+      body.userId = document.getElementById("f-employee").value;
+      body.month = Number(document.getElementById("f-month").value);
+      body.year = Number(document.getElementById("f-year").value);
+      if (!body.userId) { errBox.textContent = "Choose an employee."; errBox.style.display="block"; return; }
+    }
+    btn.disabled = true; btn.textContent = "Saving…";
+    try {
+      if (state.editingId) await api("/payroll/"+state.editingId, {method:"PUT", body});
+      else await api("/payroll", {method:"POST", body});
+      closeModal();
+      showToast("Payroll record saved.");
+      refreshAll();
+    } catch(err){
+      errBox.textContent = err.message; errBox.style.display = "block";
+    } finally {
+      btn.disabled = false; btn.textContent = "Save record";
+    }
+  });
+
+  // ── Mark paid / delete ────────────────────────────────────────────
+  async function markPaid(id){
+    try {
+      await api(`/payroll/${id}/mark-paid`, {method:"PATCH", body:{status:"PAID"}});
+      showToast("Marked as paid.");
+      refreshAll();
+    } catch(err){ showToast(err.message, true); }
+  }
+
+  async function remove(id){
+    if (!confirm("Delete this payroll record? This can't be undone.")) return;
+    try {
+      await api("/payroll/"+id, {method:"DELETE"});
+      showToast("Record deleted.");
+      refreshAll();
+    } catch(err){ showToast(err.message, true); }
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+  }
+
+  // Expose the handful of functions used by inline onclick= attributes.
+  window.PayrollApp = { openEdit, markPaid, remove, goPage };
+
+  boot();
+
+})();
+</script>
+</body>
+</html>
