@@ -50,7 +50,7 @@
     return fetch(API + '/api' + path, opts).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (r.status === 401) { try { localStorage.removeItem('crm_token'); } catch (x) {} location.href = '/login/'; }
-        if (!r.ok) throw new Error((j && j.message) || 'Request failed');
+        if (!r.ok) throw new Error(((j && j.message) || 'Request failed') + (j && j.error ? ' — ' + j.error : '')); // .error only reaches admins
         return j;
       });
     });

@@ -14,7 +14,42 @@
  *
  * If the DB user lacks CREATE/ALTER privileges, the request fails with a
  * readable message naming the migration to run, instead of a generic 500.
+ *
+ * Collation: the migrations hard-code utf8mb4_unicode_ci, but a live DB's
+ * existing tables may use another collation (e.g. utf8mb4_general_ci).
+ * That mismatch makes foreign keys to User/Customer fail to create
+ * (errno 150) and makes every JOIN on them fail with "Illegal mix of
+ * collations". So new tables are created in the same charset/collation as
+ * `User`.`id`, and managed tables already created with a different one are
+ * converted to it.
  */
+
+/** [charset, collation] of `User`.`id` — the convention every managed table must match — or null. */
+function schema_reference_collation(): ?array
+{
+    static $ref = false;
+    if ($ref !== false) return $ref;
+    $s = db()->query(
+        "SELECT CHARACTER_SET_NAME, COLLATION_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'User' AND COLUMN_NAME = 'id' LIMIT 1"
+    );
+    $r = $s->fetch();
+    $r = $r ? array_change_key_case($r, CASE_UPPER) : null;
+    $ref = ($r && $r['CHARACTER_SET_NAME'] && $r['COLLATION_NAME'])
+        ? [$r['CHARACTER_SET_NAME'], $r['COLLATION_NAME']] : null;
+    return $ref;
+}
+
+/** Rewrites the table options of a CREATE TABLE statement to the reference charset/collation. */
+function schema_with_collation(string $sql, ?array $ref): string
+{
+    if (!$ref) return $sql;
+    return preg_replace(
+        '/DEFAULT CHARSET=\w+ COLLATE=\w+/',
+        'DEFAULT CHARSET=' . $ref[0] . ' COLLATE=' . $ref[1],
+        $sql
+    );
+}
 
 /**
  * @param array $tables  tableName => [
@@ -48,14 +83,43 @@ function ensure_schema(array $tables, string $migrationHint): void
     }
 
     try {
+        $ref = schema_reference_collation();
+
+        // Convert managed tables that were created with a different collation
+        // than the rest of the DB (see header comment). FK checks are paused so
+        // the parent/child pair can be converted one after the other.
+        if ($ref) {
+            $t = db()->prepare(
+                "SELECT TABLE_NAME, TABLE_COLLATION FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ($in)"
+            );
+            $t->execute($names);
+            $wrong = [];
+            foreach ($t->fetchAll() as $r) {
+                $r = array_change_key_case($r, CASE_UPPER);
+                if ($r['TABLE_COLLATION'] !== $ref[1]) $wrong[] = $r['TABLE_NAME'];
+            }
+            if ($wrong) {
+                db()->exec('SET FOREIGN_KEY_CHECKS=0');
+                try {
+                    foreach ($wrong as $name) {
+                        error_log("SchemaGuard: converting $name to {$ref[1]}");
+                        db()->exec("ALTER TABLE `$name` CONVERT TO CHARACTER SET {$ref[0]} COLLATE {$ref[1]}");
+                    }
+                } finally {
+                    db()->exec('SET FOREIGN_KEY_CHECKS=1');
+                }
+            }
+        }
+
         foreach ($tables as $name => $def) {
             if (!isset($existing[$name])) {
                 try {
-                    db()->exec($def['create']);
+                    db()->exec(schema_with_collation($def['create'], $ref));
                 } catch (PDOException $e) {
                     if (empty($def['fallback'])) throw $e;
                     error_log("SchemaGuard: FK create of $name failed ({$e->getMessage()}), retrying without FKs");
-                    db()->exec($def['fallback']);
+                    db()->exec(schema_with_collation($def['fallback'], $ref));
                 }
                 continue;
             }

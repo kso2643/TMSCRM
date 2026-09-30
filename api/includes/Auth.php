@@ -61,6 +61,8 @@ function authenticate(): array
     $user['isActive'] = (bool) $user['isActive'];
     $user['isLocked'] = (bool) $user['isLocked'];
 
+    // Remembered so index.php's 500 handler can show admins the real cause.
+    $GLOBALS['__auth_user'] = $user;
     return $user;
 }
 

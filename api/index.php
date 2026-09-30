@@ -461,6 +461,13 @@ try {
 } catch (Throwable $e) {
     error_log('Unhandled error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
     $payload = ['success' => false, 'message' => 'Internal server error'];
+    // Super Admin / Admin see the underlying error (no trace) so production
+    // problems can be diagnosed from the browser; everyone else gets the
+    // generic message.
+    $who = $GLOBALS['__auth_user'] ?? null;
+    if ($who && in_array($who['role'], ['SUPER_ADMIN', 'ADMIN'], true)) {
+        $payload['error'] = $e->getMessage();
+    }
     if (APP_ENV === 'development') {
         $payload['error'] = $e->getMessage();
         $payload['trace'] = explode("\n", $e->getTraceAsString());

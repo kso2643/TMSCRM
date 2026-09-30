@@ -23,6 +23,16 @@ mysql -u <user> -p <database> < api/database/migration_orders_all.sql
 mysql -u <user> -p <database> < api/database/migration_tasks_price_requests.sql
 ```
 
+### Update: the 500 was still there after the first patch — cause found and fixed
+
+Your live database's existing tables (`User`, `Customer`) use the **`utf8mb4_general_ci`** collation, while the orders migration hard-coded **`utf8mb4_unicode_ci`**. That mismatch:
+1. made the original `migration_orders.sql` fail with *"Foreign key constraint is incorrectly formed"*, which is why the table was missing, and
+2. once the table did get created, made every orders query fail with *"Illegal mix of collations"*, which still showed as "Internal server error".
+
+`SchemaGuard.php` now creates the tables in the same collation as your `User` table. It also **automatically converts** the orders tables that the previous patch had already created with the wrong collation. **Just upload the new `api/` folder; there's nothing to run.**
+
+Super Admin / Admin now also see the real cause of any future server error, shown next to "Internal server error". Other users still see only the generic message.
+
 ## 2. New: Tasks page (sidebar → Operations → Tasks, `/tasks/`)
 
 **Task queue with timer**
@@ -64,7 +74,7 @@ The list now has these columns: **Customer · Sales engineer · Type · Order da
 | `api/controllers/TaskController.php` | **new**: task queue + timer |
 | `api/controllers/PriceRequestController.php` | **new**: price requests |
 | `api/controllers/OrderController.php` | + proforma, partial delivery, per-item supply, schema check |
-| `api/index.php` | + `/api/tasks/*`, `/api/price-requests/*`, `PATCH /api/orders/:id/proforma`, `PATCH /api/orders/:id/supply` |
+| `api/index.php`, `api/includes/Auth.php` | admins see the real error on a 500; + `/api/tasks/*`, `/api/price-requests/*`, `PATCH /api/orders/:id/proforma`, `PATCH /api/orders/:id/supply` |
 | `api/database/migration_orders_all.sql` | **new**: optional manual migration |
 | `api/database/migration_tasks_price_requests.sql` | **new**: optional manual migration |
 | `crm/orders-app.js` | new Orders list, expandable rows, materials checklist |

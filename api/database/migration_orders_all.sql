@@ -12,6 +12,10 @@
 --   mysql -u <user> -p <database> < database/migration_orders_all.sql
 --
 -- (ADD COLUMN IF NOT EXISTS needs MariaDB 10.0.2+, which Hostinger uses.)
+--
+-- COLLATION: these tables must use the same collation as your existing
+-- `User`/`Customer` tables. If yours are utf8mb4_general_ci, replace
+-- utf8mb4_unicode_ci below before running (the API does this automatically).
 -- ════════════════════════════════════════════════════════════════════════
 
 SET NAMES utf8mb4;
