@@ -33,6 +33,7 @@ require __DIR__ . '/includes/Response.php';
 require __DIR__ . '/includes/JWT.php';
 require __DIR__ . '/includes/Auth.php';
 require __DIR__ . '/includes/ActivityLogger.php';
+require __DIR__ . '/includes/SchemaGuard.php';
 require __DIR__ . '/includes/XlsxWriter.php';
 require __DIR__ . '/includes/XlsxReader.php';
 require __DIR__ . '/includes/SimplePdf.php';
@@ -49,6 +50,8 @@ require __DIR__ . '/controllers/AttendanceController.php';
 require __DIR__ . '/controllers/FuelExpenseController.php';
 require __DIR__ . '/controllers/AppointmentController.php';
 require __DIR__ . '/controllers/OrderController.php';
+require __DIR__ . '/controllers/TaskController.php';
+require __DIR__ . '/controllers/PriceRequestController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -285,12 +288,45 @@ try {
             $method === 'PATCH' && $c1 !== '' && $c2 === 'delivery'        => $ctrl->updateDelivery($c1),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'eta'             => $ctrl->updateEta($c1),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'procurement'     => $ctrl->updateProcurement($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'proforma'        => $ctrl->updateProforma($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'supply'          => $ctrl->updateSupply($c1),
             $method === 'GET'   && $c1 === ''                              => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                              => $ctrl->create(),
             $method === 'GET'   && $c1 !== '' && $c2 === ''                => $ctrl->show($c1),
             $method === 'PUT'   && $c1 !== '' && $c2 === ''                => $ctrl->update($c1),
             $method === 'DELETE'&& $c1 !== '' && $c2 === ''                => $ctrl->delete($c1),
             default => sendError("Route /api/orders/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Tasks — admin-assigned, worked as a queue with a timer ──────
+    elseif ($c0 === 'tasks') {
+        $ctrl = new TaskController();
+        match (true) {
+            $method === 'GET'   && $c1 === 'meta'                      => $ctrl->meta(),
+            $method === 'GET'   && $c1 === 'assignees'                 => $ctrl->assignees(),
+            $method === 'GET'   && $c1 === ''                          => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                          => $ctrl->create(),
+            $method === 'PUT'   && $c1 !== '' && $c2 === ''            => $ctrl->update($c1),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === ''            => $ctrl->delete($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'move'        => $ctrl->move($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'start'       => $ctrl->start($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'pause'       => $ctrl->pause($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'resume'      => $ctrl->resume($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'complete'    => $ctrl->complete($c1),
+            default => sendError("Route /api/tasks/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Price requests — raised by engineers, answered by admin ─────
+    elseif ($c0 === 'price-requests') {
+        $ctrl = new PriceRequestController();
+        match (true) {
+            $method === 'GET'   && $c1 === ''                          => $ctrl->index(),
+            $method === 'POST'  && $c1 === ''                          => $ctrl->create(),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'respond'     => $ctrl->respond($c1),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === ''            => $ctrl->delete($c1),
+            default => sendError("Route /api/price-requests/$c1/$c2 not found", 404),
         };
     }
 

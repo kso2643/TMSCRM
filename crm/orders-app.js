@@ -7,6 +7,12 @@
    you're admin-tier and pick someone else. Editing/deleting needs to be
    the creator or admin-tier — matches OrderController.php exactly.
 
+   List page: price/proforma and delivery are inline dropdowns; clicking a
+   row (or the sales engineer's name) expands it to show the materials on
+   the order, where the supplied ones are ticked off. All ticked = order
+   complete; some = partially complete; none = not delivered — anything
+   short of complete needs a reason (enforced by PATCH /orders/:id/supply).
+
    NOTE: part of the hand-patched build. `npm run build` from source will
    not regenerate this file — see DEPLOY-README.md.
    ════════════════════════════════════════════════════════════════════ */
@@ -15,8 +21,11 @@
 
   var API = 'https://api.apjtech.in';
   var ORDER_TYPES = [['VERBAL', 'Verbal'], ['PO', 'Purchase order']];
-  var DELIVERY_STATUSES = [['PENDING', 'Pending'], ['DELIVERED', 'Delivered'], ['NOT_DELIVERED', 'Not delivered']];
-  var STATUS_BADGE = { PENDING: 'badge-yellow', DELIVERED: 'badge-green', NOT_DELIVERED: 'badge-red' };
+  var DELIVERY_STATUSES = [['PENDING', 'Pending'], ['DELIVERED', 'Delivered'],
+                           ['PARTIALLY_DELIVERED', 'Partially delivered'], ['NOT_DELIVERED', 'Not delivered']];
+  var STATUS_BADGE = { PENDING: 'badge-yellow', DELIVERED: 'badge-green', PARTIALLY_DELIVERED: 'badge-amber', NOT_DELIVERED: 'badge-red' };
+  var PROFORMA_STATUSES = [['NOT_CONFIRMED', 'Not confirmed'], ['CONFIRMED', 'Confirmed']];
+  var PROFORMA_BADGE = { NOT_CONFIRMED: 'badge-gray', CONFIRMED: 'badge-green' };
   var TYPE_BADGE = { VERBAL: 'badge-gray', PO: 'badge-blue' };
   var PROCUREMENT_STATUSES = [['NOT_ORDERED', 'Not ordered'], ['ORDERED', 'Ordered']];
   var PROCUREMENT_BADGE = { NOT_ORDERED: 'badge-gray', ORDERED: 'badge-blue' };
@@ -28,6 +37,83 @@
   function isAdmin() {
     var u = currentUser();
     return !!u && ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(u.role) !== -1; // matches is_admin_tier()
+  }
+  /** Mirrors OrderController::canEdit() — admin-tier, or the engineer the order belongs to. */
+  function canEditOrder(o) {
+    var u = currentUser();
+    return isAdmin() || !!(o && o.engineer && u && o.engineer.id === u.id);
+  }
+  function todayIso() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  // A few styles the compiled Tailwind CSS doesn't include (it only has the
+  // classes the original React build used), scoped under an ox- prefix.
+  function injectCss() {
+    if (document.getElementById('orders-extra-css')) return;
+    var st = document.createElement('style');
+    st.id = 'orders-extra-css';
+    st.textContent = [
+      '.ox-nowrap{white-space:nowrap}',
+      '.ox-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;align-items:end}',
+      '@media(min-width:768px){.ox-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}',
+      '@media(min-width:1280px){.ox-filters{grid-template-columns:repeat(8,minmax(0,1fr))}}',
+      '.ox-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}',
+      '@media(min-width:768px){.ox-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}',
+      '@media(min-width:1280px){.ox-stats{grid-template-columns:repeat(6,minmax(0,1fr))}}',
+      '.ox-sel{width:auto;min-width:8.5rem;padding:.3rem 1.6rem .3rem .5rem;font-size:.78rem;font-weight:500;border-radius:.5rem;',
+      '  border:1px solid #e2e8f0;background-color:#fff;color:#0f172a;cursor:pointer}',
+      '.ox-sel:focus{outline:none;box-shadow:0 0 0 1px #1e3a5f}',
+      '.dark .ox-sel{background-color:#0f172a;border-color:#334155;color:#f1f5f9}',
+      '.ox-good{border-color:#86efac;background-color:#f0fdf4;color:#166534}',
+      '.ox-warn{border-color:#fcd34d;background-color:#fffbeb;color:#92400e}',
+      '.ox-bad{border-color:#fca5a5;background-color:#fef2f2;color:#991b1b}',
+      '.ox-idle{border-color:#e2e8f0;background-color:#f8fafc;color:#475569}',
+      '.dark .ox-good{background-color:rgba(22,101,52,.25);border-color:#166534;color:#bbf7d0}',
+      '.dark .ox-warn{background-color:rgba(146,64,14,.25);border-color:#92400e;color:#fde68a}',
+      '.dark .ox-bad{background-color:rgba(153,27,27,.25);border-color:#991b1b;color:#fecaca}',
+      '.dark .ox-idle{background-color:#1e293b;border-color:#334155;color:#cbd5e1}',
+      '.ox-caret{display:inline-block;width:1rem;transition:transform .15s;color:#94a3b8}',
+      '.ox-open .ox-caret{transform:rotate(90deg)}',
+      '.ox-open>td{background:#f8fafc}.dark .ox-open>td{background:rgba(30,41,59,.5)}',
+      '.ox-expand>td{background:#f8fafc;border-bottom:1px solid #e2e8f0}',
+      '.dark .ox-expand>td{background:rgba(30,41,59,.5);border-color:#334155}',
+      '.ox-eng{color:#1e3a5f;font-weight:500;text-decoration:underline dotted;text-underline-offset:3px}',
+      '.dark .ox-eng{color:#93c5fd}',
+      '.ox-check{width:1.05rem;height:1.05rem;accent-color:#1e3a5f;cursor:pointer;flex-shrink:0}',
+      '.ox-check:disabled{cursor:default}',
+      '.ox-item{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-top:1px solid #f1f5f9}',
+      '.dark .ox-item{border-color:#1e293b}',
+      '.ox-item:first-child{border-top:0}',
+      '.ox-item-on{background:rgba(34,197,94,.08)}',
+      '.ox-overdue{color:#dc2626;font-weight:600}',
+      '.ox-dialog{max-width:40rem}',
+      '.ox-expand-grid{display:grid;gap:1rem}',
+      '@media(min-width:1024px){.ox-expand-grid{grid-template-columns:3fr 2fr}}',
+      '.ox-muted-link{font-size:.75rem;font-weight:500;color:#1e3a5f;cursor:pointer;background:none;border:0;padding:0}',
+      '.dark .ox-muted-link{color:#93c5fd}',
+      '.ox-btn-disabled{opacity:.5;cursor:not-allowed}',
+      '.ox-pl{padding-left:1rem}',
+      '.ox-expand-inner{position:sticky;left:1rem;text-align:left}',
+      // Tailwind utilities this file already used that the compiled CSS lacks:
+      '.mr-auto{margin-right:auto}.mt-5{margin-top:1.25rem}',
+      '.hover\\:text-red-500:hover{color:#ef4444}'
+    ].join('\n');
+    document.head.appendChild(st);
+  }
+
+  /** Tone class for an inline status dropdown, so it reads like a badge at a glance. */
+  function deliveryTone(s) { return { DELIVERED: 'ox-good', PARTIALLY_DELIVERED: 'ox-warn', NOT_DELIVERED: 'ox-bad' }[s] || 'ox-idle'; }
+  function proformaTone(s) { return s === 'CONFIRMED' ? 'ox-good' : 'ox-idle'; }
+
+  /** Re-derives the list-only summary fields from a full order returned by a PATCH/GET. */
+  function toListRow(o) {
+    var items = o.items || [];
+    o.productSummary = items.map(function (i) { return i.productName; }).join(', ');
+    o.itemCount = items.length;
+    o.suppliedCount = items.filter(function (i) { return i.supplied; }).length;
+    return o;
   }
 
   function api(method, path, body) {
@@ -82,30 +168,48 @@
 
   // ── list page ────────────────────────────────────────────────────────
   function mount(root) {
+    injectCss();
     var all = [];
-    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '';
+    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '';
     var engineers = [];
+    var expanded = {};    // orderId -> true while its row is open
+    var presets = {};     // orderId -> delivery status picked from the dropdown that needs the materials panel
+    var fullOrders = {};  // orderId -> full order (with items), fetched on expand
+    var flash = '';
 
-    var stats = el('div', { class: 'grid grid-cols-2 lg:grid-cols-4 gap-3' });
-    var filters = el('div', { class: 'flex flex-wrap gap-2' });
-    var body = el('div', { class: 'card p-10 text-center text-muted', text: 'Loading…' });
+    var stats = el('div', { class: 'ox-stats' });
+    var filters = el('div', { class: 'ox-filters' });
+    var flashBox = el('div');
+    // Plain wrapper — loading/error/table each render their own card inside it.
+    var body = el('div', {}, [el('div', { class: 'card p-10 text-center text-muted', text: 'Loading…' })]);
 
     root.appendChild(el('div', { class: 'space-y-5' }, [
       el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
         el('h1', { class: 'page-title', text: 'Orders' }),
         el('button', { class: 'btn-primary', text: '+ New order', onclick: function () { openOrderDialog(null, load); } })
       ]),
-      stats, filters, body
+      stats, filters, flashBox, body
     ]));
+
+    function showFlash(msg) {
+      flash = msg || '';
+      flashBox.innerHTML = '';
+      if (flash) {
+        flashBox.appendChild(el('div', {
+          class: 'text-sm px-3 py-2 rounded-lg bg-red-50 text-red-600 flex items-center justify-between gap-3'
+        }, [el('span', { text: flash }), el('button', { class: 'ox-muted-link', text: 'Dismiss', onclick: function () { showFlash(''); } })]));
+      }
+    }
 
     function query() {
       var q = [];
       if (from) q.push('from=' + from);
       if (to) q.push('to=' + to);
-      if (engineerId) q.push('engineerId=' + engineerId);
+      if (engineerId) q.push('engineerId=' + encodeURIComponent(engineerId));
       if (deliveryStatus) q.push('deliveryStatus=' + deliveryStatus);
       if (orderType) q.push('orderType=' + orderType);
       if (procurementStatus) q.push('procurementStatus=' + procurementStatus);
+      if (proformaStatus) q.push('proformaStatus=' + proformaStatus);
       q.push('limit=100');
       return q.join('&');
     }
@@ -114,21 +218,45 @@
       body.innerHTML = ''; body.appendChild(el('div', { class: 'card p-10 text-center text-muted', text: 'Loading…' }));
       api('GET', '/orders?' + query()).then(function (res) {
         all = (res.data && res.data.items) || [];
+        fullOrders = {};
         renderStats();
         renderTable();
       }).catch(function (e) {
         body.innerHTML = '';
-        body.appendChild(el('div', { class: 'card p-10 text-center text-muted', text: e.message }));
+        body.appendChild(el('div', { class: 'card p-10 text-center text-muted' }, [
+          el('p', { class: 'font-medium text-red-600', text: 'Could not load orders' }),
+          el('p', { class: 'text-sm mt-1', text: e.message }),
+          el('button', { class: 'btn-secondary btn-sm mt-4', text: 'Try again', onclick: load })
+        ]));
       });
+    }
+
+    /** Swaps an updated order into the list and redraws. */
+    function applyUpdate(order) {
+      toListRow(order);
+      fullOrders[order.id] = order;
+      all = all.map(function (o) { return o.id === order.id ? order : o; });
+      renderStats();
+      renderTable();
+    }
+
+    function patchOrder(id, path, payload) {
+      showFlash('');
+      return api('PATCH', '/orders/' + id + '/' + path, payload).then(function (res) {
+        applyUpdate(res.data.order);
+        return res.data.order;
+      }).catch(function (e) { showFlash(e.message); renderTable(); throw e; });
     }
 
     function renderStats() {
       stats.innerHTML = '';
-      var pending = all.filter(function (o) { return o.deliveryStatus === 'PENDING'; }).length;
-      var delivered = all.filter(function (o) { return o.deliveryStatus === 'DELIVERED'; }).length;
-      var notDelivered = all.filter(function (o) { return o.deliveryStatus === 'NOT_DELIVERED'; }).length;
-      [['Total orders', String(all.length)], ['Pending', String(pending)],
-       ['Delivered', String(delivered)], ['Not delivered', String(notDelivered)]
+      function count(fn) { return String(all.filter(fn).length); }
+      [['Total orders', String(all.length)],
+       ['Pending', count(function (o) { return o.deliveryStatus === 'PENDING'; })],
+       ['Partially complete', count(function (o) { return o.deliveryStatus === 'PARTIALLY_DELIVERED'; })],
+       ['Delivered', count(function (o) { return o.deliveryStatus === 'DELIVERED'; })],
+       ['Not delivered', count(function (o) { return o.deliveryStatus === 'NOT_DELIVERED'; })],
+       ['Proforma confirmed', count(function (o) { return o.proformaStatus === 'CONFIRMED'; })]
       ].forEach(function (s) {
         stats.appendChild(el('div', { class: 'card p-4' }, [
           el('p', { class: 'text-xs text-muted', text: s[0] }),
@@ -139,40 +267,85 @@
 
     function renderFilters() {
       filters.innerHTML = '';
-      var fromI = el('input', { type: 'date', class: INPUT, style: 'max-width:160px' });
+      function labelled(label, control) {
+        return el('label', { class: 'block' }, [el('span', { class: 'text-xs text-muted', text: label }), el('div', { class: 'mt-1' }, [control])]);
+      }
+      function sel(first, pairs, value, onPick) {
+        var s2 = el('select', { class: selectCls }, [el('option', { value: '', text: first })]
+          .concat(pairs.map(function (p) { return el('option', { value: p[0], text: p[1] }); })));
+        s2.value = value;
+        s2.addEventListener('change', function () { onPick(s2.value); load(); });
+        return s2;
+      }
+      var fromI = el('input', { type: 'date', class: INPUT });
       fromI.value = from;
       fromI.addEventListener('change', function () { from = fromI.value; load(); });
-      var toI = el('input', { type: 'date', class: INPUT, style: 'max-width:160px' });
+      var toI = el('input', { type: 'date', class: INPUT });
       toI.value = to;
       toI.addEventListener('change', function () { to = toI.value; load(); });
 
-      var eSel = el('select', { class: selectCls }, [el('option', { value: '', text: 'All engineers' })]
-        .concat(engineers.map(function (e2) { return el('option', { value: e2.id, text: e2.name }); })));
-      eSel.value = engineerId;
-      eSel.addEventListener('change', function () { engineerId = eSel.value; load(); });
+      [labelled('From', fromI), labelled('To', toI),
+       labelled('Sales engineer', sel('All engineers', engineers.map(function (e2) { return [e2.id, e2.name]; }), engineerId, function (v) { engineerId = v; })),
+       labelled('Delivery', sel('All delivery statuses', DELIVERY_STATUSES, deliveryStatus, function (v) { deliveryStatus = v; })),
+       labelled('Price / proforma', sel('All', PROFORMA_STATUSES, proformaStatus, function (v) { proformaStatus = v; })),
+       labelled('Procurement', sel('All procurement statuses', PROCUREMENT_STATUSES, procurementStatus, function (v) { procurementStatus = v; })),
+       labelled('Type', sel('All types', ORDER_TYPES, orderType, function (v) { orderType = v; })),
+       el('div', { class: 'flex items-end' }, [el('button', {
+         class: 'btn-secondary w-full', text: 'Clear filters',
+         onclick: function () { from = to = engineerId = deliveryStatus = orderType = procurementStatus = proformaStatus = ''; renderFilters(); load(); }
+       })])
+      ].forEach(function (n) { filters.appendChild(n); });
+    }
 
-      var dSel = el('select', { class: selectCls }, [el('option', { value: '', text: 'All delivery statuses' })]
-        .concat(DELIVERY_STATUSES.map(function (s) { return el('option', { value: s[0], text: s[1] }); })));
-      dSel.value = deliveryStatus;
-      dSel.addEventListener('change', function () { deliveryStatus = dSel.value; load(); });
+    function stop(e) { e.stopPropagation(); }
 
-      var pSel = el('select', { class: selectCls }, [el('option', { value: '', text: 'All procurement statuses' })]
-        .concat(PROCUREMENT_STATUSES.map(function (s) { return el('option', { value: s[0], text: s[1] }); })));
-      pSel.value = procurementStatus;
-      pSel.addEventListener('change', function () { procurementStatus = pSel.value; load(); });
+    function proformaCell(o) {
+      if (!canEditOrder(o)) {
+        return el('span', { class: 'badge ' + PROFORMA_BADGE[o.proformaStatus], text: labelOf(PROFORMA_STATUSES, o.proformaStatus) });
+      }
+      var s2 = el('select', { class: 'ox-sel ' + proformaTone(o.proformaStatus), 'aria-label': 'Price / proforma confirmed', onclick: stop },
+        PROFORMA_STATUSES.map(function (p) { return el('option', { value: p[0], text: p[1] }); }));
+      s2.value = o.proformaStatus || 'NOT_CONFIRMED';
+      s2.addEventListener('change', function () { patchOrder(o.id, 'proforma', { proformaStatus: s2.value }).catch(function () {}); });
+      return s2;
+    }
 
-      var tSel = el('select', { class: selectCls }, [el('option', { value: '', text: 'All types' })]
-        .concat(ORDER_TYPES.map(function (t) { return el('option', { value: t[0], text: t[1] }); })));
-      tSel.value = orderType;
-      tSel.addEventListener('change', function () { orderType = tSel.value; load(); });
+    function deliveryCell(o) {
+      if (!canEditOrder(o)) {
+        return el('span', { class: 'badge ' + STATUS_BADGE[o.deliveryStatus], text: labelOf(DELIVERY_STATUSES, o.deliveryStatus) });
+      }
+      var s2 = el('select', { class: 'ox-sel ' + deliveryTone(o.deliveryStatus), 'aria-label': 'Delivery status', onclick: stop },
+        DELIVERY_STATUSES.map(function (p) { return el('option', { value: p[0], text: p[1] }); }));
+      s2.value = o.deliveryStatus;
+      s2.addEventListener('change', function () {
+        var v = s2.value;
+        if (v === 'DELIVERED' || v === 'PENDING') {
+          patchOrder(o.id, 'delivery', { deliveryStatus: v }).catch(function () {});
+        } else {
+          // Partial / not delivered need the materials + a reason — open the row for that.
+          presets[o.id] = v;
+          expanded[o.id] = true;
+          renderTable();
+        }
+      });
+      return s2;
+    }
 
-      [el('span', { class: 'text-xs text-muted self-center', text: 'From' }), fromI,
-       el('span', { class: 'text-xs text-muted self-center', text: 'to' }), toI,
-       eSel, dSel, pSel, tSel].forEach(function (n) { filters.appendChild(n); });
+    function etaCell(o) {
+      var overdue = o.expectedDeliveryDate && o.deliveryStatus !== 'DELIVERED' && String(o.expectedDeliveryDate).slice(0, 10) < todayIso();
+      if (isAdmin()) {
+        var d = el('input', { type: 'date', class: 'ox-sel ' + (overdue ? 'ox-bad' : 'ox-idle'), 'aria-label': 'Expected date', onclick: stop,
+                              title: overdue ? 'Overdue' : '' });
+        d.value = o.expectedDeliveryDate ? String(o.expectedDeliveryDate).slice(0, 10) : '';
+        d.addEventListener('change', function () { patchOrder(o.id, 'eta', { expectedDeliveryDate: d.value || null }).catch(function () {}); });
+        return d;
+      }
+      if (!o.expectedDeliveryDate) return el('span', { class: 'text-muted', text: '—' });
+      return el('span', { class: overdue ? 'ox-overdue' : '', text: fmtDate(o.expectedDeliveryDate) + (overdue ? ' · overdue' : '') });
     }
 
     function renderTable() {
-      var heads = ['Customer', 'Type', 'Products', 'Engineer', 'Order date', 'Procurement', 'Delivery'];
+      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Materials'];
       var tbody = el('tbody');
       if (!all.length) {
         tbody.appendChild(el('tr', {}, [el('td', {
@@ -180,34 +353,84 @@
         })]));
       } else {
         all.forEach(function (o) {
-          var procCell = el('td', { class: 'px-4 py-3 whitespace-nowrap' }, [
-            el('span', { class: 'badge ' + PROCUREMENT_BADGE[o.procurementStatus], text: labelOf(PROCUREMENT_STATUSES, o.procurementStatus) }),
-            o.expectedDeliveryDate ? el('span', { class: 'block text-xs text-muted mt-0.5', text: 'Arriving ' + fmtDate(o.expectedDeliveryDate) }) : null
+          var open = !!expanded[o.id];
+          var procCell = el('td', { class: 'px-3 py-3 ox-nowrap' }, [
+            el('span', { class: 'badge ' + PROCUREMENT_BADGE[o.procurementStatus], text: labelOf(PROCUREMENT_STATUSES, o.procurementStatus) })
           ]);
-          var tr = el('tr', { class: 'table-row cursor-pointer' }, [
-            el('td', { class: 'px-4 py-3 font-medium whitespace-nowrap', text: (o.customer && o.customer.companyName) || '—' }),
-            el('td', { class: 'px-4 py-3' }, [el('span', { class: 'badge ' + TYPE_BADGE[o.orderType], text: labelOf(ORDER_TYPES, o.orderType) })]),
-            el('td', { class: 'px-4 py-3 max-w-[220px] truncate text-muted', text: o.productSummary || '—', title: o.productSummary || '' }),
-            el('td', { class: 'px-4 py-3', text: (o.engineer && o.engineer.name) || '—' }),
-            el('td', { class: 'px-4 py-3 whitespace-nowrap', text: fmtDate(o.orderDate) }),
+          var supplied = o.itemCount ? (o.suppliedCount || 0) + ' / ' + o.itemCount + ' supplied' : '—';
+          var tr = el('tr', { class: 'table-row cursor-pointer' + (open ? ' ox-open' : ''), 'aria-expanded': open ? 'true' : 'false' }, [
+            el('td', { class: 'ox-pl py-3' }, [el('span', { class: 'ox-caret', text: '▸' })]),
+            el('td', { class: 'px-3 py-3 font-medium ox-nowrap', text: (o.customer && o.customer.companyName) || '—' }),
+            el('td', { class: 'px-3 py-3 ox-nowrap' }, [el('span', { class: 'ox-eng', title: 'Show materials', text: (o.engineer && o.engineer.name) || '—' })]),
+            el('td', { class: 'px-3 py-3' }, [el('span', { class: 'badge ' + TYPE_BADGE[o.orderType], text: labelOf(ORDER_TYPES, o.orderType) })]),
+            el('td', { class: 'px-3 py-3 ox-nowrap', text: fmtDate(o.orderDate) }),
+            el('td', { class: 'px-3 py-3 ox-nowrap' }, [etaCell(o)]),
+            el('td', { class: 'px-3 py-3' }, [proformaCell(o)]),
             procCell,
-            el('td', { class: 'px-4 py-3' }, [el('span', { class: 'badge ' + STATUS_BADGE[o.deliveryStatus], text: labelOf(DELIVERY_STATUSES, o.deliveryStatus) })])
+            el('td', { class: 'px-3 py-3' }, [deliveryCell(o)]),
+            el('td', { class: 'px-3 py-3 ox-nowrap text-muted', title: o.productSummary || '', text: supplied })
           ]);
-          tr.addEventListener('click', function () { openOrderDialog(o.id, load); });
+          tr.addEventListener('click', function () {
+            expanded[o.id] = !expanded[o.id];
+            if (!expanded[o.id]) delete presets[o.id];
+            renderTable();
+          });
           tbody.appendChild(tr);
+          if (open) tbody.appendChild(expandedRow(o, heads.length));
         });
       }
-      body.innerHTML = '';
-      body.appendChild(el('div', { class: 'card overflow-hidden' }, [
-        el('div', { class: 'overflow-x-auto' }, [
-          el('table', { class: 'w-full text-sm' }, [
-            el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [
-              el('tr', {}, heads.map(function (h) { return el('th', { class: 'table-head text-left px-4 py-3 whitespace-nowrap', text: h }); }))
-            ]),
-            tbody
-          ])
+      var scroller = el('div', { class: 'overflow-x-auto' }, [
+        el('table', { class: 'w-full text-sm' }, [
+          el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [
+            el('tr', {}, heads.map(function (h) { return el('th', { class: 'table-head text-left px-3 py-3 ox-nowrap', text: h }); }))
+          ]),
+          tbody
         ])
-      ]));
+      ]);
+      body.innerHTML = '';
+      body.appendChild(el('div', { class: 'card overflow-hidden' }, [scroller]));
+      fitExpanded(scroller);
+    }
+
+    // The table can be wider than the screen (it scrolls sideways); keep an
+    // expanded row's panel pinned to the visible width so nothing in it is
+    // cut off or needs scrolling to reach.
+    function fitExpanded(scroller) {
+      var w = scroller.clientWidth;
+      var panels = scroller.querySelectorAll('.ox-expand-inner');
+      for (var i = 0; i < panels.length; i++) panels[i].style.width = Math.max(260, w - 32) + 'px';
+    }
+    window.addEventListener('resize', function () {
+      var sc = body.querySelector('.overflow-x-auto');
+      if (sc) fitExpanded(sc);
+    });
+
+    function expandedRow(o, span) {
+      var inner = el('div', { class: 'ox-expand-inner' });
+      var cell = el('td', { colspan: String(span), class: 'py-4' }, [inner]);
+      var tr = el('tr', { class: 'ox-expand' }, [cell]);
+      function fill(order) {
+        inner.innerHTML = '';
+        inner.appendChild(orderDetailPanel(order, {
+          preset: presets[order.id],
+          onSaved: function (updated) { delete presets[order.id]; applyUpdate(updated); },
+          onCancelPreset: function () { delete presets[order.id]; renderTable(); },
+          onOpen: function () { openOrderDialog(order.id, load); }
+        }));
+      }
+      if (fullOrders[o.id]) {
+        fill(fullOrders[o.id]);
+      } else {
+        inner.appendChild(el('p', { class: 'text-sm text-muted', text: 'Loading materials…' }));
+        api('GET', '/orders/' + o.id).then(function (res) {
+          fullOrders[o.id] = res.data.order;
+          fill(res.data.order);
+        }).catch(function (e) {
+          inner.innerHTML = '';
+          inner.appendChild(el('p', { class: 'text-sm text-red-600', text: e.message }));
+        });
+      }
+      return tr;
     }
 
     api('GET', '/orders/engineers').then(function (res) {
@@ -219,12 +442,162 @@
     load();
   }
 
+  /** The expanded-row content: materials checklist on the left, order facts on the right. */
+  function orderDetailPanel(o, opts) {
+    var facts = el('div', { class: 'space-y-3 text-sm' });
+    facts.appendChild(el('div', {}, [
+      el('span', { class: 'text-xs text-muted block', text: 'Order placed by' }),
+      el('span', { class: 'font-medium', text: ((o.engineer && o.engineer.name) || '—') + ' · ' + fmtDate(o.orderDate) })
+    ]));
+    if (o.customer && (o.customer.contactPerson || o.customer.contactNumber)) {
+      facts.appendChild(el('div', {}, [
+        el('span', { class: 'text-xs text-muted block', text: 'Customer contact' }),
+        el('span', { text: [o.customer.contactPerson, o.customer.contactNumber].filter(Boolean).join(' · ') })
+      ]));
+    }
+    if (o.orderType === 'PO' && o.poDocument) {
+      facts.appendChild(el('a', {
+        href: API + o.poDocument.url, target: '_blank', rel: 'noopener', class: 'text-primary font-medium block'
+      }, ['📄 ' + o.poDocument.originalName]));
+    } else if (o.orderType === 'VERBAL' && o.verbalDetails) {
+      facts.appendChild(el('div', {}, [
+        el('span', { class: 'text-xs text-muted block', text: 'Verbally agreed' }),
+        el('span', { class: 'whitespace-pre-wrap', text: o.verbalDetails })
+      ]));
+    }
+    if (o.notes) facts.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted block', text: 'Notes' }), el('span', { class: 'whitespace-pre-wrap', text: o.notes })]));
+    if (o.deliveredDate && o.deliveryStatus !== 'PENDING') {
+      facts.appendChild(el('p', { class: 'text-xs text-muted', text: 'Last supplied ' + fmtDate(o.deliveredDate) }));
+    }
+    facts.appendChild(el('button', { class: 'btn-secondary btn-sm', text: 'Open full order', onclick: opts.onOpen }));
+
+    return el('div', { class: 'ox-expand-grid' }, [
+      supplyPanel(o, { preset: opts.preset, onSaved: opts.onSaved, onCancelPreset: opts.onCancelPreset }),
+      facts
+    ]);
+  }
+
+  /**
+   * Materials checklist. Tick what was supplied, then one button saves it:
+   * all ticked = complete, some = partially complete, none = not delivered.
+   * Anything short of complete requires a reason. Read-only for people who
+   * can't edit the order.
+   */
+  function supplyPanel(o, opts) {
+    opts = opts || {};
+    var editable = canEditOrder(o);
+    var items = o.items || [];
+    var picked = {};
+    items.forEach(function (i) {
+      picked[i.id] = opts.preset === 'NOT_DELIVERED' ? false : !!i.supplied;
+    });
+    var reason = o.deliveryStatus === 'PARTIALLY_DELIVERED' || o.deliveryStatus === 'NOT_DELIVERED' ? (o.notDeliveredReason || '') : '';
+    var err = '';
+    var saving = false;
+    var wrap = el('div', { class: 'space-y-3' });
+
+    function nPicked() { return items.filter(function (i) { return picked[i.id]; }).length; }
+
+    function render() {
+      wrap.innerHTML = '';
+      var n = nPicked(), total = items.length;
+      wrap.appendChild(el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
+        el('div', {}, [
+          el('span', { class: 'text-sm font-semibold text-slate-900 dark:text-slate-100', text: 'Materials supplied' }),
+          el('span', { class: 'text-xs text-muted ml-2', text: n + ' of ' + total + ' selected' })
+        ]),
+        editable && total ? el('div', { class: 'flex gap-3' }, [
+          el('button', { class: 'ox-muted-link', text: 'Select all', onclick: function (e) { e.stopPropagation(); items.forEach(function (i) { picked[i.id] = true; }); render(); } }),
+          el('button', { class: 'ox-muted-link', text: 'Clear', onclick: function (e) { e.stopPropagation(); items.forEach(function (i) { picked[i.id] = false; }); render(); } })
+        ]) : null
+      ]));
+
+      if (opts.preset) {
+        wrap.appendChild(el('div', { class: 'text-xs px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800' }, [
+          opts.preset === 'NOT_DELIVERED'
+            ? 'Marking as not delivered — give the reason below and save.'
+            : 'Tick the materials that were supplied, give the reason for the rest, and save.'
+        ]));
+      }
+
+      var list = el('div', { class: 'rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900' });
+      if (!total) list.appendChild(el('p', { class: 'px-3 py-2 text-sm text-muted', text: 'No products on this order.' }));
+      items.forEach(function (i) {
+        var cb = el('input', { type: 'checkbox', class: 'ox-check', 'aria-label': 'Supplied: ' + i.productName });
+        cb.checked = !!picked[i.id];
+        cb.disabled = !editable;
+        cb.addEventListener('change', function () { picked[i.id] = cb.checked; render(); });
+        var row = el('label', { class: 'ox-item' + (picked[i.id] ? ' ox-item-on' : '') + (editable ? ' cursor-pointer' : '') }, [
+          cb,
+          el('span', { class: 'flex-1 min-w-0' }, [
+            el('span', { class: 'block text-sm text-slate-900 dark:text-slate-100', text: i.productName + (i.itemCode ? ' (' + i.itemCode + ')' : '') }),
+            i.supplied && i.suppliedAt ? el('span', { class: 'block text-xs text-muted', text: 'Supplied ' + fmtDate(i.suppliedAt) }) : null
+          ]),
+          el('span', { class: 'text-sm text-muted ox-nowrap', text: i.quantity + (i.unit ? ' ' + i.unit : '') })
+        ]);
+        row.addEventListener('click', function (e) { e.stopPropagation(); });
+        list.appendChild(row);
+      });
+      wrap.appendChild(list);
+
+      if (!editable) {
+        if (reason) wrap.appendChild(el('p', { class: 'text-sm text-amber-800', text: 'Reason: ' + reason }));
+        return;
+      }
+
+      var complete = total > 0 && n === total;
+      if (!complete && total) {
+        var ta = el('textarea', { class: INPUT, rows: '2', placeholder: n ? 'Why is the order only partially complete?' : 'Why wasn’t it delivered?' });
+        ta.value = reason;
+        ta.addEventListener('input', function () { reason = ta.value; });
+        ta.addEventListener('click', function (e) { e.stopPropagation(); });
+        wrap.appendChild(el('div', {}, [
+          el('span', { class: 'text-xs font-medium text-amber-800', text: n ? 'Reason for partial completion (required)' : 'Reason for non-delivery (required)' }),
+          el('div', { class: 'mt-1' }, [ta])
+        ]));
+      }
+      if (err) wrap.appendChild(el('p', { class: 'text-xs text-red-600', text: err }));
+
+      var label = complete ? '✓ Mark order complete' : (n ? 'Save as partially complete' : 'Mark not delivered');
+      var btns = el('div', { class: 'flex gap-2 justify-end flex-wrap' });
+      if (opts.preset && opts.onCancelPreset) {
+        btns.appendChild(el('button', { class: 'btn-secondary btn-sm', text: 'Cancel', onclick: function (e) { e.stopPropagation(); opts.onCancelPreset(); } }));
+      }
+      if (total) {
+        btns.appendChild(el('button', {
+          class: 'btn-primary btn-sm' + (saving ? ' ox-btn-disabled' : ''), text: saving ? 'Saving…' : label,
+          onclick: function (e) { e.stopPropagation(); save(); }
+        }));
+      }
+      wrap.appendChild(btns);
+    }
+
+    function save() {
+      if (saving) return;
+      err = '';
+      var ids = items.filter(function (i) { return picked[i.id]; }).map(function (i) { return i.id; });
+      if (ids.length < items.length && !reason.trim()) {
+        err = ids.length ? 'Please give a reason why the order is only partially complete.' : 'Please give a reason for the non-delivery.';
+        return render();
+      }
+      saving = true; render();
+      api('PATCH', '/orders/' + o.id + '/supply', { suppliedItemIds: ids, reason: reason.trim() }).then(function (res) {
+        saving = false;
+        if (opts.onSaved) opts.onSaved(res.data.order);
+      }).catch(function (e2) { saving = false; err = e2.message; render(); });
+    }
+
+    render();
+    return wrap;
+  }
+
   // ── create / detail-edit dialog ─────────────────────────────────────
   // orderId === null -> create mode. Otherwise loads and shows/edits it.
   function openOrderDialog(orderId, onChange) {
+    injectCss();
     var overlay = el('div', { class: 'fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4' });
     var card = el('div', {
-      class: 'card w-full sm:max-w-lg p-5 rounded-b-none sm:rounded-xl max-h-[92vh] overflow-y-auto',
+      class: 'card w-full ox-dialog p-5 rounded-b-none sm:rounded-xl max-h-[92vh] overflow-y-auto',
       role: 'dialog', 'aria-modal': 'true'
     });
     overlay.appendChild(card);
@@ -296,8 +669,22 @@
         wrap.appendChild(el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
           el('span', { class: 'badge ' + TYPE_BADGE[o.orderType], text: labelOf(ORDER_TYPES, o.orderType) }),
           el('span', { class: 'badge ' + PROCUREMENT_BADGE[o.procurementStatus], text: labelOf(PROCUREMENT_STATUSES, o.procurementStatus) }),
-          el('span', { class: 'badge ' + STATUS_BADGE[o.deliveryStatus], text: labelOf(DELIVERY_STATUSES, o.deliveryStatus) })
+          el('span', { class: 'badge ' + STATUS_BADGE[o.deliveryStatus], text: labelOf(DELIVERY_STATUSES, o.deliveryStatus) }),
+          el('span', { class: 'badge ' + PROFORMA_BADGE[o.proformaStatus], text: 'Proforma: ' + labelOf(PROFORMA_STATUSES, o.proformaStatus) })
         ]));
+
+        // Price / proforma confirmed? — anyone who can edit the order.
+        if (canEdit) {
+          wrap.appendChild(el('div', { class: 'flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700' }, [
+            el('span', { class: 'text-xs text-muted', text: 'Price / proforma confirmed?' }),
+            el('div', { class: 'flex gap-2' }, PROFORMA_STATUSES.map(function (s) {
+              return el('button', {
+                class: (o.proformaStatus === s[0] ? 'btn-primary' : 'btn-secondary') + ' btn-sm', text: s[1],
+                onclick: function () { patch(o.id, 'proforma', { proformaStatus: s[0] }); }
+              });
+            }))
+          ]));
+        }
 
         // Procurement (has the company ordered this from its own supplier?)
         // and expected arrival — everyone sees both, so engineers can tell
@@ -341,53 +728,22 @@
           wrap.appendChild(el('div', { class: 'text-sm px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/50' }, [o.verbalDetails || '—']));
         }
 
-        var itemsTbl = el('table', { class: 'w-full text-sm' }, [
-          el('thead', {}, [el('tr', {}, [
-            el('th', { class: 'table-head text-left px-2 py-1.5', text: 'Product' }),
-            el('th', { class: 'table-head text-right px-2 py-1.5', text: 'Qty' })
-          ])]),
-          el('tbody', {}, (o.items || []).map(function (i) {
-            return el('tr', { class: 'border-t border-slate-100 dark:border-slate-800' }, [
-              el('td', { class: 'px-2 py-1.5', text: i.productName + (i.itemCode ? ' (' + i.itemCode + ')' : '') }),
-              el('td', { class: 'px-2 py-1.5 text-right', text: i.quantity + (i.unit ? ' ' + i.unit : '') })
-            ]);
-          }))
-        ]);
-        wrap.appendChild(el('div', { class: 'rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden' }, [itemsTbl]));
+        if (o.notes) wrap.appendChild(el('p', { class: 'text-sm text-muted whitespace-pre-wrap', text: o.notes }));
 
-        if (o.notes) wrap.appendChild(el('p', { class: 'text-sm text-muted', text: o.notes }));
+        // Materials checklist — tick what was supplied; complete / partial / not delivered
+        // is derived from the ticks, with a required reason for anything short of complete.
+        wrap.appendChild(supplyPanel(o, {
+          onSaved: function (updated) { order = updated; errMsg = ''; render(); if (onChange) onChange(); }
+        }));
 
-        if (o.deliveryStatus === 'NOT_DELIVERED' && o.notDeliveredReason) {
-          wrap.appendChild(el('div', {
-            class: 'text-sm px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
-          }, ['Not delivered: ' + o.notDeliveredReason]));
+        if (o.deliveredDate && (o.deliveryStatus === 'DELIVERED' || o.deliveryStatus === 'PARTIALLY_DELIVERED')) {
+          wrap.appendChild(el('p', { class: 'text-xs text-muted', text: 'Last supplied ' + fmtDate(o.deliveredDate) }));
         }
-        if (o.deliveryStatus === 'DELIVERED' && o.deliveredDate) {
-          wrap.appendChild(el('p', { class: 'text-xs text-muted', text: 'Delivered ' + fmtDate(o.deliveredDate) }));
-        }
-
-        // Delivery action buttons — anyone who can edit this order.
-        if (canEdit) {
-          var actions = el('div', { class: 'flex gap-2 flex-wrap' });
-          if (o.deliveryStatus !== 'DELIVERED') {
-            actions.appendChild(el('button', {
-              class: 'btn-secondary', text: 'Mark delivered',
-              onclick: function () { setDelivery(o.id, 'DELIVERED'); }
-            }));
-          }
-          if (o.deliveryStatus !== 'NOT_DELIVERED') {
-            actions.appendChild(el('button', {
-              class: 'btn-secondary', text: 'Mark not delivered',
-              onclick: function () { promptNotDelivered(o.id); }
-            }));
-          }
-          if (o.deliveryStatus !== 'PENDING') {
-            actions.appendChild(el('button', {
-              class: 'btn-secondary', text: 'Reset to pending',
-              onclick: function () { setDelivery(o.id, 'PENDING'); }
-            }));
-          }
-          wrap.appendChild(actions);
+        if (canEdit && o.deliveryStatus !== 'PENDING') {
+          wrap.appendChild(el('div', { class: 'flex justify-end' }, [el('button', {
+            class: 'btn-ghost btn-sm', text: 'Reset to pending',
+            onclick: function () { setDelivery(o.id, 'PENDING'); }
+          })]));
         }
         return wrap;
       }
@@ -420,22 +776,13 @@
         }).catch(function (e) { errMsg = e.message; render(); });
       }
 
-      function promptNotDelivered(id) {
-        var reasonBox = el('div', { class: 'space-y-2 p-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20' });
-        var ta = el('textarea', { class: INPUT, rows: '2', placeholder: 'Why wasn\u2019t it delivered?' });
-        reasonBox.appendChild(el('span', { class: 'text-xs text-amber-800 dark:text-amber-200', text: 'Reason required' }));
-        reasonBox.appendChild(ta);
-        reasonBox.appendChild(el('div', { class: 'flex gap-2 justify-end' }, [
-          el('button', { class: 'btn-secondary', text: 'Cancel', onclick: render }),
-          el('button', {
-            class: 'btn-primary', text: 'Confirm',
-            onclick: function () {
-              if (!ta.value.trim()) return;
-              setDelivery(id, 'NOT_DELIVERED', ta.value.trim());
-            }
-          })
-        ]));
-        card.querySelector('.space-y-4').appendChild(reasonBox);
+      function patch(id, path, payload) {
+        api('PATCH', '/orders/' + id + '/' + path, payload).then(function (res) {
+          order = res.data.order;
+          errMsg = '';
+          render();
+          if (onChange) onChange();
+        }).catch(function (e) { errMsg = e.message; render(); });
       }
 
       // ── editable form (create, or edit-mode on an existing order) ────

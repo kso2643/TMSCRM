@@ -19,9 +19,13 @@
 class OrderController
 {
     private const ORDER_TYPES = ['VERBAL', 'PO'];
-    private const DELIVERY_STATUSES = ['PENDING', 'DELIVERED', 'NOT_DELIVERED'];
+    private const DELIVERY_STATUSES = ['PENDING', 'DELIVERED', 'PARTIALLY_DELIVERED', 'NOT_DELIVERED'];
+    /** Delivery statuses that must carry a reason (stored in notDeliveredReason). */
+    private const STATUSES_NEEDING_REASON = ['PARTIALLY_DELIVERED', 'NOT_DELIVERED'];
     /** Has the company ordered this from its own supplier yet? Set by admin-tier only. */
     private const PROCUREMENT_STATUSES = ['NOT_ORDERED', 'ORDERED'];
+    /** Has the price / proforma invoice been confirmed with the customer? */
+    private const PROFORMA_STATUSES = ['NOT_CONFIRMED', 'CONFIRMED'];
 
     /** extension => expected real MIME type, checked against the file's actual bytes via finfo. */
     private const ALLOWED_EXTENSIONS = [
@@ -31,6 +35,85 @@ class OrderController
         'png'  => 'image/png',
     ];
     private const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB
+
+    public function __construct()
+    {
+        // Safety net for "Internal server error" on /api/orders when one of the
+        // orders migrations hasn't been run on the live DB — see SchemaGuard.php.
+        ensure_schema(self::schema(), 'migration_orders_all.sql');
+    }
+
+    /** Full current shape of the two orders tables — kept in sync with database/migration_orders_all.sql. */
+    public static function schema(): array
+    {
+        $orderCols = "
+  `id`                     VARCHAR(30)   NOT NULL,
+  `customerId`             VARCHAR(30)   NOT NULL,
+  `engineerId`             VARCHAR(30)   NOT NULL,
+  `orderType`              VARCHAR(10)   NOT NULL DEFAULT 'VERBAL',
+  `poDocumentOriginalName` VARCHAR(255)      NULL,
+  `poDocumentStoredName`   VARCHAR(255)      NULL,
+  `poDocumentMime`         VARCHAR(100)      NULL,
+  `poDocumentSize`         INT               NULL,
+  `verbalDetails`          TEXT              NULL,
+  `orderDate`              DATE          NOT NULL,
+  `deliveryStatus`         VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
+  `notDeliveredReason`     TEXT              NULL,
+  `deliveredDate`          DATE              NULL,
+  `notes`                  TEXT              NULL,
+  `expectedDeliveryDate`   DATE              NULL,
+  `procurementStatus`      VARCHAR(20)   NOT NULL DEFAULT 'NOT_ORDERED',
+  `proformaStatus`         VARCHAR(20)   NOT NULL DEFAULT 'NOT_CONFIRMED',
+  `createdAt`              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt`              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `CustomerOrder_customerId_idx` (`customerId`),
+  KEY `CustomerOrder_engineerId_idx` (`engineerId`),
+  KEY `CustomerOrder_orderDate_idx` (`orderDate`),
+  KEY `CustomerOrder_deliveryStatus_idx` (`deliveryStatus`)";
+        $orderFks = ",
+  CONSTRAINT `CustomerOrder_customerId_fkey` FOREIGN KEY (`customerId`) REFERENCES `Customer` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `CustomerOrder_engineerId_fkey` FOREIGN KEY (`engineerId`) REFERENCES `User` (`id`)     ON DELETE RESTRICT ON UPDATE CASCADE";
+
+        $itemCols = "
+  `id`          VARCHAR(30)   NOT NULL,
+  `orderId`     VARCHAR(30)   NOT NULL,
+  `productId`   VARCHAR(30)       NULL,
+  `itemCode`    VARCHAR(100)  NOT NULL,
+  `productName` VARCHAR(255)  NOT NULL,
+  `unit`        VARCHAR(20)       NULL,
+  `quantity`    DECIMAL(14,2) NOT NULL,
+  `supplied`    TINYINT(1)    NOT NULL DEFAULT 0,
+  `suppliedAt`  DATETIME          NULL,
+  `createdAt`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `CustomerOrderItem_orderId_idx` (`orderId`),
+  KEY `CustomerOrderItem_productId_idx` (`productId`)";
+        $itemFks = ",
+  CONSTRAINT `CustomerOrderItem_orderId_fkey`   FOREIGN KEY (`orderId`)   REFERENCES `CustomerOrder` (`id`) ON DELETE CASCADE  ON UPDATE CASCADE,
+  CONSTRAINT `CustomerOrderItem_productId_fkey` FOREIGN KEY (`productId`) REFERENCES `Product` (`id`)       ON DELETE SET NULL ON UPDATE CASCADE";
+
+        $tail = ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+        return [
+            'CustomerOrder' => [
+                'create'   => "CREATE TABLE IF NOT EXISTS `CustomerOrder` ($orderCols$orderFks\n$tail",
+                'fallback' => "CREATE TABLE IF NOT EXISTS `CustomerOrder` ($orderCols\n$tail",
+                'columns'  => [
+                    'expectedDeliveryDate' => 'DATE NULL',
+                    'procurementStatus'    => "VARCHAR(20) NOT NULL DEFAULT 'NOT_ORDERED'",
+                    'proformaStatus'       => "VARCHAR(20) NOT NULL DEFAULT 'NOT_CONFIRMED'",
+                ],
+            ],
+            'CustomerOrderItem' => [
+                'create'   => "CREATE TABLE IF NOT EXISTS `CustomerOrderItem` ($itemCols$itemFks\n$tail",
+                'fallback' => "CREATE TABLE IF NOT EXISTS `CustomerOrderItem` ($itemCols\n$tail",
+                'columns'  => [
+                    'supplied'   => 'TINYINT(1) NOT NULL DEFAULT 0',
+                    'suppliedAt' => 'DATETIME NULL',
+                ],
+            ],
+        ];
+    }
 
     private function storageDir(): string
     {
@@ -83,10 +166,12 @@ class OrderController
             'deliveredDate'      => $row['deliveredDate'],
             'procurementStatus'  => $row['procurementStatus'],
             'expectedDeliveryDate' => $row['expectedDeliveryDate'],
+            'proformaStatus'     => $row['proformaStatus'],
             'notes'              => $row['notes'],
             'items'              => $items !== null ? array_map(fn($i) => [
                 'id' => $i['id'], 'productId' => $i['productId'], 'itemCode' => $i['itemCode'],
                 'productName' => $i['productName'], 'unit' => $i['unit'], 'quantity' => (float) $i['quantity'],
+                'supplied' => (bool) $i['supplied'], 'suppliedAt' => $i['suppliedAt'],
             ], $items) : null,
             'createdAt'          => $row['createdAt'],
             'updatedAt'          => $row['updatedAt'],
@@ -128,14 +213,32 @@ class OrderController
 
     private function replaceItems(string $orderId, array $items): void
     {
+        // Editing an order rewrites its lines — carry each product's
+        // "supplied" tick over so an edit doesn't silently un-deliver it.
+        $prev = [];
+        foreach ($this->fetchItems($orderId) as $old) {
+            if ($old['productId'] && $old['supplied']) $prev[$old['productId']] = $old['suppliedAt'];
+        }
+
         db()->prepare('DELETE FROM `CustomerOrderItem` WHERE orderId=?')->execute([$orderId]);
         $ins = db()->prepare(
-            'INSERT INTO `CustomerOrderItem` (id,orderId,productId,itemCode,productName,unit,quantity,createdAt)
-             VALUES (?,?,?,?,?,?,?,?)'
+            'INSERT INTO `CustomerOrderItem` (id,orderId,productId,itemCode,productName,unit,quantity,supplied,suppliedAt,createdAt)
+             VALUES (?,?,?,?,?,?,?,?,?,?)'
         );
         foreach ($items as $it) {
-            $ins->execute([gen_id(), $orderId, $it['productId'], $it['itemCode'], $it['productName'], $it['unit'], $it['quantity'], now_sql()]);
+            $wasSupplied = array_key_exists($it['productId'], $prev);
+            $ins->execute([
+                gen_id(), $orderId, $it['productId'], $it['itemCode'], $it['productName'], $it['unit'], $it['quantity'],
+                $wasSupplied ? 1 : 0, $wasSupplied ? $prev[$it['productId']] : null, now_sql(),
+            ]);
         }
+    }
+
+    /** Sets every line on the order to supplied (true) or not (false). */
+    private function setAllItemsSupplied(string $orderId, bool $supplied): void
+    {
+        db()->prepare('UPDATE `CustomerOrderItem` SET supplied=?,suppliedAt=? WHERE orderId=?')
+            ->execute([$supplied ? 1 : 0, $supplied ? now_sql() : null, $orderId]);
     }
 
     /** Validates + moves an uploaded PO file to storage. Returns [originalName, storedName, mime, size]. */
@@ -184,6 +287,7 @@ class OrderController
             'orderTypes' => self::ORDER_TYPES,
             'deliveryStatuses' => self::DELIVERY_STATUSES,
             'procurementStatuses' => self::PROCUREMENT_STATUSES,
+            'proformaStatuses' => self::PROFORMA_STATUSES,
         ]);
     }
 
@@ -210,6 +314,7 @@ class OrderController
         if (qp('engineerId'))     { $where[] = 'o.engineerId=?';     $params[] = qp('engineerId'); }
         if (qp('deliveryStatus')) { $where[] = 'o.deliveryStatus=?'; $params[] = qp('deliveryStatus'); }
         if (qp('procurementStatus')) { $where[] = 'o.procurementStatus=?'; $params[] = qp('procurementStatus'); }
+        if (qp('proformaStatus'))    { $where[] = 'o.proformaStatus=?';    $params[] = qp('proformaStatus'); }
         if (qp('orderType'))      { $where[] = 'o.orderType=?';      $params[] = qp('orderType'); }
         if (qp('customerId'))     { $where[] = 'o.customerId=?';     $params[] = qp('customerId'); }
         if (qp('search')) {
@@ -226,7 +331,8 @@ class OrderController
         $s2 = db()->prepare(
             "SELECT o.*, c.companyName, c.contactPerson, c.contactNumber, u.name AS engineerName, u.role AS engineerRole,
                     (SELECT GROUP_CONCAT(productName SEPARATOR ', ') FROM `CustomerOrderItem` WHERE orderId=o.id) AS productNames,
-                    (SELECT COUNT(*) FROM `CustomerOrderItem` WHERE orderId=o.id) AS itemCount
+                    (SELECT COUNT(*) FROM `CustomerOrderItem` WHERE orderId=o.id) AS itemCount,
+                    (SELECT COUNT(*) FROM `CustomerOrderItem` WHERE orderId=o.id AND supplied=1) AS suppliedCount
              FROM `CustomerOrder` o
              LEFT JOIN `Customer` c ON c.id=o.customerId
              LEFT JOIN `User` u ON u.id=o.engineerId
@@ -237,6 +343,7 @@ class OrderController
             $shaped = $this->shape($r);
             $shaped['productSummary'] = $r['productNames'];
             $shaped['itemCount'] = (int) $r['itemCount'];
+            $shaped['suppliedCount'] = (int) $r['suppliedCount'];
             return $shaped;
         }, $s2->fetchAll());
 
@@ -404,10 +511,15 @@ class OrderController
         }
 
         $reason = null; $deliveredDate = null;
-        if ($status === 'NOT_DELIVERED') {
+        if (in_array($status, self::STATUSES_NEEDING_REASON, true)) {
             $reason = trim((string) ($b['notDeliveredReason'] ?? ''));
-            if (!$reason) sendError('Please give a reason for the non-delivery.', 400);
-        } elseif ($status === 'DELIVERED') {
+            if (!$reason) {
+                sendError($status === 'PARTIALLY_DELIVERED'
+                    ? 'Please give a reason why the order is only partially delivered.'
+                    : 'Please give a reason for the non-delivery.', 400);
+            }
+        }
+        if ($status === 'DELIVERED' || $status === 'PARTIALLY_DELIVERED') {
             $deliveredDate = to_date_only($b['deliveredDate'] ?? null) ?? (new DateTime('now'))->format('Y-m-d');
         }
 
@@ -415,7 +527,87 @@ class OrderController
             'UPDATE `CustomerOrder` SET deliveryStatus=?,notDeliveredReason=?,deliveredDate=?,updatedAt=? WHERE id=?'
         )->execute([$status, $reason, $deliveredDate, now_sql(), $id]);
 
+        // Keep the per-line supplied ticks consistent with the headline status.
+        // PARTIALLY_DELIVERED leaves them as-is — use PATCH .../supply to pick lines.
+        if ($status === 'DELIVERED') $this->setAllItemsSupplied($id, true);
+        elseif ($status === 'PENDING' || $status === 'NOT_DELIVERED') $this->setAllItemsSupplied($id, false);
+
         log_activity($auth['id'], 'ORDER_DELIVERY_UPDATED', 'CustomerOrder', $id, ['status' => $status]);
+        $this->show($id);
+    }
+
+    // PATCH /api/orders/:id/supply — body { suppliedItemIds: [...], reason }
+    // Ticks which product lines were actually supplied and derives the order's
+    // delivery status from that: every line ticked → DELIVERED; some → PARTIALLY_DELIVERED;
+    // none → NOT_DELIVERED. Anything short of complete needs a reason.
+    public function updateSupply(string $id): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Order not found.', 404);
+        if (!$this->canEdit($auth, $row)) sendError('Not authorized to update this order.', 403);
+
+        $b = request_body();
+        $ids = $b['suppliedItemIds'] ?? [];
+        if (is_string($ids)) { $d = json_decode($ids, true); $ids = is_array($d) ? $d : []; }
+        if (!is_array($ids)) $ids = [];
+        $ids = array_values(array_unique(array_map('strval', $ids)));
+
+        $items = $this->fetchItems($id);
+        if (!$items) sendError('This order has no product lines to supply.', 400);
+        $known = array_column($items, 'id');
+        foreach ($ids as $itemId) {
+            if (!in_array($itemId, $known, true)) sendError('One of the selected items does not belong to this order.', 400);
+        }
+
+        $total = count($items); $ticked = count($ids);
+        $status = $ticked === $total ? 'DELIVERED' : ($ticked > 0 ? 'PARTIALLY_DELIVERED' : 'NOT_DELIVERED');
+        $reason = null;
+        if ($status !== 'DELIVERED') {
+            $reason = trim((string) ($b['reason'] ?? ''));
+            if (!$reason) {
+                sendError($status === 'PARTIALLY_DELIVERED'
+                    ? 'Not every item is selected — please give a reason for the partial delivery.'
+                    : 'No items are selected — please give a reason for the non-delivery.', 400);
+            }
+        }
+        $deliveredDate = $status === 'NOT_DELIVERED' ? null
+            : (to_date_only($b['deliveredDate'] ?? null) ?? (new DateTime('now'))->format('Y-m-d'));
+
+        $now = now_sql();
+        $upd = db()->prepare('UPDATE `CustomerOrderItem` SET supplied=?,suppliedAt=? WHERE id=? AND orderId=?');
+        foreach ($items as $it) {
+            $on = in_array($it['id'], $ids, true);
+            // Keep the original timestamp for lines that were already ticked.
+            $at = $on ? ($it['supplied'] ? $it['suppliedAt'] : $now) : null;
+            $upd->execute([$on ? 1 : 0, $at, $it['id'], $id]);
+        }
+        db()->prepare(
+            'UPDATE `CustomerOrder` SET deliveryStatus=?,notDeliveredReason=?,deliveredDate=?,updatedAt=? WHERE id=?'
+        )->execute([$status, $reason, $deliveredDate, $now, $id]);
+
+        log_activity($auth['id'], 'ORDER_SUPPLY_UPDATED', 'CustomerOrder', $id, ['status' => $status, 'supplied' => $ticked, 'of' => $total]);
+        $this->show($id);
+    }
+
+    // PATCH /api/orders/:id/proforma — body { proformaStatus: NOT_CONFIRMED|CONFIRMED }
+    // Whether the price / proforma invoice has been confirmed. The order's
+    // engineer or admin-tier can set it (same rule as editing the order).
+    public function updateProforma(string $id): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Order not found.', 404);
+        if (!$this->canEdit($auth, $row)) sendError('Not authorized to update this order.', 403);
+
+        $b = request_body();
+        $status = strtoupper(trim((string) ($b['proformaStatus'] ?? '')));
+        if (!in_array($status, self::PROFORMA_STATUSES, true)) {
+            sendError('proformaStatus must be one of: ' . implode(', ', self::PROFORMA_STATUSES), 400);
+        }
+        db()->prepare('UPDATE `CustomerOrder` SET proformaStatus=?,updatedAt=? WHERE id=?')->execute([$status, now_sql(), $id]);
+
+        log_activity($auth['id'], 'ORDER_PROFORMA_UPDATED', 'CustomerOrder', $id, ['status' => $status]);
         $this->show($id);
     }
 
