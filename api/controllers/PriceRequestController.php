@@ -103,12 +103,19 @@ class PriceRequestController
         return (float) $b[$key];
     }
 
-    // GET /api/price-requests?status=PENDING|APPROVED|REJECTED|ALL&mine=1
+    // GET /api/price-requests?status=PENDING|APPROVED|REJECTED|ALL&mine=1&requestedById=
     public function index(): void
     {
         $auth = authenticate();
-        $where = []; $params = [];
-        if (!is_admin_tier($auth['role']) || qp('mine')) { $where[] = 'r.requestedById=?'; $params[] = $auth['id']; }
+        // Scope = whose requests this caller may see (and optionally filters to one engineer).
+        $scope = []; $scopeParams = [];
+        if (!is_admin_tier($auth['role']) || qp('mine')) {
+            $scope[] = 'r.requestedById=?'; $scopeParams[] = $auth['id'];
+        } elseif (qp('requestedById')) {
+            $scope[] = 'r.requestedById=?'; $scopeParams[] = qp('requestedById');
+        }
+
+        $where = $scope; $params = $scopeParams;
         $status = strtoupper((string) qp('status', 'ALL'));
         if ($status !== 'ALL') {
             if (!in_array($status, self::STATUSES, true)) sendError('Unknown status filter.', 400);
@@ -119,6 +126,16 @@ class PriceRequestController
         $s->execute($params);
         $rows = $s->fetchAll();
 
+        // Counts per status within the same scope, for the summary tiles and filter pills.
+        $sw = $scope ? 'WHERE ' . implode(' AND ', $scope) : '';
+        $c = db()->prepare("SELECT r.status, COUNT(*) AS n FROM `PriceRequest` r $sw GROUP BY r.status");
+        $c->execute($scopeParams);
+        $counts = ['PENDING' => 0, 'APPROVED' => 0, 'REJECTED' => 0];
+        foreach ($c->fetchAll() as $r) {
+            $r = array_change_key_case($r, CASE_LOWER);
+            if (isset($counts[$r['status']])) $counts[$r['status']] = (int) $r['n'];
+        }
+
         // Badge count for the tab — pending ones this user would act on (admin) or is waiting on (everyone else).
         if (is_admin_tier($auth['role'])) {
             $pc = db()->prepare("SELECT COUNT(*) FROM `PriceRequest` WHERE status='PENDING'");
@@ -128,9 +145,18 @@ class PriceRequestController
             $pc->execute([$auth['id']]);
         }
 
+        // Engineers who have raised requests — for the admin's "Requested by" filter.
+        $requesters = [];
+        if (is_admin_tier($auth['role'])) {
+            $rq = db()->query("SELECT DISTINCT u.id, u.name FROM `PriceRequest` r JOIN `User` u ON u.id = r.requestedById ORDER BY u.name");
+            $requesters = $rq->fetchAll();
+        }
+
         sendSuccess([
             'requests'     => array_map(fn($r) => $this->shape($r), $rows),
             'pendingCount' => (int) $pc->fetchColumn(),
+            'counts'       => $counts,
+            'requesters'   => $requesters,
         ]);
     }
 

@@ -1,3 +1,44 @@
+# Update — 2 Oct: Team live board + clearer price requests
+
+**Upload:** `api/` and `crm/` (same as before; `api/.env` isn't included, so yours stays as it is), then press **Ctrl+Shift+R** on the Tasks page. Nothing to run in the database.
+
+### Team live (Tasks → Team live) — Super Admin, Admin, Manager
+- One card per person, people who are working right now first. Each card shows:
+  - their state: **Working now / Paused / Not started / No tasks**
+  - the task they're on and its **live timer**
+  - **time today**, **tasks done today** and **tasks in queue**
+- Tiles at the top filter the board: Everyone / Working now / Paused / Have tasks, not started.
+- **Click a person** to see all their tasks, with start and finish times, completion notes and the time spent on each.
+- Timers tick every second, and the board refreshes itself every 20 seconds.
+- This is now the first tab admins see.
+- "Time today" adds up the time on tasks finished today plus the current task's timer. A task started yesterday and finished today counts in full.
+
+### Price requests — clearer
+- A one-line "how it works" at the top, written separately for engineers and for admins.
+- Tiles for **Waiting for decision / Approved / Rejected / All**, which also work as filters. Admins can also filter by engineer.
+- Each request shows **List price → Price asked for → Approved price** side by side, each with **% below or above list price** and the **total for the quantity**.
+- Each request also shows the engineer's reason, then a clear result:
+  - "✓ Approved at ₹87", or "✕ Rejected" with the reason
+  - who decided it, and when
+- **Your decision** box for admins: as you type the price, it shows the discount and the total live.
+- After approving or rejecting, a confirmation appears saying the engineer can see the answer.
+- The engineer's form is numbered 1–5 and only the product is required. It shows the discount live as they type, and a confirmation after sending.
+
+### Fixes in this round
+- **Per-item procurement buttons on Orders:** your newer `orders-app.js` calls `/orders/:id/items/:itemId/procurement` and `/eta`, but `index.php` had no routes for them, so those buttons failed with a 404. The routes are now added.
+- **Tasks link in the sidebar:** your latest upload had an older `app-shell.js` and sidebar file without the "Tasks" link. It's restored, and the service-worker revision has been bumped so browsers pick it up.
+
+### Verification
+- **API:** the 76 earlier checks plus 15 new ones, run on a `utf8mb4_general_ci` database like yours. The new ones cover:
+  - who can see the board (engineers are blocked)
+  - running / paused / waiting states and their order
+  - today's totals and the price-request counts
+  - the engineer filter
+  - the per-item routes
+- **Browser:** 43 checks in headless Chromium, including the Team live timers ticking, the filters, the per-person detail, and the live discount hints. They also cover the whole Orders flow on your newer `orders-app.js`.
+
+---
+
 # Orders fix + Tasks page + new Orders columns: patched build
 
 Two folders, both drop-in replacements, same as before:

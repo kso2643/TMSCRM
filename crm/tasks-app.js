@@ -6,6 +6,10 @@
                        a live timer (Start / Pause / Resume / Complete).
                        Tasks are worked in order: completing one unlocks
                        the next ("Complete & start next" does both).
+     Team live       — admin-tier (incl. Manager): one card per person with
+                       what they're working on right now and its live timer,
+                       running / paused / waiting / idle, and today's totals.
+                       Click a person for their task list with time per task.
      All tasks       — admin-tier (incl. Manager) sees everyone's queues.
                        Super Admin / Admin also assign, edit, reorder and
                        delete — matches TaskController.php.
@@ -156,7 +160,53 @@
       '.tx-dialog{max-width:36rem}',
       '.tx-disabled{opacity:.5;cursor:not-allowed}',
       '.tx-overdue{color:#dc2626;font-weight:600}',
-      '.mt-5{margin-top:1.25rem}'
+      '.mt-5{margin-top:1.25rem}',
+      // Team live
+      '.tx-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}',
+      '@media(min-width:768px){.tx-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}',
+      '.tx-tile{text-align:left;cursor:pointer;border:1px solid #e2e8f0;background:#fff;border-radius:.75rem;padding:.75rem 1rem}',
+      '.dark .tx-tile{background:#0f172a;border-color:#334155}',
+      '.tx-tile-on{border-color:#1e3a5f;box-shadow:0 0 0 1px #1e3a5f}',
+      '.dark .tx-tile-on{border-color:#60a5fa;box-shadow:0 0 0 1px #60a5fa}',
+      '.tx-tile-n{font-size:1.5rem;font-weight:700;line-height:1.2;color:#0f172a}',
+      '.dark .tx-tile-n{color:#f1f5f9}',
+      '.tx-people{display:grid;grid-template-columns:1fr;gap:.75rem}',
+      '@media(min-width:768px){.tx-people{grid-template-columns:repeat(2,minmax(0,1fr))}}',
+      '@media(min-width:1280px){.tx-people{grid-template-columns:repeat(3,minmax(0,1fr))}}',
+      '.tx-person{cursor:pointer;border-left:4px solid #cbd5e1;padding:1rem;display:flex;flex-direction:column;gap:.6rem}',
+      '.tx-person-RUNNING{border-left-color:#22c55e}.tx-person-PAUSED{border-left-color:#f59e0b}',
+      '.tx-person-WAITING{border-left-color:#3b82f6}.tx-person-IDLE{border-left-color:#cbd5e1}',
+      '.tx-person-open{box-shadow:0 0 0 2px #1e3a5f}',
+      '.dark .tx-person-open{box-shadow:0 0 0 2px #60a5fa}',
+      '.tx-avatar{width:2.25rem;height:2.25rem;border-radius:9999px;background:#e0e7ff;color:#1e3a5f;font-weight:700;',
+      '  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
+      '.dark .tx-avatar{background:#1e3a5f;color:#dbeafe}',
+      '.tx-state{display:inline-flex;align-items:center;gap:.35rem;font-size:.72rem;font-weight:600;padding:.15rem .55rem;border-radius:9999px}',
+      '.tx-state-RUNNING{background:#dcfce7;color:#166534}.tx-state-PAUSED{background:#fef3c7;color:#92400e}',
+      '.tx-state-WAITING{background:#dbeafe;color:#1e40af}.tx-state-IDLE{background:#f1f5f9;color:#475569}',
+      '.tx-timer-mid{font-size:1.6rem;font-weight:700;line-height:1.1;color:#0f172a}',
+      '.dark .tx-timer-mid{color:#f1f5f9}',
+      '.tx-muted-box{background:#f8fafc;border-radius:.5rem;padding:.6rem .75rem}',
+      '.dark .tx-muted-box{background:rgba(30,41,59,.6)}',
+      // Price requests
+      '.tx-pr{border-left:4px solid #cbd5e1}',
+      '.tx-pr-PENDING{border-left-color:#f59e0b}.tx-pr-APPROVED{border-left-color:#22c55e}.tx-pr-REJECTED{border-left-color:#ef4444}',
+      '.tx-cmp{display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:.5rem}',
+      '@media(min-width:640px){.tx-cmp{grid-template-columns:repeat(3,minmax(0,1fr))}}',
+      '.tx-cmp-cell{border:1px solid #e2e8f0;border-radius:.5rem;padding:.55rem .75rem}',
+      '.dark .tx-cmp-cell{border-color:#334155}',
+      '.tx-cmp-final{border-color:#86efac;background:#f0fdf4}',
+      '.dark .tx-cmp-final{border-color:#166534;background:rgba(22,101,52,.2)}',
+      '.tx-big{font-size:1.15rem;font-weight:700;color:#0f172a}',
+      '.dark .tx-big{color:#f1f5f9}',
+      '.tx-down{color:#b45309;font-size:.72rem;font-weight:600}.tx-up{color:#15803d;font-size:.72rem;font-weight:600}',
+      '.tx-banner{border-radius:.5rem;padding:.6rem .75rem;font-size:.875rem}',
+      '.tx-banner-PENDING{background:#fffbeb;color:#92400e}.tx-banner-APPROVED{background:#f0fdf4;color:#166534}.tx-banner-REJECTED{background:#fef2f2;color:#991b1b}',
+      '.dark .tx-banner-PENDING{background:rgba(146,64,14,.2);color:#fde68a}.dark .tx-banner-APPROVED{background:rgba(22,101,52,.25);color:#bbf7d0}',
+      '.dark .tx-banner-REJECTED{background:rgba(153,27,27,.25);color:#fecaca}',
+      '.tx-decide{border:1px dashed #1e3a5f;border-radius:.5rem;padding:.75rem}',
+      '.dark .tx-decide{border-color:#60a5fa}',
+      '.tx-help{font-size:.75rem;color:#64748b}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -184,12 +234,12 @@
   function mount(root) {
     injectCss();
     var tabs = [['mine', 'My tasks']];
-    if (isAdminTier()) tabs.push(['all', 'All tasks']);
+    if (isAdminTier()) { tabs.push(['team', 'Team live']); tabs.push(['all', 'All tasks']); }
     tabs.push(['prices', 'Price requests']);
 
     var tab = null;
     try { tab = localStorage.getItem('crm_tasks_tab'); } catch (e) {}
-    if (!tabs.some(function (t) { return t[0] === tab; })) tab = isAdminTier() ? 'all' : 'mine';
+    if (!tabs.some(function (t) { return t[0] === tab; })) tab = isAdminTier() ? 'team' : 'mine';
 
     var pendingPrices = 0;
     var tabBar = el('div', { class: 'tx-tabs', role: 'tablist' });
@@ -220,7 +270,10 @@
       try { localStorage.setItem('crm_tasks_tab', t); } catch (e) {}
       renderTabs();
       panel.innerHTML = '';
-      reload = t === 'mine' ? myTasksTab(panel) : t === 'all' ? allTasksTab(panel) : priceRequestsTab(panel, function (n) { pendingPrices = n; renderTabs(); });
+      reload = t === 'mine' ? myTasksTab(panel)
+             : t === 'team' ? teamTab(panel)
+             : t === 'all' ? allTasksTab(panel)
+             : priceRequestsTab(panel, function (n) { pendingPrices = n; renderTabs(); });
     }
 
     // Pending price-request count for the tab badge.
@@ -232,13 +285,16 @@
     setInterval(tickTimers, 1000);
     // Pick up newly assigned tasks without a manual refresh — but never
     // while someone is typing into a form on the page.
+    // Team live refreshes every 20s (it's a monitoring view); the others every 60s.
+    var ticks = 0;
     setInterval(function () {
+      ticks++;
       if (document.visibilityState !== 'visible') return;
       var a = document.activeElement;
       if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
       if (document.querySelector('[data-tx-dialog]')) return;
-      if (tab !== 'prices') reload();
-    }, 60000);
+      if (tab === 'team' || (tab !== 'prices' && ticks % 3 === 0)) reload();
+    }, 20000);
 
     switchTab(tab);
   }
@@ -403,6 +459,144 @@
         ]));
       }
       return card;
+    }
+
+    load();
+    return load;
+  }
+
+  // ── Team live (admin-tier) ───────────────────────────────────────────
+  var STATE_LABEL = { RUNNING: 'Working now', PAUSED: 'Paused', WAITING: 'Not started', IDLE: 'No tasks' };
+  function teamTab(p) {
+    var people = [], filter = 'ALL', openId = null, detail = {}, loaded = false;
+
+    function load() {
+      if (!loaded) loading(p);
+      api('GET', '/tasks/overview').then(function (r) {
+        people = r.data.people || [];
+        loaded = true;
+        if (openId) loadDetail(openId, true); else render();
+      }).catch(function (e) { errorBox(p, e.message, load); });
+    }
+    function loadDetail(id, thenRender) {
+      api('GET', '/tasks?assignedToId=' + encodeURIComponent(id) + '&status=ALL&limit=40').then(function (r) {
+        detail[id] = r.data.tasks || [];
+        render();
+      }).catch(function () { detail[id] = []; render(); });
+      if (!thenRender) render();
+    }
+
+    function count(state) { return people.filter(function (x) { return x.state === state; }).length; }
+
+    function render() {
+      p.innerHTML = '';
+      var tiles = el('div', { class: 'tx-tiles mb-4' });
+      [['ALL', 'Everyone', people.length], ['RUNNING', 'Working now', count('RUNNING')], ['PAUSED', 'Paused', count('PAUSED')],
+       ['WAITING', 'Have tasks, not started', count('WAITING')]].forEach(function (t) {
+        tiles.appendChild(el('button', {
+          class: 'tx-tile' + (filter === t[0] ? ' tx-tile-on' : ''),
+          onclick: function () { filter = t[0]; render(); }
+        }, [el('p', { class: 'text-xs text-muted', text: t[1] }), el('p', { class: 'tx-tile-n', text: String(t[2]) })]));
+      });
+      p.appendChild(tiles);
+      p.appendChild(el('p', { class: 'tx-help mb-3', text: 'Live view — timers tick every second and the board refreshes every 20 seconds. Click a person to see their tasks and the time spent on each.' }));
+
+      var shown = people.filter(function (x) { return filter === 'ALL' || x.state === filter; });
+      if (!shown.length) {
+        p.appendChild(el('div', { class: 'card p-10 text-center text-muted', text: 'Nobody in this group right now.' }));
+        return;
+      }
+      var grid = el('div', { class: 'tx-people' });
+      shown.forEach(function (x) { grid.appendChild(personCard(x)); });
+      p.appendChild(grid);
+
+      if (openId) {
+        var who = people.filter(function (x) { return x.user.id === openId; })[0];
+        if (who) p.appendChild(personDetail(who));
+      }
+    }
+
+    function personCard(x) {
+      var u = x.user, c = x.current;
+      var card = el('div', {
+        class: 'card tx-person tx-person-' + x.state + (openId === u.id ? ' tx-person-open' : ''), role: 'button', tabindex: '0',
+        'aria-label': u.name + ': ' + STATE_LABEL[x.state]
+      });
+      function toggle() {
+        openId = openId === u.id ? null : u.id;
+        if (openId) loadDetail(openId); else render();
+        if (openId) setTimeout(function () { var d = document.getElementById('tx-person-detail'); if (d) d.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 300);
+      }
+      card.addEventListener('click', toggle);
+      card.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+
+      card.appendChild(el('div', { class: 'flex items-center gap-3' }, [
+        el('span', { class: 'tx-avatar', text: (u.name || '?').charAt(0).toUpperCase() }),
+        el('div', { class: 'flex-1 min-w-0' }, [
+          el('p', { class: 'text-sm font-semibold truncate text-slate-900 dark:text-slate-100', text: u.name }),
+          el('p', { class: 'text-xs text-muted truncate', text: (u.role || '').replace('_', ' ').toLowerCase() + (u.department ? ' · ' + u.department : '') })
+        ]),
+        el('span', { class: 'tx-state tx-state-' + x.state }, [
+          x.state === 'RUNNING' ? el('span', { class: 'tx-dot tx-dot-run' }) : x.state === 'PAUSED' ? el('span', { class: 'tx-dot tx-dot-pause' }) : null,
+          STATE_LABEL[x.state]
+        ])
+      ]));
+
+      if (c) {
+        card.appendChild(el('div', { class: 'tx-muted-box' }, [
+          el('p', { class: 'text-xs text-muted', text: x.state === 'RUNNING' ? 'Current task' : 'Paused task' }),
+          el('p', { class: 'text-sm font-medium truncate', text: c.title }),
+          el('div', { class: 'flex items-end justify-between gap-2 mt-1' }, [
+            timerEl(c, 'tx-timer-mid'),
+            el('span', { class: 'text-xs text-muted', text: 'since ' + fmtDateTime(c.startedAt) })
+          ])
+        ]));
+      } else {
+        card.appendChild(el('div', { class: 'tx-muted-box text-sm text-muted', text: x.queuedCount ? 'Has tasks waiting but hasn’t started one.' : 'Nothing assigned right now.' }));
+      }
+
+      var todayTimer = timerEl({ elapsedSeconds: x.secondsToday, running: x.state === 'RUNNING' }, 'text-sm font-semibold');
+      card.appendChild(el('div', { class: 'grid grid-cols-3 gap-2 text-center' }, [
+        miniStat('Time today', todayTimer),
+        miniStat('Done today', el('span', { class: 'text-sm font-semibold', text: String(x.completedToday) })),
+        miniStat('In queue', el('span', { class: 'text-sm font-semibold', text: String(x.queuedCount) }))
+      ]));
+      return card;
+    }
+    function miniStat(label, valueEl) {
+      return el('div', {}, [el('p', { class: 'text-xs text-muted', text: label }), valueEl]);
+    }
+
+    function personDetail(x) {
+      var list = detail[x.user.id];
+      var box = el('div', { class: 'card mt-4 overflow-hidden', id: 'tx-person-detail' }, [
+        el('div', { class: 'px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3' }, [
+          el('span', { class: 'text-sm font-semibold', text: x.user.name + ' — tasks & time' }),
+          el('button', { class: 'tx-link', text: 'Close', onclick: function () { openId = null; render(); } })
+        ])
+      ]);
+      if (!list) { box.appendChild(el('p', { class: 'px-4 py-6 text-sm text-muted text-center', text: 'Loading…' })); return box; }
+      if (!list.length) { box.appendChild(el('p', { class: 'px-4 py-6 text-sm text-muted text-center', text: 'No tasks assigned to ' + x.user.name + ' yet.' })); return box; }
+      var total = 0;
+      list.forEach(function (t) {
+        if (t.status === 'COMPLETED') total += t.elapsedSeconds;
+        box.appendChild(el('div', { class: 'tx-row flex-wrap' }, [
+          el('span', { class: 'badge ' + STATUS_BADGE[t.status], text: STATUS_LABEL[t.status] || t.status }),
+          el('div', { class: 'flex-1 min-w-0' }, [
+            el('p', { class: 'text-sm font-medium truncate', text: t.title }),
+            el('p', { class: 'text-xs text-muted truncate', text:
+              (t.startedAt ? 'Started ' + fmtDateTime(t.startedAt) : 'Not started') + (t.completedAt ? ' · finished ' + fmtDateTime(t.completedAt) : '') +
+              (t.completionNote ? ' · “' + t.completionNote + '”' : '') })
+          ]),
+          el('span', { class: 'badge ' + PRIORITY_BADGE[t.priority], text: labelOf(PRIORITIES, t.priority) }),
+          t.status === 'QUEUED' ? el('span', { class: 'text-xs text-muted tx-nowrap', text: '—' }) : timerEl(t, 'text-sm font-semibold tx-nowrap')
+        ]));
+      });
+      box.appendChild(el('div', { class: 'px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-sm flex justify-between' }, [
+        el('span', { class: 'text-muted', text: 'Total time on completed tasks shown' }),
+        el('span', { class: 'font-semibold tx-timer', text: fmtDuration(total) })
+      ]));
+      return box;
     }
 
     load();
@@ -628,15 +822,38 @@
   }
 
   // ── Price requests ───────────────────────────────────────────────────
+  var PR_HEADLINE = { PENDING: 'Waiting for admin approval', APPROVED: 'Approved', REJECTED: 'Rejected' };
+
+  /** "15% below list" / "5% above list" / "same as list" — or null when there's nothing to compare. */
+  function vsList(price, list) {
+    if (price === null || price === undefined || price === '' || !list) return null;
+    var pct = (Number(price) - Number(list)) / Number(list) * 100;
+    if (Math.abs(pct) < 0.05) return { text: 'same as list price', cls: 'text-xs text-muted' };
+    return pct < 0
+      ? { text: (Math.round(-pct * 10) / 10) + '% below list price', cls: 'tx-down' }
+      : { text: (Math.round(pct * 10) / 10) + '% above list price', cls: 'tx-up' };
+  }
+  function lineValue(price, qty) {
+    if (price === null || price === undefined || price === '' || !qty) return null;
+    return 'Total for ' + qty + ': ' + money(Number(price) * Number(qty));
+  }
+
   function priceRequestsTab(p, onPendingCount) {
     var status = isAdminTier() ? 'PENDING' : 'ALL';
-    var list = [], err = '', showForm = !isAdminTier();
-    var form = { productId: '', productLabel: '', productName: '', listPrice: null, customerId: '', customerLabel: '', quantity: '', requestedPrice: '', notes: '' };
+    var who = '';
+    var list = [], counts = { PENDING: 0, APPROVED: 0, REJECTED: 0 }, requesters = [], err = '', showForm = !isAdminTier(), loaded = false;
+    var blankForm = function () { return { productId: '', productLabel: '', productName: '', listPrice: null, customerId: '', customerLabel: '', quantity: '', requestedPrice: '', notes: '' }; };
+    var form = blankForm();
     var drafts = {}; // requestId -> { price, note } while an admin types a response
+    var flash = '';
 
     function load() {
-      api('GET', '/price-requests?status=' + status).then(function (r) {
+      if (!loaded) loading(p);
+      api('GET', '/price-requests?status=' + status + (who ? '&requestedById=' + encodeURIComponent(who) : '')).then(function (r) {
         list = r.data.requests || [];
+        counts = r.data.counts || counts;
+        requesters = r.data.requesters || [];
+        loaded = true;
         onPendingCount(r.data.pendingCount || 0);
         render();
       }).catch(function (e) { errorBox(p, e.message, load); });
@@ -644,18 +861,44 @@
 
     function render() {
       p.innerHTML = '';
-      var top = el('div', { class: 'flex items-center justify-between gap-3 flex-wrap mb-4' }, [
-        el('div', { class: 'flex gap-2 flex-wrap' }, PR_STATUS.map(function (s) {
-          return el('button', { class: 'tx-pill' + (s[0] === status ? ' tx-pill-on' : ''), text: s[1], onclick: function () { status = s[0]; load(); } });
-        })),
-        el('button', { class: showForm ? 'btn-secondary' : 'btn-primary', text: showForm ? 'Hide form' : '+ Raise price request', onclick: function () { showForm = !showForm; render(); } })
-      ]);
-      p.appendChild(top);
+
+      // How it works — one line, so nobody has to guess who does what.
+      p.appendChild(el('p', { class: 'tx-help mb-3', text: canManage()
+        ? 'Engineers ask for a price here. Check the list price and the price they asked for, then approve with the final price or reject with a reason — they see your answer straight away.'
+        : 'Need a special price for a customer? Raise a request below. An admin approves it with the final price (or rejects it with a reason) and you’ll see the answer here.' }));
+
+      // Status tiles — they double as the filter.
+      var tiles = el('div', { class: 'tx-tiles mb-4' });
+      [['PENDING', isAdminTier() ? 'Waiting for your decision' : 'Waiting for admin', counts.PENDING],
+       ['APPROVED', 'Approved', counts.APPROVED], ['REJECTED', 'Rejected', counts.REJECTED],
+       ['ALL', 'All requests', counts.PENDING + counts.APPROVED + counts.REJECTED]].forEach(function (t) {
+        tiles.appendChild(el('button', { class: 'tx-tile' + (status === t[0] ? ' tx-tile-on' : ''), onclick: function () { status = t[0]; load(); } }, [
+          el('p', { class: 'text-xs text-muted', text: t[1] }), el('p', { class: 'tx-tile-n', text: String(t[2]) })
+        ]));
+      });
+      p.appendChild(tiles);
+
+      var bar = el('div', { class: 'flex items-center justify-between gap-3 flex-wrap mb-4' });
+      var left = el('div', { class: 'flex items-center gap-2 flex-wrap' });
+      if (isAdminTier() && requesters.length) {
+        var sel = el('select', { class: INPUT, style: 'width:auto;max-width:240px', 'aria-label': 'Requested by' },
+          [el('option', { value: '', text: 'All engineers' })].concat(requesters.map(function (u) { return el('option', { value: u.id, text: u.name }); })));
+        sel.value = who;
+        sel.addEventListener('change', function () { who = sel.value; load(); });
+        left.appendChild(sel);
+      }
+      left.appendChild(el('span', { class: 'text-sm text-muted', text: list.length + ' shown' }));
+      bar.appendChild(left);
+      bar.appendChild(el('button', { class: showForm ? 'btn-secondary' : 'btn-primary', text: showForm ? 'Hide form' : '+ Raise price request', onclick: function () { showForm = !showForm; render(); } }));
+      p.appendChild(bar);
+
+      if (flash) p.appendChild(el('div', { class: 'tx-banner tx-banner-APPROVED mb-3', text: flash }));
       if (showForm) p.appendChild(requestForm());
       if (err) p.appendChild(el('p', { class: 'text-sm text-red-600 mb-3', text: err }));
 
       if (!list.length) {
-        p.appendChild(el('div', { class: 'card p-10 text-center text-muted', text: status === 'PENDING' ? 'No pending price requests.' : 'No price requests.' }));
+        p.appendChild(el('div', { class: 'card p-10 text-center text-muted', text:
+          status === 'PENDING' ? (isAdminTier() ? 'Nothing waiting for a decision.' : 'You have no requests waiting.') : 'No price requests here yet.' }));
         return;
       }
       var wrap = el('div', { class: 'space-y-3' });
@@ -663,44 +906,68 @@
       p.appendChild(wrap);
     }
 
+    function priceCell(label, price, r, final) {
+      var cmp = vsList(price, r.listPrice);
+      var total = lineValue(price, r.quantity);
+      return el('div', { class: 'tx-cmp-cell' + (final ? ' tx-cmp-final' : '') }, [
+        el('p', { class: 'text-xs text-muted', text: label }),
+        el('p', { class: 'tx-big', text: money(price) }),
+        cmp && label !== 'List price' ? el('p', { class: cmp.cls, text: cmp.text }) : null,
+        total ? el('p', { class: 'text-xs text-muted', text: total }) : null
+      ]);
+    }
+
     function requestCard(r) {
       var mine = currentUser() && r.requestedBy.id === currentUser().id;
-      var card = el('div', { class: 'card p-4 space-y-3' });
+      var card = el('div', { class: 'card p-4 space-y-3 tx-pr tx-pr-' + r.status });
+
+      // 1. What and for whom
       card.appendChild(el('div', { class: 'flex items-start justify-between gap-3 flex-wrap' }, [
         el('div', { class: 'min-w-0' }, [
-          el('p', { class: 'text-sm font-semibold text-slate-900 dark:text-slate-100', text: r.productName + (r.itemCode ? ' (' + r.itemCode + ')' : '') }),
-          el('p', { class: 'text-xs text-muted', text: [r.customer ? r.customer.companyName : null, 'Requested by ' + (r.requestedBy.name || '—'), fmtDateTime(r.createdAt)].filter(Boolean).join(' · ') })
+          el('p', { class: 'text-base font-semibold text-slate-900 dark:text-slate-100', text: r.productName + (r.itemCode && r.itemCode !== 'MANUAL' ? ' (' + r.itemCode + ')' : '') }),
+          el('p', { class: 'text-sm text-muted', text: [
+            r.customer ? 'For ' + r.customer.companyName : 'No customer given',
+            r.quantity !== null ? 'Qty ' + r.quantity : null
+          ].filter(Boolean).join(' · ') }),
+          el('p', { class: 'text-xs text-muted', text: 'Raised by ' + (mine ? 'you' : (r.requestedBy.name || '—')) + ' · ' + fmtDateTime(r.createdAt) })
         ]),
-        el('span', { class: 'badge ' + PR_BADGE[r.status], text: labelOf(PR_STATUS, r.status) })
+        el('span', { class: 'badge ' + PR_BADGE[r.status], text: PR_HEADLINE[r.status] })
       ]));
-      card.appendChild(el('div', { class: 'grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm' }, [
-        stat('Quantity', r.quantity !== null ? String(r.quantity) : '—'),
-        stat('List price', money(r.listPrice)),
-        stat('Price asked for', money(r.requestedPrice)),
-        stat('Approved price', r.status === 'APPROVED' ? money(r.approvedPrice) : '—')
+
+      // 2. The prices side by side
+      card.appendChild(el('div', { class: 'tx-cmp' }, [
+        priceCell('List price', r.listPrice, r, false),
+        priceCell(mine ? 'Price you asked for' : 'Price the engineer asked for', r.requestedPrice, r, false),
+        r.status === 'APPROVED'
+          ? priceCell('Approved price', r.approvedPrice, r, true)
+          : el('div', { class: 'tx-cmp-cell' }, [
+              el('p', { class: 'text-xs text-muted', text: 'Approved price' }),
+              el('p', { class: 'tx-big text-muted', text: r.status === 'REJECTED' ? 'Not approved' : 'Awaiting decision' })
+            ])
       ]));
-      if (r.notes) card.appendChild(el('p', { class: 'text-sm whitespace-pre-wrap', text: r.notes }));
-      if (r.status !== 'PENDING') {
-        card.appendChild(el('div', { class: 'text-sm px-3 py-2 rounded-lg ' + (r.status === 'APPROVED' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600') }, [
-          (r.status === 'APPROVED' ? 'Approved' : 'Rejected') + ' by ' + ((r.respondedBy && r.respondedBy.name) || '—') + ' · ' + fmtDateTime(r.respondedAt) +
-          (r.responseNote ? ' — ' + r.responseNote : '')
+
+      if (r.notes) {
+        card.appendChild(el('div', { class: 'tx-muted-box' }, [
+          el('p', { class: 'text-xs text-muted', text: 'Why the engineer is asking' }),
+          el('p', { class: 'text-sm whitespace-pre-wrap', text: r.notes })
         ]));
       }
 
-      if (r.status === 'PENDING' && canManage()) {
-        var d = drafts[r.id] || (drafts[r.id] = { price: r.requestedPrice !== null ? String(r.requestedPrice) : (r.listPrice !== null ? String(r.listPrice) : ''), note: '' });
-        var price = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'Approved price (₹)' });
-        price.value = d.price; price.addEventListener('input', function () { d.price = price.value; });
-        var note = el('input', { class: INPUT, placeholder: 'Note to the engineer (required to reject)' });
-        note.value = d.note; note.addEventListener('input', function () { d.note = note.value; });
-        card.appendChild(el('div', { class: 'grid grid-cols-1 sm:grid-cols-3 gap-2 items-center' }, [
-          price, note,
-          el('div', { class: 'flex gap-2 justify-end' }, [
-            el('button', { class: 'btn-secondary btn-sm', text: 'Reject', onclick: function () { respond(r, 'REJECTED'); } }),
-            el('button', { class: 'btn-primary btn-sm', text: 'Approve', onclick: function () { respond(r, 'APPROVED'); } })
-          ])
+      // 3. The outcome
+      if (r.status !== 'PENDING') {
+        var by = ((r.respondedBy && r.respondedBy.name) || '—') + ' · ' + fmtDateTime(r.respondedAt);
+        card.appendChild(el('div', { class: 'tx-banner tx-banner-' + r.status }, [
+          el('p', { class: 'font-semibold', text: r.status === 'APPROVED' ? '✓ Approved at ' + money(r.approvedPrice) : '✕ Rejected' }),
+          r.responseNote ? el('p', { text: (r.status === 'REJECTED' ? 'Reason: ' : 'Note: ') + r.responseNote }) : null,
+          el('p', { class: 'text-xs', text: 'By ' + by })
         ]));
-      } else if (r.status === 'PENDING' && mine) {
+      } else if (!canManage()) {
+        card.appendChild(el('div', { class: 'tx-banner tx-banner-PENDING', text: '⏳ Waiting for an admin to approve or reject this request.' }));
+      }
+
+      // 4. Actions
+      if (r.status === 'PENDING' && canManage()) card.appendChild(decisionBox(r));
+      else if (r.status === 'PENDING' && mine) {
         card.appendChild(el('div', { class: 'flex justify-end' }, [el('button', {
           class: 'tx-link tx-danger', text: 'Withdraw request',
           onclick: function () {
@@ -712,33 +979,68 @@
       return card;
     }
 
-    function stat(label, value) {
-      return el('div', {}, [el('span', { class: 'text-xs text-muted block', text: label }), el('span', { class: 'font-medium', text: value })]);
+    function decisionBox(r) {
+      var d = drafts[r.id] || (drafts[r.id] = { price: r.requestedPrice !== null ? String(r.requestedPrice) : (r.listPrice !== null ? String(r.listPrice) : ''), note: '' });
+      var hint = el('p', { class: 'text-xs text-muted mt-1' });
+      function updateHint() {
+        var cmp = vsList(d.price, r.listPrice), tot = lineValue(d.price, r.quantity);
+        hint.textContent = [cmp ? cmp.text : null, tot].filter(Boolean).join(' · ');
+        hint.className = (cmp ? cmp.cls : 'text-xs text-muted') + ' mt-1 block';
+      }
+      var price = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'Final price per unit (₹)', 'aria-label': 'Approved price' });
+      price.value = d.price;
+      price.addEventListener('input', function () { d.price = price.value; updateHint(); });
+      updateHint();
+      var note = el('input', { class: INPUT, placeholder: 'Message to the engineer — required if you reject', 'aria-label': 'Note to engineer' });
+      note.value = d.note; note.addEventListener('input', function () { d.note = note.value; });
+
+      return el('div', { class: 'tx-decide space-y-2' }, [
+        el('p', { class: 'text-sm font-semibold', text: 'Your decision' }),
+        el('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-2' }, [
+          el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Approved price (per unit)' }), el('div', { class: 'mt-1' }, [price]), hint]),
+          el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Note' }), el('div', { class: 'mt-1' }, [note])])
+        ]),
+        el('div', { class: 'flex gap-2 justify-end' }, [
+          el('button', { class: 'btn-secondary btn-sm', text: '✕ Reject', onclick: function () { respond(r, 'REJECTED'); } }),
+          el('button', { class: 'btn-primary btn-sm', text: '✓ Approve at this price', onclick: function () { respond(r, 'APPROVED'); } })
+        ])
+      ]);
     }
 
     function respond(r, st) {
       var d = drafts[r.id] || {};
-      err = '';
+      err = ''; flash = '';
       if (st === 'APPROVED' && (d.price === '' || isNaN(Number(d.price)))) { err = 'Enter the approved price for “' + r.productName + '”.'; return render(); }
-      if (st === 'REJECTED' && !(d.note || '').trim()) { err = 'Give a reason in the note to reject “' + r.productName + '”.'; return render(); }
+      if (st === 'REJECTED' && !(d.note || '').trim()) { err = 'Write the reason in the note to reject “' + r.productName + '”.'; return render(); }
       api('PATCH', '/price-requests/' + r.id + '/respond', { status: st, approvedPrice: st === 'APPROVED' ? Number(d.price) : null, responseNote: d.note || '' })
-        .then(function () { delete drafts[r.id]; load(); })
+        .then(function () {
+          delete drafts[r.id];
+          flash = (st === 'APPROVED' ? 'Approved “' + r.productName + '” at ' + money(Number(d.price)) : 'Rejected “' + r.productName + '”') + ' — ' + (r.requestedBy.name || 'the engineer') + ' can see it now.';
+          load();
+        })
         .catch(function (e) { err = e.message; render(); });
     }
 
     function requestForm() {
-      var box = el('div', { class: 'card p-4 mb-4' });
-      box.appendChild(el('p', { class: 'text-sm font-semibold mb-3', text: 'Ask admin for a price' }));
+      var box = el('div', { class: 'card p-4 mb-4 space-y-3' });
+      box.appendChild(el('div', {}, [
+        el('p', { class: 'text-sm font-semibold', text: 'Ask admin for a price' }),
+        el('p', { class: 'tx-help', text: 'Only the product is required — the more you fill in, the faster admin can decide.' })
+      ]));
       var grid = el('div', { class: 'tx-form' });
-      function field(label, control, span) {
-        return el('div', { class: 'block' + (span ? ' tx-span2' : '') }, [el('span', { class: 'text-xs text-muted', text: label }), el('div', { class: 'mt-1' }, [control])]);
+      function field(label, control, span, help) {
+        return el('div', { class: 'block' + (span ? ' tx-span2' : '') }, [
+          el('span', { class: 'text-xs font-medium text-muted', text: label }),
+          el('div', { class: 'mt-1' }, [control]),
+          help ? el('p', { class: 'tx-help mt-1', text: help }) : null
+        ]);
       }
 
-      // Product: pick from catalog, or type a free-text item.
+      // 1. Product: pick from catalog, or type a free-text item.
       var prodCtl;
       if (form.productId) {
         prodCtl = el('div', { class: 'flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/50' }, [
-          el('span', { class: 'truncate', text: form.productLabel + (form.listPrice !== null ? ' · list ' + money(form.listPrice) : '') }),
+          el('span', { class: 'truncate', text: form.productLabel + (form.listPrice !== null ? ' · list price ' + money(form.listPrice) : '') }),
           el('button', { class: 'tx-link', text: 'Change', onclick: function (e) { e.preventDefault(); form.productId = ''; form.productLabel = ''; form.listPrice = null; render(); } })
         ]);
       } else {
@@ -771,36 +1073,48 @@
         });
         prodCtl = el('div', {}, [pin, res]);
       }
-      grid.appendChild(field('Product', prodCtl, true));
-      grid.appendChild(field('Customer (optional)', customerPicker(form, render)));
+      grid.appendChild(field('1. Product *', prodCtl, true, form.productId ? null : 'Pick from the list to show the list price automatically, or just type the item name.'));
+      grid.appendChild(field('2. Customer', customerPicker(form, render)));
 
       var qty = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'e.g. 10' });
-      qty.value = form.quantity; qty.addEventListener('input', function () { form.quantity = qty.value; });
-      grid.appendChild(field('Quantity (optional)', qty));
+      qty.value = form.quantity;
+      grid.appendChild(field('3. Quantity', qty));
 
-      var rp = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'Price you want to offer (₹)' });
-      rp.value = form.requestedPrice; rp.addEventListener('input', function () { form.requestedPrice = rp.value; });
-      grid.appendChild(field('Price asked for (optional)', rp));
+      var rp = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'Price per unit you want to offer (₹)' });
+      rp.value = form.requestedPrice;
+      var rpHint = el('p', { class: 'text-xs mt-1' });
+      function updateRpHint() {
+        var cmp = vsList(form.requestedPrice, form.listPrice), tot = lineValue(form.requestedPrice, form.quantity);
+        rpHint.textContent = [cmp ? cmp.text : null, tot].filter(Boolean).join(' · ');
+        rpHint.className = (cmp ? cmp.cls : 'text-xs text-muted') + ' mt-1 block';
+      }
+      rp.addEventListener('input', function () { form.requestedPrice = rp.value; updateRpHint(); });
+      qty.addEventListener('input', function () { form.quantity = qty.value; updateRpHint(); });
+      updateRpHint();
+      grid.appendChild(el('div', { class: 'block' }, [
+        el('span', { class: 'text-xs font-medium text-muted', text: '4. Price you want to offer' }), el('div', { class: 'mt-1' }, [rp]), rpHint
+      ]));
 
-      var notes = el('textarea', { class: INPUT, rows: '2', placeholder: 'Why — competitor price, volume, repeat customer…' });
+      var notes = el('textarea', { class: INPUT, rows: '2', placeholder: 'e.g. competitor quoted ₹84, order of 200 units, repeat customer…' });
       notes.value = form.notes; notes.addEventListener('input', function () { form.notes = notes.value; });
-      grid.appendChild(field('Notes', notes, true));
+      grid.appendChild(field('5. Why do you need this price?', notes, true));
       box.appendChild(grid);
 
-      box.appendChild(el('div', { class: 'flex justify-end mt-3' }, [el('button', { class: 'btn-primary', text: 'Send request', onclick: submit })]));
+      box.appendChild(el('div', { class: 'flex justify-end' }, [el('button', { class: 'btn-primary', text: 'Send to admin', onclick: submit })]));
       return box;
     }
 
     function submit() {
-      err = '';
+      err = ''; flash = '';
       if (!form.productId && !form.productName.trim()) { err = 'Choose a product or type the item name.'; return render(); }
       var body = {
         productId: form.productId || '', productName: form.productId ? '' : form.productName.trim(),
         customerId: form.customerId || '', quantity: form.quantity, requestedPrice: form.requestedPrice, notes: form.notes
       };
       api('POST', '/price-requests', body).then(function () {
-        form = { productId: '', productLabel: '', productName: '', listPrice: null, customerId: '', customerLabel: '', quantity: '', requestedPrice: '', notes: '' };
-        showForm = !isAdminTier();
+        flash = 'Request sent — an admin will approve or reject it. You’ll see the answer under “Waiting for admin”.';
+        form = blankForm();
+        showForm = false;
         status = isAdminTier() ? 'PENDING' : 'ALL';
         load();
       }).catch(function (e) { err = e.message; render(); });

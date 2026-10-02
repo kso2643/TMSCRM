@@ -120,6 +120,7 @@ $c0 = $segs[0] ?? '';
 $c1 = $segs[1] ?? '';
 $c2 = $segs[2] ?? '';
 $c3 = $segs[3] ?? '';
+$c4 = $segs[4] ?? '';
 
 // Tiny router — match from most-specific to least-specific.
 // Convention: segment variables (IDs) are captured as $c1, $c2, etc.
@@ -290,6 +291,8 @@ try {
             $method === 'PATCH' && $c1 !== '' && $c2 === 'procurement'     => $ctrl->updateProcurement($c1),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'proforma'        => $ctrl->updateProforma($c1),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'supply'          => $ctrl->updateSupply($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'items' && $c3 !== '' && $c4 === 'procurement' => $ctrl->updateItemProcurement($c1, $c3),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'items' && $c3 !== '' && $c4 === 'eta'         => $ctrl->updateItemEta($c1, $c3),
             $method === 'GET'   && $c1 === ''                              => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                              => $ctrl->create(),
             $method === 'GET'   && $c1 !== '' && $c2 === ''                => $ctrl->show($c1),
@@ -305,6 +308,7 @@ try {
         match (true) {
             $method === 'GET'   && $c1 === 'meta'                      => $ctrl->meta(),
             $method === 'GET'   && $c1 === 'assignees'                 => $ctrl->assignees(),
+            $method === 'GET'   && $c1 === 'overview'                  => $ctrl->overview(),
             $method === 'GET'   && $c1 === ''                          => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                          => $ctrl->create(),
             $method === 'PUT'   && $c1 !== '' && $c2 === ''            => $ctrl->update($c1),

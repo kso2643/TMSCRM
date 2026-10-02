@@ -188,6 +188,64 @@ class TaskController
         sendSuccess(['users' => $s->fetchAll()]);
     }
 
+    // GET /api/tasks/overview — admin-tier. One row per active person: what
+    // they're working on right now (with its live timer), whether it's
+    // running or paused, how many tasks wait in their queue, and today's
+    // totals. People with no tasks at all are included so idle staff show up.
+    public function overview(): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('Access denied.', 403);
+
+        $users = db()->query("SELECT id, name, role, department FROM `User` WHERE isActive=1 ORDER BY name ASC")->fetchAll();
+
+        // Current (in-progress or paused) task per person.
+        $active = [];
+        $s = db()->query(
+            "SELECT t.*, a.name AS assignedToName, a.role AS assignedToRole, b.name AS assignedByName, c.companyName AS customerName
+             FROM `AdminTask` t
+             LEFT JOIN `User` a ON a.id = t.assignedToId
+             LEFT JOIN `User` b ON b.id = t.assignedById
+             LEFT JOIN `Customer` c ON c.id = t.customerId
+             WHERE t.status IN ('IN_PROGRESS','PAUSED')"
+        );
+        foreach ($s->fetchAll() as $r) $active[$r['assignedToId']] = $this->shape($r);
+
+        $queued = [];
+        foreach (db()->query("SELECT assignedToId, COUNT(*) AS n FROM `AdminTask` WHERE status='QUEUED' GROUP BY assignedToId")->fetchAll() as $r) {
+            $queued[$r['assignedToId']] = (int) $r['n'];
+        }
+
+        // Completed today, and the time recorded on them.
+        $today = (new DateTime('now'))->format('Y-m-d');
+        $done = [];
+        $d = db()->prepare(
+            "SELECT assignedToId, COUNT(*) AS n, COALESCE(SUM(workedSeconds),0) AS secs FROM `AdminTask`
+             WHERE status='COMPLETED' AND completedAt >= ? AND completedAt < DATE_ADD(?, INTERVAL 1 DAY) GROUP BY assignedToId"
+        );
+        $d->execute([$today, $today]);
+        foreach ($d->fetchAll() as $r) $done[$r['assignedToId']] = ['n' => (int) $r['n'], 'secs' => (int) $r['secs']];
+
+        $people = [];
+        foreach ($users as $u) {
+            $cur = $active[$u['id']] ?? null;
+            $people[] = [
+                'user'               => $u,
+                'current'            => $cur,
+                'state'              => $cur ? ($cur['running'] ? 'RUNNING' : 'PAUSED') : (($queued[$u['id']] ?? 0) ? 'WAITING' : 'IDLE'),
+                'queuedCount'        => $queued[$u['id']] ?? 0,
+                'completedToday'     => $done[$u['id']]['n'] ?? 0,
+                // Time on tasks finished today plus the current task's timer so far.
+                'secondsToday'       => ($done[$u['id']]['secs'] ?? 0) + ($cur ? $cur['elapsedSeconds'] : 0),
+            ];
+        }
+        // Running first, then paused, waiting, idle; alphabetical within each.
+        $rank = ['RUNNING' => 0, 'PAUSED' => 1, 'WAITING' => 2, 'IDLE' => 3];
+        usort($people, fn($a, $b) => [$rank[$a['state']], $a['user']['name']] <=> [$rank[$b['state']], $b['user']['name']]);
+
+        sendSuccess(['people' => $people]);
+    }
+
     // GET /api/tasks?assignedToId=&status=open|completed|<STATUS>&mine=1
     public function index(): void
     {

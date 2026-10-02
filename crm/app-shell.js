@@ -53,7 +53,8 @@
     nav:       'M3 11l19-9-9 19-2-8-8-2z',
     tag:       'M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42zM7 7h.01',
     check:     'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
-    activity:  'M22 12h-4l-3 9L9 3l-3 9H2'
+    activity:  'M22 12h-4l-3 9L9 3l-3 9H2',
+    timer:     'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16z'
   };
 
   // Same list the React layout renders, plus the standalone pages. Roles
@@ -72,6 +73,7 @@
     { label: 'Attendance',            href: '/attendance/',     icon: 'clock',     section: 'Operations' },
     { label: 'Fuel expense',          href: '/fuel-expense/',   icon: 'fuel',      section: 'Operations' },
     { label: 'Appointments',          href: '/appointments/',   icon: 'appts',     section: 'Operations' },
+    { label: 'Tasks',                 href: '/tasks/',          icon: 'timer',     section: 'Operations' },
     { label: 'Leave',                 href: '/leaves/',         icon: 'calendar',  section: 'Operations' }
   ];
   var ADMIN_NAV = [
