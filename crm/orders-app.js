@@ -527,16 +527,48 @@
         cb.checked = !!picked[i.id];
         cb.disabled = !editable;
         cb.addEventListener('change', function () { picked[i.id] = cb.checked; render(); });
+
+        var metaBits = [i.category, i.brand].filter(Boolean).join(' · ');
+        var procLabel = labelOf(PROCUREMENT_STATUSES, i.procurementStatus);
+        var procLine = procLabel + (i.expectedDeliveryDate ? ' · arriving ' + fmtDate(i.expectedDeliveryDate) : '');
+
         var row = el('label', { class: 'ox-item' + (picked[i.id] ? ' ox-item-on' : '') + (editable ? ' cursor-pointer' : '') }, [
           cb,
           el('span', { class: 'flex-1 min-w-0' }, [
-            el('span', { class: 'block text-sm text-slate-900 dark:text-slate-100', text: i.productName + (i.itemCode ? ' (' + i.itemCode + ')' : '') }),
-            i.supplied && i.suppliedAt ? el('span', { class: 'block text-xs text-muted', text: 'Supplied ' + fmtDate(i.suppliedAt) }) : null
+            el('span', { class: 'block text-sm text-slate-900 dark:text-slate-100', text: i.productName + (i.itemCode && i.itemCode !== 'MANUAL' ? ' (' + i.itemCode + ')' : '') }),
+            metaBits ? el('span', { class: 'block text-xs text-muted', text: metaBits }) : null,
+            i.supplied && i.suppliedAt ? el('span', { class: 'block text-xs text-muted', text: 'Supplied ' + fmtDate(i.suppliedAt) }) : null,
+            el('span', { class: 'block text-xs text-muted', text: procLine })
           ]),
           el('span', { class: 'text-sm text-muted ox-nowrap', text: i.quantity + (i.unit ? ' ' + i.unit : '') })
         ]);
         row.addEventListener('click', function (e) { e.stopPropagation(); });
         list.appendChild(row);
+
+        // Per-item procurement — admin-tier only, right under that item.
+        // Separate from the checkbox above: this is about whether WE have
+        // ordered this specific line from OUR supplier, not whether it's
+        // been handed to the customer.
+        if (isAdmin()) {
+          var etaI = el('input', { type: 'date', class: INPUT, style: 'max-width:140px', 'aria-label': 'Expected arrival: ' + i.productName });
+          etaI.value = i.expectedDeliveryDate ? String(i.expectedDeliveryDate).slice(0, 10) : '';
+          etaI.addEventListener('click', function (e) { e.stopPropagation(); });
+          var itemRow = el('div', { class: 'flex items-center gap-2 px-3 py-2 border-t border-slate-100 dark:border-slate-800 flex-wrap' }, [
+            el('div', { class: 'flex gap-1' }, PROCUREMENT_STATUSES.map(function (s) {
+              return el('button', {
+                class: (i.procurementStatus === s[0] ? 'btn-primary' : 'btn-secondary') + ' btn-sm', text: s[1],
+                onclick: function (e) { e.stopPropagation(); patchItem(o.id, i.id, 'procurement', { procurementStatus: s[0] }); }
+              });
+            })),
+            etaI,
+            el('button', {
+              class: 'btn-secondary btn-sm', text: 'Set',
+              onclick: function (e) { e.stopPropagation(); patchItem(o.id, i.id, 'eta', { expectedDeliveryDate: etaI.value || null }); }
+            })
+          ]);
+          itemRow.addEventListener('click', function (e) { e.stopPropagation(); });
+          list.appendChild(itemRow);
+        }
       });
       wrap.appendChild(list);
 
@@ -587,6 +619,17 @@
       }).catch(function (e2) { saving = false; err = e2.message; render(); });
     }
 
+    // Per-item procurement/eta — admin-tier only, used inside render()'s
+    // item loop above. Same api()/opts.onSaved pattern as save() below.
+    function patchItem(orderId, itemId, path, payload) {
+      api('PATCH', '/orders/' + orderId + '/items/' + itemId + '/' + path, payload).then(function (res) {
+        if (opts.onSaved) opts.onSaved(res.data.order);
+      }).catch(function (e) {
+        err = e.message;
+        render();
+      });
+    }
+
     render();
     return wrap;
   }
@@ -631,12 +674,13 @@
         notes: order ? order.notes || '' : '',
         engineerId: order ? order.engineer.id : (currentUser() && currentUser().id),
         items: order && order.items ? order.items.map(function (i) {
-          return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, unit: i.unit, quantity: i.quantity };
+          return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, unit: i.unit, category: i.category, brand: i.brand, quantity: i.quantity };
         }) : [],
         file: null
       };
       var errMsg = '';
       var dialogEngineers = null;
+      var showManualEntry = false;
 
       function render() {
         card.innerHTML = '';
@@ -898,10 +942,16 @@
         wrap.appendChild(el('span', { class: 'text-xs text-muted', text: 'Products' }));
         var list = el('div', { class: 'mt-1 space-y-2' });
         state.items.forEach(function (it, idx) {
-          var qty = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, style: 'max-width:90px', value: it.quantity });
+          var qty = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, style: 'max-width:80px', value: it.quantity });
           qty.addEventListener('input', function () { state.items[idx].quantity = Number(qty.value) || 0; });
+          var brand = el('input', { class: INPUT, placeholder: 'Brand', style: 'max-width:110px', value: it.brand || '' });
+          brand.addEventListener('input', function () { state.items[idx].brand = brand.value.trim() || null; });
+          var label = it.productName + (it.itemCode && it.itemCode !== 'MANUAL' ? ' (' + it.itemCode + ')' : '');
+          if (it.category) label += ' · ' + it.category;
+          if (!it.productId) label += ' · manual';
           list.appendChild(el('div', { class: 'flex items-center gap-2' }, [
-            el('span', { class: 'flex-1 text-sm truncate', text: it.productName + (it.itemCode ? ' (' + it.itemCode + ')' : '') }),
+            el('span', { class: 'flex-1 text-sm truncate', text: label, title: label }),
+            brand,
             qty,
             el('button', {
               class: 'p-1 text-slate-400 hover:text-red-500', 'aria-label': 'Remove', text: '✕',
@@ -927,7 +977,7 @@
                   class: 'block w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800',
                   text: p.productName + ' (' + p.itemCode + ')',
                   onclick: function () {
-                    state.items.push({ productId: p.id, itemCode: p.itemCode, productName: p.productName, unit: p.unit, quantity: 1 });
+                    state.items.push({ productId: p.id, itemCode: p.itemCode, productName: p.productName, unit: p.unit, category: null, brand: null, quantity: 1 });
                     prodInput.value = ''; prodResults.innerHTML = '';
                     render();
                   }
@@ -937,7 +987,58 @@
           }, 300);
         });
         wrap.appendChild(el('div', { class: 'mt-2' }, [prodInput, prodResults]));
+
+        if (!showManualEntry) {
+          wrap.appendChild(el('button', {
+            class: 'text-xs text-primary dark:text-primary-300 font-medium mt-2',
+            text: "Can't find it? Add manually",
+            onclick: function () { showManualEntry = true; render(); }
+          }));
+        } else {
+          wrap.appendChild(manualEntryForm());
+        }
         return wrap;
+      }
+
+      // Not in the Products catalog — type it in directly. Goes onto the
+      // order with no productId; the backend stores exactly what's typed
+      // here rather than looking it up.
+      function manualEntryForm() {
+        var nameI = el('input', { class: INPUT, placeholder: 'Product / item name' });
+        var codeI = el('input', { class: INPUT, placeholder: 'Code (optional)' });
+        var unitI = el('input', { class: INPUT, placeholder: 'Unit (optional)' });
+        var catI = el('input', { class: INPUT, placeholder: 'Category (optional)' });
+        var brandI = el('input', { class: INPUT, placeholder: 'Brand (optional)' });
+        var qtyI = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, value: '1' });
+        var err = el('p', { class: 'text-xs text-red-600 dark:text-red-400 hidden' });
+
+        function addLine() {
+          var name = nameI.value.trim();
+          if (!name) {
+            err.textContent = 'Enter a name for the item.';
+            err.classList.remove('hidden');
+            return;
+          }
+          state.items.push({
+            productId: null, itemCode: codeI.value.trim() || 'MANUAL', productName: name,
+            unit: unitI.value.trim() || null, category: catI.value.trim() || null,
+            brand: brandI.value.trim() || null, quantity: Number(qtyI.value) || 1
+          });
+          showManualEntry = false;
+          render();
+        }
+
+        return el('div', { class: 'mt-2 p-3 space-y-2 rounded-lg border border-slate-200 dark:border-slate-700' }, [
+          nameI,
+          el('div', { class: 'grid grid-cols-2 gap-2' }, [codeI, catI]),
+          el('div', { class: 'grid grid-cols-2 gap-2' }, [brandI, unitI]),
+          qtyI,
+          err,
+          el('div', { class: 'flex gap-2 justify-end' }, [
+            el('button', { class: 'btn-secondary', text: 'Cancel', onclick: function () { showManualEntry = false; render(); } }),
+            el('button', { class: 'btn-primary', text: 'Add item', onclick: addLine })
+          ])
+        ]);
       }
 
       function footer() {
@@ -976,7 +1077,9 @@
         fd.append('orderType', state.orderType);
         fd.append('orderDate', state.orderDate);
         fd.append('notes', state.notes || '');
-        fd.append('items', JSON.stringify(state.items.map(function (i) { return { productId: i.productId, quantity: i.quantity }; })));
+        fd.append('items', JSON.stringify(state.items.map(function (i) {
+          return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand };
+        })));
         if (state.orderType === 'VERBAL') fd.append('verbalDetails', state.verbalDetails);
         if (state.orderType === 'PO' && state.file) fd.append('file', state.file);
         if (isAdmin() && state.engineerId) fd.append('engineerId', state.engineerId);
@@ -1005,7 +1108,9 @@
           orderType: goingToPO ? order.orderType : state.orderType, // don't flip to PO here — the upload call below does that
           orderDate: state.orderDate,
           notes: state.notes,
-          items: state.items.map(function (i) { return { productId: i.productId, quantity: i.quantity }; }),
+          items: state.items.map(function (i) {
+            return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand };
+          }),
         };
         if (state.orderType === 'VERBAL') body2.verbalDetails = state.verbalDetails;
 

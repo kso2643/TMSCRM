@@ -59,6 +59,21 @@ function schema_with_collation(string $sql, ?array $ref): string
  *                   parent tables use a different collation,
  *     'columns'  => [columnName => 'column definition'] added via ALTER TABLE
  *                   when the table exists but a column is missing,
+ *     'drop_columns' => [columnName => constraintName|[constraintNames]|null]
+ *                   columns known to be leftover cruft from an earlier/
+ *                   abandoned version of the table on some live DBs — not
+ *                   part of this app's schema, not read or written
+ *                   anywhere, but occasionally actively harmful (e.g. a
+ *                   NOT NULL FK column whose default matches no real row,
+ *                   breaking every insert; or a UNIQUE column whose default
+ *                   collides with itself after the first row). Removed if
+ *                   present; named constraints (FK or unique/plain index —
+ *                   either is tried) are dropped first, since MySQL
+ *                   requires that before the column itself can go; pass
+ *                   null if the column has no constraint to drop. A column
+ *                   NOT in this list is never touched, named or not — this
+ *                   is for specific, identified cases only, not a general
+ *                   cleanup pass.
  * ]
  * @param string $migrationHint file name shown in the error if repair fails
  */
@@ -124,9 +139,40 @@ function ensure_schema(array $tables, string $migrationHint): void
                 continue;
             }
             foreach (($def['columns'] ?? []) as $col => $colDef) {
-                if (!isset($existing[$name][$col])) {
+                if (isset($existing[$name][$col])) continue;
+                try {
                     db()->exec("ALTER TABLE `$name` ADD COLUMN `$col` $colDef");
+                } catch (PDOException $e) {
+                    // 1060 = Duplicate column name: another concurrent request
+                    // (the browser fires several of these at once, and a
+                    // retried/duplicate click can overlap one already in
+                    // flight) won the race and added it a moment first. The
+                    // column exists either way, which is the only thing that
+                    // actually matters here — anything else still throws.
+                    if (($e->errorInfo[1] ?? null) != 1060) throw $e;
                 }
+            }
+            foreach (($def['drop_columns'] ?? []) as $col => $constraints) {
+                if (!isset($existing[$name][$col])) continue;
+                foreach ((array) $constraints as $constraintName) {
+                    if (!$constraintName) continue;
+                    // The leftover constraint could be a FOREIGN KEY or a
+                    // plain/unique INDEX — try both, since there's no cheap
+                    // single syntax that drops "whatever this name is."
+                    // Whichever kind it isn't fails with 1091 (doesn't
+                    // exist) and we move on; anything else still throws.
+                    foreach (['FOREIGN KEY', 'INDEX'] as $kind) {
+                        try {
+                            db()->exec("ALTER TABLE `$name` DROP $kind `$constraintName`");
+                            error_log("SchemaGuard: dropped legacy $kind $constraintName on $name.$col");
+                            break;
+                        } catch (PDOException $e) {
+                            if (($e->errorInfo[1] ?? null) != 1091) throw $e;
+                        }
+                    }
+                }
+                error_log("SchemaGuard: dropping legacy column $name.$col");
+                db()->exec("ALTER TABLE `$name` DROP COLUMN `$col`");
             }
         }
     } catch (PDOException $e) {

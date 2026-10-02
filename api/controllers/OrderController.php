@@ -41,6 +41,22 @@ class OrderController
         // Safety net for "Internal server error" on /api/orders when one of the
         // orders migrations hasn't been run on the live DB — see SchemaGuard.php.
         ensure_schema(self::schema(), 'migration_orders_all.sql');
+
+        // One-time catch-up for orders that reached Delivered/Partially
+        // delivered before autoMarkProcured() existed, so they don't keep
+        // showing "Not ordered" next to "Delivered" forever. Matches
+        // nothing once existing orders are fixed, so this is a cheap
+        // no-op on every request after the first.
+        db()->exec(
+            "UPDATE `CustomerOrder` SET procurementStatus='ORDERED'
+             WHERE procurementStatus='NOT_ORDERED' AND deliveryStatus IN ('DELIVERED','PARTIALLY_DELIVERED')"
+        );
+        // Same catch-up, now at the line level: any item already ticked
+        // supplied before per-item procurement tracking existed.
+        db()->exec(
+            "UPDATE `CustomerOrderItem` SET procurementStatus='ORDERED'
+             WHERE procurementStatus='NOT_ORDERED' AND supplied=1"
+        );
     }
 
     /** Full current shape of the two orders tables — kept in sync with database/migration_orders_all.sql. */
@@ -82,9 +98,13 @@ class OrderController
   `itemCode`    VARCHAR(100)  NOT NULL,
   `productName` VARCHAR(255)  NOT NULL,
   `unit`        VARCHAR(20)       NULL,
+  `category`    VARCHAR(100)      NULL,
+  `brand`       VARCHAR(100)      NULL,
   `quantity`    DECIMAL(14,2) NOT NULL,
   `supplied`    TINYINT(1)    NOT NULL DEFAULT 0,
   `suppliedAt`  DATETIME          NULL,
+  `procurementStatus`    VARCHAR(20) NOT NULL DEFAULT 'NOT_ORDERED',
+  `expectedDeliveryDate` DATE        NULL,
   `createdAt`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `CustomerOrderItem_orderId_idx` (`orderId`),
@@ -98,18 +118,62 @@ class OrderController
             'CustomerOrder' => [
                 'create'   => "CREATE TABLE IF NOT EXISTS `CustomerOrder` ($orderCols$orderFks\n$tail",
                 'fallback' => "CREATE TABLE IF NOT EXISTS `CustomerOrder` ($orderCols\n$tail",
+                // Every column the table should have, not just the ones added
+                // after the original CREATE TABLE — a half-pasted migration can
+                // leave ANY of these missing, not only the newest ones. Columns
+                // that have no sensible retrofit default (customerId, orderDate,
+                // ...) go in as NULL-able here even though the fresh-create path
+                // above makes them NOT NULL — the app always supplies them on
+                // insert either way, and a repair that can fail on existing rows
+                // isn't a safety net.
                 'columns'  => [
-                    'expectedDeliveryDate' => 'DATE NULL',
-                    'procurementStatus'    => "VARCHAR(20) NOT NULL DEFAULT 'NOT_ORDERED'",
-                    'proformaStatus'       => "VARCHAR(20) NOT NULL DEFAULT 'NOT_CONFIRMED'",
+                    'customerId'             => 'VARCHAR(30) NULL',
+                    'engineerId'             => 'VARCHAR(30) NULL',
+                    'orderType'              => "VARCHAR(10) NOT NULL DEFAULT 'VERBAL'",
+                    'poDocumentOriginalName' => 'VARCHAR(255) NULL',
+                    'poDocumentStoredName'   => 'VARCHAR(255) NULL',
+                    'poDocumentMime'         => 'VARCHAR(100) NULL',
+                    'poDocumentSize'         => 'INT NULL',
+                    'verbalDetails'          => 'TEXT NULL',
+                    'orderDate'              => 'DATE NULL',
+                    'deliveryStatus'         => "VARCHAR(20) NOT NULL DEFAULT 'PENDING'",
+                    'notDeliveredReason'     => 'TEXT NULL',
+                    'deliveredDate'          => 'DATE NULL',
+                    'notes'                  => 'TEXT NULL',
+                    'expectedDeliveryDate'   => 'DATE NULL',
+                    'procurementStatus'      => "VARCHAR(20) NOT NULL DEFAULT 'NOT_ORDERED'",
+                    'proformaStatus'         => "VARCHAR(20) NOT NULL DEFAULT 'NOT_CONFIRMED'",
+                    'createdAt'              => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
+                    'updatedAt'              => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+                ],
+                // Seen on at least one live DB: a leftover `userId` column +
+                // FK from an earlier/abandoned version of this table, never
+                // part of this app's schema. Harmless if NULL-able, but if
+                // it's NOT NULL with a default that matches no real user
+                // (e.g. DEFAULT ''), it silently breaks every single insert
+                // with a 1452 FK violation, since this app never sets it.
+                'drop_columns' => [
+                    'userId' => 'CustomerOrder_userId_fkey',
+                    'orderNumber' => 'CustomerOrder_orderNumber_key',
                 ],
             ],
             'CustomerOrderItem' => [
                 'create'   => "CREATE TABLE IF NOT EXISTS `CustomerOrderItem` ($itemCols$itemFks\n$tail",
                 'fallback' => "CREATE TABLE IF NOT EXISTS `CustomerOrderItem` ($itemCols\n$tail",
                 'columns'  => [
-                    'supplied'   => 'TINYINT(1) NOT NULL DEFAULT 0',
-                    'suppliedAt' => 'DATETIME NULL',
+                    'orderId'     => 'VARCHAR(30) NULL',
+                    'productId'   => 'VARCHAR(30) NULL',
+                    'itemCode'    => 'VARCHAR(100) NULL',
+                    'productName' => 'VARCHAR(255) NULL',
+                    'unit'        => 'VARCHAR(20) NULL',
+                    'category'    => 'VARCHAR(100) NULL',
+                    'brand'       => 'VARCHAR(100) NULL',
+                    'quantity'    => 'DECIMAL(14,2) NULL',
+                    'supplied'    => 'TINYINT(1) NOT NULL DEFAULT 0',
+                    'suppliedAt'  => 'DATETIME NULL',
+                    'procurementStatus'    => "VARCHAR(20) NOT NULL DEFAULT 'NOT_ORDERED'",
+                    'expectedDeliveryDate' => 'DATE NULL',
+                    'createdAt'   => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
                 ],
             ],
         ];
@@ -170,8 +234,10 @@ class OrderController
             'notes'              => $row['notes'],
             'items'              => $items !== null ? array_map(fn($i) => [
                 'id' => $i['id'], 'productId' => $i['productId'], 'itemCode' => $i['itemCode'],
-                'productName' => $i['productName'], 'unit' => $i['unit'], 'quantity' => (float) $i['quantity'],
+                'productName' => $i['productName'], 'unit' => $i['unit'], 'category' => $i['category'],
+                'brand' => $i['brand'], 'quantity' => (float) $i['quantity'],
                 'supplied' => (bool) $i['supplied'], 'suppliedAt' => $i['suppliedAt'],
+                'procurementStatus' => $i['procurementStatus'], 'expectedDeliveryDate' => $i['expectedDeliveryDate'],
             ], $items) : null,
             'createdAt'          => $row['createdAt'],
             'updatedAt'          => $row['updatedAt'],
@@ -183,7 +249,16 @@ class OrderController
         return is_admin_tier($auth['role']) || $row['engineerId'] === $auth['id'];
     }
 
-    /** Parses + validates the `items` field, present as a JSON string (multipart) or a native array (JSON body). */
+    /**
+     * Parses + validates the `items` field, present as a JSON string
+     * (multipart) or a native array (JSON body). Each line is either:
+     *   - a catalog product: {productId, quantity}
+     *   - a manual/ad-hoc line, for something not in the Products catalog
+     *     yet: {productName, quantity, itemCode?, unit?, category?} with no
+     *     productId. itemCode defaults to a short placeholder if left out,
+     *     since the column doesn't allow empty — everything else is exactly
+     *     what was typed, no catalog lookup involved.
+     */
     private function parseItems($raw): array
     {
         if (is_string($raw)) {
@@ -194,18 +269,36 @@ class OrderController
 
         $items = [];
         foreach ($raw as $line) {
-            $productId = trim((string) ($line['productId'] ?? ''));
             $qty = is_numeric($line['quantity'] ?? null) ? (float) $line['quantity'] : 0;
-            if (!$productId || $qty <= 0) continue;
+            if ($qty <= 0) continue;
 
-            $p = db()->prepare('SELECT id,itemCode,productName,unit FROM `Product` WHERE id=? LIMIT 1');
-            $p->execute([$productId]);
-            $product = $p->fetch();
-            if (!$product) sendError("Product not found: $productId", 404);
+            $productId = trim((string) ($line['productId'] ?? ''));
+            if ($productId) {
+                $p = db()->prepare('SELECT id,itemCode,productName,unit FROM `Product` WHERE id=? LIMIT 1');
+                $p->execute([$productId]);
+                $product = $p->fetch();
+                if (!$product) sendError("Product not found: $productId", 404);
 
+                $items[] = [
+                    'productId' => $product['id'], 'itemCode' => $product['itemCode'],
+                    'productName' => $product['productName'], 'unit' => $product['unit'],
+                    'category' => trim((string) ($line['category'] ?? '')) ?: null,
+                    'brand' => trim((string) ($line['brand'] ?? '')) ?: null, 'quantity' => $qty,
+                ];
+                continue;
+            }
+
+            // Manual line — not in the Products catalog.
+            $productName = trim((string) ($line['productName'] ?? ''));
+            if (!$productName) continue; // need at least a name to be a real line
             $items[] = [
-                'productId' => $product['id'], 'itemCode' => $product['itemCode'],
-                'productName' => $product['productName'], 'unit' => $product['unit'], 'quantity' => $qty,
+                'productId' => null,
+                'itemCode' => trim((string) ($line['itemCode'] ?? '')) ?: 'MANUAL',
+                'productName' => $productName,
+                'unit' => trim((string) ($line['unit'] ?? '')) ?: null,
+                'category' => trim((string) ($line['category'] ?? '')) ?: null,
+                'brand' => trim((string) ($line['brand'] ?? '')) ?: null,
+                'quantity' => $qty,
             ];
         }
         return $items;
@@ -214,22 +307,34 @@ class OrderController
     private function replaceItems(string $orderId, array $items): void
     {
         // Editing an order rewrites its lines — carry each product's
-        // "supplied" tick over so an edit doesn't silently un-deliver it.
+        // "supplied" tick and per-item procurement tracking over, keyed by
+        // productId, so an edit (e.g. a quantity change) doesn't silently
+        // reset tracking someone already did on that line. Manual lines
+        // (no productId) have no stable identity across an edit, so their
+        // tracking always starts fresh — same limitation "supplied" already
+        // had here before this.
         $prev = [];
         foreach ($this->fetchItems($orderId) as $old) {
-            if ($old['productId'] && $old['supplied']) $prev[$old['productId']] = $old['suppliedAt'];
+            if (!$old['productId']) continue;
+            $prev[$old['productId']] = [
+                'supplied' => $old['supplied'], 'suppliedAt' => $old['suppliedAt'],
+                'procurementStatus' => $old['procurementStatus'], 'expectedDeliveryDate' => $old['expectedDeliveryDate'],
+            ];
         }
 
         db()->prepare('DELETE FROM `CustomerOrderItem` WHERE orderId=?')->execute([$orderId]);
         $ins = db()->prepare(
-            'INSERT INTO `CustomerOrderItem` (id,orderId,productId,itemCode,productName,unit,quantity,supplied,suppliedAt,createdAt)
-             VALUES (?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO `CustomerOrderItem`
+                (id,orderId,productId,itemCode,productName,unit,category,brand,quantity,supplied,suppliedAt,procurementStatus,expectedDeliveryDate,createdAt)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         foreach ($items as $it) {
-            $wasSupplied = array_key_exists($it['productId'], $prev);
+            $carry = $prev[$it['productId']] ?? null;
             $ins->execute([
-                gen_id(), $orderId, $it['productId'], $it['itemCode'], $it['productName'], $it['unit'], $it['quantity'],
-                $wasSupplied ? 1 : 0, $wasSupplied ? $prev[$it['productId']] : null, now_sql(),
+                gen_id(), $orderId, $it['productId'], $it['itemCode'], $it['productName'], $it['unit'], $it['category'], $it['brand'], $it['quantity'],
+                $carry && $carry['supplied'] ? 1 : 0, $carry && $carry['supplied'] ? $carry['suppliedAt'] : null,
+                $carry ? $carry['procurementStatus'] : 'NOT_ORDERED', $carry ? $carry['expectedDeliveryDate'] : null,
+                now_sql(),
             ]);
         }
     }
@@ -237,8 +342,27 @@ class OrderController
     /** Sets every line on the order to supplied (true) or not (false). */
     private function setAllItemsSupplied(string $orderId, bool $supplied): void
     {
-        db()->prepare('UPDATE `CustomerOrderItem` SET supplied=?,suppliedAt=? WHERE orderId=?')
-            ->execute([$supplied ? 1 : 0, $supplied ? now_sql() : null, $orderId]);
+        $sql = $supplied
+            ? "UPDATE `CustomerOrderItem` SET supplied=1,suppliedAt=?,
+                 procurementStatus=IF(procurementStatus='NOT_ORDERED','ORDERED',procurementStatus) WHERE orderId=?"
+            : 'UPDATE `CustomerOrderItem` SET supplied=0,suppliedAt=NULL WHERE orderId=?';
+        $params = $supplied ? [now_sql(), $orderId] : [$orderId];
+        db()->prepare($sql)->execute($params);
+    }
+
+    /**
+     * You can't supply something that was never procured — if any item is
+     * being marked supplied and procurement is still sitting at the
+     * NOT_ORDERED default, bring it in line automatically rather than
+     * leave the order showing a contradiction (delivered, but "not
+     * ordered"). Never overwrites a procurement status someone already
+     * set deliberately, and never flips ORDERED back to NOT_ORDERED —
+     * this only ever moves forward.
+     */
+    private function autoMarkProcured(string $orderId): void
+    {
+        db()->prepare("UPDATE `CustomerOrder` SET procurementStatus='ORDERED' WHERE id=? AND procurementStatus='NOT_ORDERED'")
+            ->execute([$orderId]);
     }
 
     /** Validates + moves an uploaded PO file to storage. Returns [originalName, storedName, mime, size]. */
@@ -531,6 +655,7 @@ class OrderController
         // PARTIALLY_DELIVERED leaves them as-is — use PATCH .../supply to pick lines.
         if ($status === 'DELIVERED') $this->setAllItemsSupplied($id, true);
         elseif ($status === 'PENDING' || $status === 'NOT_DELIVERED') $this->setAllItemsSupplied($id, false);
+        if ($status === 'DELIVERED' || $status === 'PARTIALLY_DELIVERED') $this->autoMarkProcured($id);
 
         log_activity($auth['id'], 'ORDER_DELIVERY_UPDATED', 'CustomerOrder', $id, ['status' => $status]);
         $this->show($id);
@@ -575,16 +700,25 @@ class OrderController
             : (to_date_only($b['deliveredDate'] ?? null) ?? (new DateTime('now'))->format('Y-m-d'));
 
         $now = now_sql();
-        $upd = db()->prepare('UPDATE `CustomerOrderItem` SET supplied=?,suppliedAt=? WHERE id=? AND orderId=?');
+        $upd = db()->prepare(
+            "UPDATE `CustomerOrderItem` SET supplied=?,suppliedAt=?,
+                procurementStatus=IF(?=1 AND procurementStatus='NOT_ORDERED','ORDERED',procurementStatus)
+             WHERE id=? AND orderId=?"
+        );
         foreach ($items as $it) {
             $on = in_array($it['id'], $ids, true);
             // Keep the original timestamp for lines that were already ticked.
             $at = $on ? ($it['supplied'] ? $it['suppliedAt'] : $now) : null;
-            $upd->execute([$on ? 1 : 0, $at, $it['id'], $id]);
+            // Same reasoning as the order-level version: a line can't be
+            // supplied without having been procured, so ticking it also
+            // brings its own procurement status in line if it was still
+            // sitting at the default.
+            $upd->execute([$on ? 1 : 0, $at, $on ? 1 : 0, $it['id'], $id]);
         }
         db()->prepare(
             'UPDATE `CustomerOrder` SET deliveryStatus=?,notDeliveredReason=?,deliveredDate=?,updatedAt=? WHERE id=?'
         )->execute([$status, $reason, $deliveredDate, $now, $id]);
+        if ($ticked > 0) $this->autoMarkProcured($id);
 
         log_activity($auth['id'], 'ORDER_SUPPLY_UPDATED', 'CustomerOrder', $id, ['status' => $status, 'supplied' => $ticked, 'of' => $total]);
         $this->show($id);
@@ -660,6 +794,62 @@ class OrderController
 
         log_activity($auth['id'], 'ORDER_PROCUREMENT_UPDATED', 'CustomerOrder', $id, ['status' => $status]);
         $this->show($id);
+    }
+
+    private function findItem(string $orderId, string $itemId): array
+    {
+        $s = db()->prepare('SELECT * FROM `CustomerOrderItem` WHERE id=? AND orderId=? LIMIT 1');
+        $s->execute([$itemId, $orderId]);
+        $item = $s->fetch();
+        if (!$item) sendError('Item not found on this order.', 404);
+        return $item;
+    }
+
+    // PATCH /api/orders/:id/items/:itemId/procurement — admin-tier only.
+    // Same idea as updateProcurement() above, but scoped to one product
+    // line — a multi-product order routinely has each line at a different
+    // stage, from a different supplier, on a different timeline.
+    public function updateItemProcurement(string $orderId, string $itemId): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('Only admins can update procurement.', 403);
+        if (!$this->fetchRow($orderId)) sendError('Order not found.', 404);
+        $this->findItem($orderId, $itemId);
+
+        $b = request_body();
+        $status = strtoupper(trim((string) ($b['procurementStatus'] ?? '')));
+        if (!in_array($status, self::PROCUREMENT_STATUSES, true)) {
+            sendError('procurementStatus must be one of: ' . implode(', ', self::PROCUREMENT_STATUSES), 400);
+        }
+
+        if ($status === 'NOT_ORDERED') {
+            db()->prepare('UPDATE `CustomerOrderItem` SET procurementStatus=?,expectedDeliveryDate=NULL WHERE id=?')
+                ->execute([$status, $itemId]);
+        } else {
+            db()->prepare('UPDATE `CustomerOrderItem` SET procurementStatus=? WHERE id=?')->execute([$status, $itemId]);
+        }
+
+        log_activity($auth['id'], 'ORDER_ITEM_PROCUREMENT_UPDATED', 'CustomerOrder', $orderId, ['itemId' => $itemId, 'status' => $status]);
+        $this->show($orderId);
+    }
+
+    // PATCH /api/orders/:id/items/:itemId/eta — admin-tier only, per line.
+    public function updateItemEta(string $orderId, string $itemId): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('Only admins can set the expected delivery date.', 403);
+        if (!$this->fetchRow($orderId)) sendError('Order not found.', 404);
+        $this->findItem($orderId, $itemId);
+
+        $b = request_body();
+        if (!array_key_exists('expectedDeliveryDate', $b)) sendError('expectedDeliveryDate is required.', 400);
+        $raw = $b['expectedDeliveryDate'];
+        $eta = ($raw === null || $raw === '') ? null : to_date_only($raw);
+
+        db()->prepare('UPDATE `CustomerOrderItem` SET expectedDeliveryDate=? WHERE id=?')->execute([$eta, $itemId]);
+
+        log_activity($auth['id'], 'ORDER_ITEM_ETA_UPDATED', 'CustomerOrder', $orderId, ['itemId' => $itemId, 'expectedDeliveryDate' => $eta]);
+        $this->show($orderId);
     }
 
     // DELETE /api/orders/:id
