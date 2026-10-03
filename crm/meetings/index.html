@@ -254,6 +254,43 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 .cust-chosen button { background: none; border: none; color: var(--blue); font-size: .78rem; font-weight: 700; cursor: pointer; }
 .form-section { font-size: .78rem; font-weight: 700; color: var(--dark); border-top: 1px solid var(--border); padding-top: 12px; }
 
+/* attachments */
+.att-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.att-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; font-size: .84rem; font-weight: 600; color: var(--dark); cursor: pointer; }
+.att-btn:hover { border-color: var(--blue); color: var(--blue); }
+.att-btn:disabled { opacity: .5; cursor: default; }
+.att-rec { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 12px; border-radius: var(--radius-sm); background: #fef2f2; color: #991b1b; font-size: .84rem; font-weight: 600; }
+.att-rec.is-hidden { display: none; }
+.att-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #dc2626; animation: attpulse 1s infinite; }
+@keyframes attpulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .att-rec-dot { animation: none; } }
+.att-rec-lbl { flex: 1; font-weight: 500; }
+.att-rec-stop { background: #dc2626; color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font-weight: 700; cursor: pointer; }
+.att-rec-cancel { background: none; border: none; color: #991b1b; text-decoration: underline; cursor: pointer; }
+.att-msg { font-size: .78rem; color: var(--muted); margin-top: 6px; }
+.att-msg:empty { display: none; }
+.att-msg.err { color: var(--red); }
+.att-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.att-empty { font-size: .8rem; color: var(--muted); }
+.att-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; background: var(--white); }
+.att-item.is-uploading { opacity: .6; }
+.att-media { flex-shrink: 0; }
+.att-photo .att-media img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; display: block; background: var(--bg); }
+.att-click { cursor: zoom-in; }
+.att-voice { flex-wrap: wrap; }
+.att-voice .att-media { order: 3; flex-basis: 100%; }
+.att-voice audio { width: 100%; height: 36px; }
+.att-play { background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: .8rem; font-weight: 600; color: var(--blue); cursor: pointer; }
+.att-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; background: var(--bg); font-size: 1.3rem; }
+.att-info { flex: 1; min-width: 0; }
+.att-name { font-size: .84rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att-meta { font-size: .74rem; color: var(--muted); }
+.att-acts { display: flex; gap: 4px; }
+.att-act { width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border); background: var(--white); cursor: pointer; font-size: .9rem; color: var(--muted); }
+.att-act:hover { color: var(--blue); border-color: var(--blue); }
+.att-rm:hover { color: var(--red); border-color: var(--red); }
+.badge-att { background: var(--bg); color: var(--muted); }
+
 @media (max-width: 640px) {
   .user-chip #user-name { display: none; }
   .filter-bar { flex-direction: column; align-items: stretch; }
@@ -553,6 +590,10 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
         "</div>";
     }
 
+    var ac = m.attachmentCounts || {};
+    var attBits = [["photo", "📷", "photo"], ["file", "📎", "file"], ["voice", "🎙", "voice note"]].filter(function (k) { return ac[k[0]]; })
+      .map(function (k) { return '<span class="badge badge-att" title="' + ac[k[0]] + " " + k[2] + (ac[k[0]] === 1 ? "" : "s") + '">' + k[1] + " " + ac[k[0]] + "</span>"; }).join("");
+    if (attBits) badges += attBits;
     var metaBits = ['<span><b>By</b> ' + escapeHtml((m.user && m.user.name) || "—") + "</span>"];
     if (m.assignedTo && m.assignedTo.name) metaBits.push('<span><b>Assigned</b> ' + escapeHtml(m.assignedTo.name) + "</span>");
     if (m.updatedBy && m.updatedBy.name) metaBits.push('<span><b>Updated by</b> ' + escapeHtml(m.updatedBy.name) + "</span>");
@@ -724,6 +765,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
         "</div>" +
         '<div class="field-group"><label>Follow-up priority</label><select id="edit-priority"></select></div>' +
         '<div class="field-group"><label>Notes</label><textarea id="edit-notes" placeholder="Add or update notes…">' + escapeHtml(m.notes || "") + "</textarea></div>" +
+        '<div class="field-group"><label>Photos, files &amp; voice notes</label><div id="edit-att"></div></div>' +
         (extraFields ? '<div class="field-group"><label>Additional details on file (read-only here)</label>' + extraFields + "</div>" : "") +
       "</div>" +
       '<div id="drawer-feedback"></div>' +
@@ -749,11 +791,14 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-close").addEventListener("click", closeDrawer);
     document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
     document.getElementById("drawer-save").addEventListener("click", function () { saveMeeting(m.id); });
+    mountAttachments(document.getElementById("edit-att"), { meetingId: m.id });
 
     document.getElementById("drawer-backdrop").classList.remove("is-hidden");
   }
 
   function closeDrawer() {
+    if (attState && attState.recorder && !confirm("A voice note is still recording. Discard it?")) return;
+    teardownAttachments();
     document.getElementById("drawer-backdrop").classList.add("is-hidden");
   }
 
@@ -783,6 +828,326 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     }).catch(function (err) {
       feedback.innerHTML = '<div class="save-feedback err">' + escapeHtml(err.message || "Couldn\u2019t save. Try again.") + "</div>";
       saveBtn.disabled = false; saveBtn.textContent = "Save changes";
+    });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
+     ATTACHMENTS — photos, files and voice notes on a meeting.
+     mountAttachments(host, { meetingId }) shows the meeting's attachments
+     and uploads new ones straight away; without meetingId (the "Log a
+     meeting" form) they are kept as pending and uploaded right after the
+     meeting is saved (uploadPending). Files are fetched with the login
+     token and shown from blob: URLs — the server never exposes them
+     publicly (MeetingAttachmentController).
+     ═════════════════════════════════════════════════════════════════════ */
+  var ATT_MAX_MB = 15;
+  var ATT_FILE_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.jpg,.jpeg,.png,.webp,.heic,application/pdf,image/*";
+  var attState = null; // { host, meetingId, pending:[], items:[], urls:[], recorder }
+
+  function fetchBlob(path) {
+    var token = getToken();
+    return fetch(API_BASE + path, { headers: token ? { Authorization: "Bearer " + token } : {} }).then(function (r) {
+      if (!r.ok) throw new Error("Could not load the file (" + r.status + ")");
+      return r.blob();
+    });
+  }
+  function fmtSize(b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB"; }
+  function fmtDur(s) { s = Math.round(s || 0); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+  function fileIcon(name) {
+    var ext = (String(name).split(".").pop() || "").toLowerCase();
+    return { pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", csv: "📗", ppt: "📙", pptx: "📙", txt: "📄" }[ext] || "📄";
+  }
+  function attKind(file) {
+    if (/^audio\//.test(file.type)) return "VOICE";
+    if (/^image\//.test(file.type) || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)) return "PHOTO";
+    return "FILE";
+  }
+  function revokeAll() {
+    if (!attState) return;
+    attState.urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
+    attState.urls = [];
+  }
+  function stopRecorder() {
+    if (attState && attState.recorder) {
+      try { attState.recorder.cancelled = true; attState.recorder.rec.stop(); } catch (e) {}
+      try { attState.recorder.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      clearInterval(attState.recorder.timer);
+      attState.recorder = null;
+    }
+  }
+  function teardownAttachments() { stopRecorder(); revokeAll(); attState = null; }
+
+  function mountAttachments(host, opts) {
+    teardownAttachments();
+    attState = { host: host, meetingId: (opts && opts.meetingId) || null, pending: [], items: [], urls: [], recorder: null };
+    host.innerHTML =
+      '<div class="att-buttons">' +
+        '<button type="button" class="att-btn" id="att-photo-btn"><span aria-hidden="true">📷</span> Photo</button>' +
+        '<button type="button" class="att-btn" id="att-file-btn"><span aria-hidden="true">📎</span> File</button>' +
+        '<button type="button" class="att-btn" id="att-voice-btn"><span aria-hidden="true">🎙</span> Voice note</button>' +
+        '<input type="file" id="att-photo-in" accept="image/*" multiple hidden />' +
+        '<input type="file" id="att-file-in" accept="' + ATT_FILE_ACCEPT + '" multiple hidden />' +
+      "</div>" +
+      '<div class="att-rec is-hidden" id="att-rec" role="status" aria-live="polite">' +
+        '<span class="att-rec-dot"></span><span id="att-rec-time">0:00</span><span class="att-rec-lbl">Recording…</span>' +
+        '<button type="button" class="att-rec-stop" id="att-rec-stop">■ Stop</button>' +
+        '<button type="button" class="att-rec-cancel" id="att-rec-cancel">Cancel</button>' +
+      "</div>" +
+      '<div class="att-msg" id="att-msg"></div>' +
+      '<div class="att-list" id="att-list"></div>';
+    var photoIn = host.querySelector("#att-photo-in"), fileIn = host.querySelector("#att-file-in");
+    host.querySelector("#att-photo-btn").addEventListener("click", function () { photoIn.click(); });
+    host.querySelector("#att-file-btn").addEventListener("click", function () { fileIn.click(); });
+    photoIn.addEventListener("change", function () { addFiles(photoIn.files, null); photoIn.value = ""; });
+    fileIn.addEventListener("change", function () { addFiles(fileIn.files, "FILE"); fileIn.value = ""; });
+    host.querySelector("#att-voice-btn").addEventListener("click", startVoice);
+    host.querySelector("#att-rec-stop").addEventListener("click", function () { finishVoice(true); });
+    host.querySelector("#att-rec-cancel").addEventListener("click", function () { finishVoice(false); });
+    if (attState.meetingId) loadAttachments(); else drawAttachments();
+  }
+
+  function attMsg(text, isErr) {
+    var m = attState && attState.host.querySelector("#att-msg");
+    if (!m) return;
+    m.textContent = text || "";
+    m.className = "att-msg" + (isErr ? " err" : "");
+  }
+
+  function addFiles(files, forceKind) {
+    var st = attState; if (!st) return;
+    var list = Array.prototype.slice.call(files || []);
+    var errs = [];
+    list.forEach(function (f) {
+      if (f.size > ATT_MAX_MB * 1048576) { errs.push(f.name + " is larger than " + ATT_MAX_MB + " MB"); return; }
+      var item = { file: f, kind: forceKind || attKind(f), name: f.name, size: f.size };
+      if (st.meetingId) uploadOne(item); else { st.pending.push(item); }
+    });
+    attMsg(errs.join(" · "), !!errs.length);
+    drawAttachments();
+  }
+
+  function pickRecorderType() {
+    if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
+    var types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", "audio/aac"];
+    for (var i = 0; i < types.length; i++) if (MediaRecorder.isTypeSupported(types[i])) return types[i];
+    return "";
+  }
+
+  function startVoice() {
+    var st = attState; if (!st || st.recorder) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
+      attMsg("Voice recording isn't supported in this browser. You can attach an audio file with “File” instead.", true);
+      return;
+    }
+    attMsg("Allow microphone access to record…");
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      if (attState !== st) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+      var type = pickRecorderType();
+      var rec = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+      var chunks = [];
+      var r = { rec: rec, stream: stream, chunks: chunks, started: Date.now(), timer: null, cancelled: false };
+      st.recorder = r;
+      rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        clearInterval(r.timer);
+        if (r.cancelled || attState !== st) return;
+        var mime = (rec.mimeType || type || "audio/webm").split(";")[0];
+        var ext = /mp4|aac|m4a/.test(mime) ? "m4a" : /ogg/.test(mime) ? "ogg" : "webm";
+        var secs = (Date.now() - r.started) / 1000;
+        var d = new Date();
+        var name = "Voice note " + d.toLocaleDateString("en-CA") + " " + String(d.getHours()).padStart(2, "0") + "-" + String(d.getMinutes()).padStart(2, "0") + "." + ext;
+        var blob = new Blob(chunks, { type: mime });
+        if (!blob.size) { attMsg("Nothing was recorded — check the microphone and try again.", true); return; }
+        var file = new File([blob], name, { type: mime });
+        var item = { file: file, kind: "VOICE", name: name, size: file.size, durationSec: secs };
+        if (st.meetingId) uploadOne(item); else st.pending.push(item);
+        attMsg("");
+        drawAttachments();
+      };
+      rec.start(1000);
+      var box = st.host.querySelector("#att-rec"), t = st.host.querySelector("#att-rec-time");
+      box.classList.remove("is-hidden");
+      st.host.querySelector("#att-voice-btn").disabled = true;
+      attMsg("");
+      r.timer = setInterval(function () {
+        var s = (Date.now() - r.started) / 1000;
+        t.textContent = fmtDur(s);
+        if (s >= 300) finishVoice(true); // 5-minute limit per note
+      }, 250);
+    }).catch(function (e) {
+      attMsg(e && e.name === "NotAllowedError"
+        ? "Microphone access was blocked. Allow the microphone for this site in the browser settings, then try again."
+        : "Could not start the microphone: " + (e && e.message ? e.message : e), true);
+    });
+  }
+
+  function finishVoice(keep) {
+    var st = attState; if (!st || !st.recorder) return;
+    var r = st.recorder;
+    st.recorder = null;
+    r.cancelled = !keep;
+    try { r.rec.stop(); } catch (e) {}
+    st.host.querySelector("#att-rec").classList.add("is-hidden");
+    st.host.querySelector("#att-voice-btn").disabled = false;
+  }
+
+  function loadAttachments() {
+    var st = attState;
+    apiFetch("/meetings/" + encodeURIComponent(st.meetingId) + "/attachments").then(function (res) {
+      if (attState !== st) return;
+      st.items = res.data.attachments || [];
+      drawAttachments();
+    }).catch(function (e) { if (attState === st) attMsg(e.message, true); });
+  }
+
+  function uploadOne(item) {
+    var st = attState;
+    item.uploading = true;
+    st.items.push(item);
+    drawAttachments();
+    return uploadFile(st.meetingId, item).then(function (att) {
+      if (attState !== st) return;
+      var i = st.items.indexOf(item);
+      if (i !== -1) st.items[i] = att;
+      drawAttachments();
+    }).catch(function (e) {
+      if (attState !== st) return;
+      st.items.splice(st.items.indexOf(item), 1);
+      attMsg(item.name + ": " + e.message, true);
+      drawAttachments();
+    });
+  }
+
+  function uploadFile(meetingId, item) {
+    var fd = new FormData();
+    fd.append("file", item.file, item.name);
+    fd.append("kind", item.kind);
+    if (item.durationSec) fd.append("durationSec", String(Math.round(item.durationSec)));
+    var token = getToken();
+    return fetch(API_BASE + "/meetings/" + encodeURIComponent(meetingId) + "/attachments", {
+      method: "POST", headers: token ? { Authorization: "Bearer " + token } : {}, body: fd
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || j.success === false) throw new Error((j && j.message) || "Upload failed (" + r.status + ")");
+        return j.data.attachment;
+      });
+    });
+  }
+
+  /** After a new meeting is saved: upload what was attached in the form. */
+  function uploadPending(meetingId, onProgress) {
+    var st = attState;
+    var queue = st ? st.pending.slice() : [];
+    var failed = [];
+    var i = 0;
+    function next() {
+      if (i >= queue.length) return Promise.resolve({ total: queue.length, failed: failed });
+      var item = queue[i++];
+      if (onProgress) onProgress(i, queue.length);
+      return uploadFile(meetingId, item).catch(function (e) { failed.push(item.name + ": " + e.message); }).then(next);
+    }
+    return next();
+  }
+
+  function deleteAttachment(att) {
+    var st = attState;
+    if (!confirm("Remove “" + att.name + "”?")) return;
+    apiFetch("/meetings/" + encodeURIComponent(st.meetingId) + "/attachments/" + encodeURIComponent(att.id), { method: "DELETE" })
+      .then(function () { st.items = st.items.filter(function (x) { return x !== att; }); drawAttachments(); attMsg("Removed."); })
+      .catch(function (e) { attMsg(e.message, true); });
+  }
+
+  function openAttachment(att, download) {
+    var st = attState;
+    var w = download ? null : window.open("", "_blank");
+    fetchBlob("/meetings/" + encodeURIComponent(st.meetingId) + "/attachments/" + encodeURIComponent(att.id)).then(function (b) {
+      var u = URL.createObjectURL(b);
+      st.urls.push(u);
+      if (download || !w) {
+        var a = document.createElement("a"); a.href = u; a.download = att.name; document.body.appendChild(a); a.click(); a.remove();
+        if (w) w.close();
+      } else w.location.href = u;
+    }).catch(function (e) { if (w) w.close(); attMsg(e.message, true); });
+  }
+
+  function drawAttachments() {
+    var st = attState; if (!st) return;
+    var list = st.host.querySelector("#att-list");
+    var items = st.meetingId ? st.items : st.pending;
+    list.innerHTML = "";
+    if (!items.length) {
+      list.innerHTML = '<div class="att-empty">' + (st.meetingId ? "No photos, files or voice notes yet." : "Add site photos, documents (PDF, Excel, Word…) or record a voice note.") + "</div>";
+      return;
+    }
+    items.forEach(function (it, idx) {
+      var pending = !st.meetingId || it.uploading;
+      var row = document.createElement("div");
+      row.className = "att-item att-" + String(it.kind).toLowerCase() + (it.uploading ? " is-uploading" : "");
+      var name = it.name, size = it.size;
+      var media = document.createElement("div");
+      media.className = "att-media";
+      if (it.kind === "PHOTO") {
+        var img = document.createElement("img");
+        img.alt = name;
+        if (pending) { var u = URL.createObjectURL(it.file); st.urls.push(u); img.src = u; }
+        else fetchBlob("/meetings/" + encodeURIComponent(st.meetingId) + "/attachments/" + encodeURIComponent(it.id)).then(function (b) {
+          var u2 = URL.createObjectURL(b); st.urls.push(u2); img.src = u2;
+        }).catch(function () { img.alt = "Photo unavailable"; });
+        media.appendChild(img);
+        if (!pending) { media.classList.add("att-click"); media.title = "Open full size"; media.addEventListener("click", function () { openAttachment(it); }); }
+      } else if (it.kind === "VOICE") {
+        var au = document.createElement("audio");
+        au.controls = true; au.preload = "metadata";
+        if (pending) { var u3 = URL.createObjectURL(it.file); st.urls.push(u3); au.src = u3; }
+        else {
+          var load = function () {
+            au.removeEventListener("play", load);
+            fetchBlob("/meetings/" + encodeURIComponent(st.meetingId) + "/attachments/" + encodeURIComponent(it.id)).then(function (b) {
+              var u4 = URL.createObjectURL(b); st.urls.push(u4); au.src = u4; au.play().catch(function () {});
+            }).catch(function (e) { attMsg(e.message, true); });
+          };
+          // Load the recording when it's first played (saves data on phones).
+          au.addEventListener("play", load);
+          var ph = document.createElement("button");
+          ph.type = "button"; ph.className = "att-play"; ph.textContent = "▶ Play voice note";
+          ph.addEventListener("click", function () { ph.remove(); au.style.display = ""; load(); });
+          au.style.display = "none";
+          media.appendChild(ph);
+        }
+        media.appendChild(au);
+      } else {
+        var ic = document.createElement("span");
+        ic.className = "att-icon"; ic.textContent = fileIcon(name);
+        media.appendChild(ic);
+      }
+      row.appendChild(media);
+      var info = document.createElement("div");
+      info.className = "att-info";
+      var meta = [it.kind === "VOICE" ? "Voice note" + (it.durationSec ? " · " + fmtDur(it.durationSec) : "") : it.kind === "PHOTO" ? "Photo" : "File", fmtSize(size)];
+      if (it.uploadedBy && it.uploadedBy.name) meta.push(it.uploadedBy.name);
+      if (it.uploading) meta.push("uploading…"); else if (!st.meetingId) meta.push("will upload when you save");
+      info.innerHTML = '<div class="att-name">' + escapeHtml(name) + '</div><div class="att-meta">' + escapeHtml(meta.join(" · ")) + "</div>";
+      row.appendChild(info);
+      var acts = document.createElement("div");
+      acts.className = "att-acts";
+      if (!pending && it.kind !== "VOICE") {
+        var dl = document.createElement("button");
+        dl.type = "button"; dl.className = "att-act"; dl.title = "Download"; dl.setAttribute("aria-label", "Download " + name); dl.textContent = "⤓";
+        dl.addEventListener("click", function () { openAttachment(it, true); });
+        acts.appendChild(dl);
+      }
+      if (!it.uploading) {
+        var rm = document.createElement("button");
+        rm.type = "button"; rm.className = "att-act att-rm"; rm.title = "Remove"; rm.setAttribute("aria-label", "Remove " + name); rm.textContent = "✕";
+        rm.addEventListener("click", function () {
+          if (!st.meetingId) { st.pending.splice(idx, 1); drawAttachments(); }
+          else deleteAttachment(it);
+        });
+        acts.appendChild(rm);
+      }
+      row.appendChild(acts);
+      list.appendChild(row);
     });
   }
 
@@ -842,6 +1207,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
         '<div class="field-group"><label for="new-summary">Discussion summary</label><textarea id="new-summary" placeholder="What was discussed?"></textarea></div>' +
         '<div class="field-group"><label for="new-req">Customer requirements</label><textarea id="new-req" placeholder="Tools, quantities, specs…" style="min-height:54px"></textarea></div>' +
         '<div class="field-group"><label for="new-notes">Notes</label><textarea id="new-notes" placeholder="Anything else" style="min-height:54px"></textarea></div>' +
+        '<div class="field-group"><label>Photos, files &amp; voice notes</label><div id="new-att"></div></div>' +
         '<div class="form-section">Next follow-up</div>' +
         '<div class="field-row">' +
           '<div class="field-group"><label for="new-fu-date">Date' + (forFollowup ? ' <span class="req">*</span>' : "") + '</label><input type="date" id="new-fu-date" value="' + (forFollowup ? todayInputValue(1) : "") + '" /></div>' +
@@ -858,6 +1224,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-close").addEventListener("click", closeDrawer);
     document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
     document.getElementById("drawer-save").addEventListener("click", function () { saveCreate(forFollowup); });
+    mountAttachments(document.getElementById("new-att"), {});
     var q = document.getElementById("new-cust-q");
     q.addEventListener("input", function () {
       clearTimeout(createState.timer);
@@ -939,11 +1306,23 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 
     saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     feedback.innerHTML = "";
-    api.meetings.create(body).then(function () {
-      feedback.innerHTML = '<div class="save-feedback ok">Saved' + (body.nextFollowUp ? " — you’ll get a reminder before the follow-up." : ".") + "</div>";
-      state.totals = { meetings: null, followups: null };
-      state.page = 1;
-      setTimeout(function () { closeDrawer(); fetchList().then(refreshOtherTabCount); }, 700);
+    if (attState && attState.recorder) finishVoice(true);
+    api.meetings.create(body).then(function (res) {
+      var meetingId = res.data && res.data.meeting && res.data.meeting.id;
+      var n = attState ? attState.pending.length : 0;
+      var done = function (result) {
+        var failed = (result && result.failed) || [];
+        feedback.innerHTML = failed.length
+          ? '<div class="save-feedback err">Meeting saved, but ' + failed.length + ' attachment(s) could not be uploaded: ' + escapeHtml(failed.join(" · ")) + ". Open the meeting to try again.</div>"
+          : '<div class="save-feedback ok">Saved' + (n ? " with " + n + " attachment" + (n === 1 ? "" : "s") : "") + (body.nextFollowUp ? " — you’ll get a reminder before the follow-up." : ".") + "</div>";
+        state.totals = { meetings: null, followups: null };
+        state.page = 1;
+        setTimeout(function () { closeDrawer(); fetchList().then(refreshOtherTabCount); }, failed.length ? 4000 : 700);
+      };
+      if (!n || !meetingId) return done(null);
+      return uploadPending(meetingId, function (i, total) {
+        saveBtn.textContent = "Uploading " + i + " of " + total + "…";
+      }).then(done);
     }).catch(function (e) {
       feedback.innerHTML = '<div class="save-feedback err">' + escapeHtml(e.message || "Couldn’t save. Try again.") + "</div>";
       saveBtn.disabled = false; saveBtn.textContent = forFollowup ? "Save follow-up" : "Save meeting";

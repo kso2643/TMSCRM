@@ -1,0 +1,19 @@
+# Uploaded files are data, never code: nothing in here may run as a script.
+Options -Indexes -ExecCGI
+<FilesMatch "\.(php[0-9]?|phtml|phar|pht|pl|py|cgi|sh|shtml|asp|aspx|jsp|htaccess|htpasswd|ini)$">
+    Require all denied
+</FilesMatch>
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phar
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phar
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>

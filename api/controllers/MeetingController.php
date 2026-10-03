@@ -63,6 +63,10 @@ class MeetingController
         );
         $s2->execute(array_merge($params, [$limit, $offset]));
         $items = array_map([$this, 'shape'], $s2->fetchAll());
+        // Photo / file / voice-note counts for the list badges.
+        $counts = class_exists('MeetingAttachmentController') ? MeetingAttachmentController::counts(array_column($items, 'id')) : [];
+        foreach ($items as &$it) $it['attachmentCounts'] = $counts[$it['id']] ?? new stdClass();
+        unset($it);
         sendPaginated($items, $total, $page, $limit, 'Meetings fetched');
     }
 
@@ -359,9 +363,12 @@ class MeetingController
         sendSuccess(['meeting' => $s2->fetch()], "Timer {$action}ed");
     }
 
-    // POST /api/meetings/:id/attachments
+    // Superseded by MeetingAttachmentController (the route now points there):
+    // this version accepted any file type into the public uploads folder.
+    // Kept only for reference; not routed.
     public function uploadAttachment(string $id): void
     {
+        sendError('Use /api/meetings/:id/attachments (MeetingAttachmentController).', 410);
         authenticate();
         if (empty($_FILES['file'])) sendError('No file uploaded.', 400);
         $s = db()->prepare('SELECT attachments FROM `Meeting` WHERE id=? LIMIT 1'); $s->execute([$id]);

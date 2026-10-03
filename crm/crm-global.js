@@ -458,6 +458,8 @@
   var TAB_ID = Math.random().toString(36).slice(2);
 
   var TYPE_STYLE = {
+    APPOINTMENT_REMINDER:   { color: '#d97706', icon: '⏰' },
+    APPOINTMENT_ASSIGNED:   { color: '#4f46e5', icon: '📅' },
     TASK_ASSIGNED:          { color: '#2563eb', icon: '📋' },
     TASK_COMPLETED:         { color: '#16a34a', icon: '✅' },
     PRICE_REQUEST_NEW:      { color: '#d97706', icon: '₹' },
@@ -504,7 +506,13 @@
   // Sit above a page's sticky bottom button bar (e.g. the Trials save/submit
   // bar) — checked continuously since pages render that bar after alerts arrive.
   setInterval(function () {
-    if (box) box.style.bottom = document.querySelector('.trl-bar') ? '96px' : '16px';
+    if (!box) return;
+    // ...and above the Save/Cancel footer of an open form drawer (Meetings, CPR).
+    var foot = document.querySelector('.drawer-backdrop:not(.is-hidden) .drawer-footer, .cp-back .cp-df');
+    box.style.bottom = document.querySelector('.trl-bar') ? '96px' : foot ? (Math.ceil(foot.getBoundingClientRect().height) + 16) + 'px' : '16px';
+    // While a form drawer is open only the newest alert shows, so the stack
+    // doesn't cover the form; the rest come back when the drawer closes.
+    box.classList.toggle('compact', !!foot);
   }, 700);
   function ensureBox() {
     if (box) { if (!host.isConnected) document.body.appendChild(host); return; }
@@ -529,6 +537,7 @@
       '.a:hover{text-decoration:underline}.muted{font-size:12px;color:#94a3b8}' +
       '.bar{display:flex;justify-content:space-between;gap:8px;align-items:center;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:8px 12px;font-size:12.5px}' +
       '.bar .a{color:#93c5fd}' +
+      '.box.compact .bar,.box.compact .more,.box.compact .t~.t{display:none!important}' +
       '.dark .t{background:#0f172a;color:#f1f5f9;border-color:#334155}.dark .bd{color:#cbd5e1}.dark .a{color:#93c5fd}';
     box = document.createElement('div');
     box.className = 'box' + (document.documentElement.classList.contains('dark') ? ' dark' : '');
@@ -594,14 +603,14 @@
     h.appendChild(txt);
     var x = mk('button', 'x', '✕');
     x.setAttribute('aria-label', 'Dismiss');
-    x.addEventListener('click', function () { t.remove(); refreshSoundHint(); });
+    x.addEventListener('click', function () { t.remove(); refreshSoundHint(); if (ev.onClose) ev.onClose(); });
     h.appendChild(x);
     t.appendChild(h);
     var ft = mk('div', 'ft');
     if (ev.link) {
       var a = mk('a', 'a', 'Open →');
       a.href = ev.link;
-      a.addEventListener('click', function () { t.remove(); });
+      a.addEventListener('click', function () { t.remove(); if (ev.onOpen) ev.onOpen(); });
       ft.appendChild(a);
     }
     ft.appendChild(mk('span', 'muted', fmtWhen(ev.at)));
@@ -609,7 +618,7 @@
     var first = box.querySelector('.t');
     box.insertBefore(t, first || null);
     // New tasks stay until dismissed; everything else tidies itself away.
-    if (ev.type !== 'TASK_ASSIGNED') {
+    if (ev.type !== 'TASK_ASSIGNED' && !ev.sticky) {
       setTimeout(function () { if (t.parentNode && !t.matches(':hover')) { t.remove(); refreshSoundHint(); } }, 20000);
     }
     // At most 3 on screen, so alerts never bury the page; the rest are summarised.
@@ -689,5 +698,17 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
   // For other scripts / testing: CRMAlerts.check() polls right away.
-  window.CRMAlerts = { check: function () { poll(true); }, chime: chime };
+  // CRMAlerts.show(ev) puts another script's alert in the same stack, e.g. the
+  // appointment reminders ({ id, type, title, body, link, at, sticky, onOpen, onClose }).
+  window.CRMAlerts = {
+    check: function () { poll(true); },
+    chime: chime,
+    show: function (ev) {
+      if (!ev || !document.body) return false;
+      ensureBox();
+      if (ev.id && box.querySelector('.t[data-id="' + String(ev.id).replace(/"/g, '') + '"]')) return true;
+      toast(ev); desktop(ev); refreshSoundHint();
+      return true;
+    }
+  };
 })();

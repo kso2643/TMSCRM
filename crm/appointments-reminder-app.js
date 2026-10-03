@@ -4,7 +4,10 @@
    Site-wide (loaded on every page, same idea as fuel-expense-app.js's
    punch hook): polls GET /api/appointments/reminders every few minutes
    while the CRM is open in a browser tab, and for any newly-seen alert
-   shows a dismissible toast + plays a short chime. Covers both alert
+   shows a dismissible toast + plays a short chime. The toast goes into
+   the shared bottom-right alert stack (crm-global.js → CRMAlerts.show),
+   so it never covers page buttons; its own box is only a fallback.
+   Covers both alert
    types AppointmentController can generate:
      - TASK_ASSIGNED            someone assigned you an appointment
      - REMINDER_EVENING_BEFORE  a heads-up for tomorrow's (or today's,
@@ -120,6 +123,8 @@
     st.textContent =
       '#appt-reminder-stack{position:fixed;z-index:9998;top:76px;right:12px;left:12px;display:flex;flex-direction:column;gap:8px;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}' +
       '@media (min-width:640px){#appt-reminder-stack{left:auto;width:384px}}' +
+      // Out of the way while a form drawer / dialog is open (it would cover its top fields).
+      'body:has(.drawer-backdrop:not(.is-hidden)) #appt-reminder-stack,body:has(.cp-back) #appt-reminder-stack,body:has([role=dialog][aria-modal=true]) #appt-reminder-stack{display:none}' +
       '.ar-card{display:flex;gap:12px;align-items:flex-start;padding:14px;background:#fff;border:1px solid #e2e8f0;border-left:4px solid #1e3a8a;border-radius:12px;box-shadow:0 10px 25px -5px rgba(15,23,42,.18)}' +
       '.ar-card.ar-amber{border-left-color:#f59e0b}' +
       '.ar-ico{font-size:20px;line-height:1;flex-shrink:0}' +
@@ -198,22 +203,36 @@
       alerts.forEach(function (a) {
         if (shownIds[a.id]) return;
         shownIds[a.id] = true;
-        ensureStack().appendChild(renderAlert(a));
-        showBrowserNotification(
-          a.alertType === 'REMINDER_EVENING_BEFORE' ? 'Appointment reminder' : 'New appointment assigned',
-          a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '')
-        );
+        var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE';
+        var title = isReminder ? 'Appointment reminder' : 'New appointment assigned to you';
+        var body = a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '') + ' \u00b7 ' + fmtWhen(a.appointmentDate, a.appointmentTime);
+        // Same bottom-right stack as every other alert (crm-global.js), so it
+        // never covers a page's header buttons or form fields.
+        var shared = window.CRMAlerts && window.CRMAlerts.show && window.CRMAlerts.show({
+          id: 'appt-' + a.id, type: isReminder ? 'APPOINTMENT_REMINDER' : 'APPOINTMENT_ASSIGNED',
+          title: title, body: body, link: '/appointments/?date=' + encodeURIComponent(a.appointmentDate),
+          at: new Date().toISOString(), sticky: true,
+          onOpen: function () { markRead(a.id); }, onClose: function () { markRead(a.id); }
+        });
+        if (!shared) {
+          ensureStack().appendChild(renderAlert(a));
+          showBrowserNotification(title, a.title + (a.companyName ? ' \u00b7 ' + a.companyName : ''));
+        }
         playedSound = true;
       });
-      if (playedSound) playChime();
+      if (playedSound) { if (window.CRMAlerts && window.CRMAlerts.chime) window.CRMAlerts.chime(); else playChime(); }
     }).catch(function () { /* quiet — this is a background ticker */ });
   }
 
   function boot() {
     if (!token()) return; // login/404 pages, or logged-out sessions — nothing to do
     ensureNotificationPermission();
-    poll();
-    setInterval(poll, POLL_MS);
+    // crm-global.js (the shared alert stack) loads right after this script.
+    var tries = 0;
+    (function first() {
+      if ((window.CRMAlerts && window.CRMAlerts.show) || tries++ > 20) { poll(); setInterval(poll, POLL_MS); }
+      else setTimeout(first, 150);
+    })();
   }
 
   if (document.readyState === 'loading') {

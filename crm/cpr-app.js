@@ -551,7 +551,12 @@
         if (seField) { body.seId = seField.value; if (!seField.value && o.seName && !o.seId) delete body.seId; }
         if (!body.customerName) { err.className = 'cp-err'; err.textContent = 'Customer is required.'; custIn.focus(); return; }
         saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
-        (id ? api('PUT', '/cpr/' + id, body) : api('POST', '/cpr', body)).then(function () {
+        // Link the CRM customer even if the name was typed faster than the suggestions arrived.
+        var link = body.customerId ? Promise.resolve() : api('GET', '/customers?limit=10&search=' + encodeURIComponent(body.customerName)).then(function (r) {
+          var hit = ((r.data && r.data.items) || []).filter(function (c) { return String(c.companyName).trim().toLowerCase() === body.customerName.toLowerCase(); });
+          if (hit.length === 1) body.customerId = hit[0].id;
+        }).catch(function () {});
+        link.then(function () { return id ? api('PUT', '/cpr/' + id, body) : api('POST', '/cpr', body); }).then(function () {
           close();
           toast(id ? 'Opportunity updated' : 'Opportunity added');
           if (state.tab === 'register' && state.reloadRegister) state.reloadRegister();

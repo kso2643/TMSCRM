@@ -62,7 +62,8 @@ require __DIR__ . '/controllers/ExportController.php';
 require __DIR__ . '/controllers/ReportsController.php';   // extends ExportController — must come after it
 require __DIR__ . '/controllers/BackupController.php';
 require __DIR__ . '/controllers/LocationHistoryController.php';
-require __DIR__ . '/controllers/CprController.php';      // CPR opportunity register + Saturday review + weekly/monthly reports
+require __DIR__ . '/controllers/CprController.php';
+require __DIR__ . '/controllers/MeetingAttachmentController.php'; // photos, files, voice notes on meetings      // CPR opportunity register + Saturday review + weekly/monthly reports
 require __DIR__ . '/controllers/PayrollController.php';  // Payroll, Salary Advances, Advance Recovery, Employee Ledger
 
 // ── CORS — mirrors the Express CORS config exactly ───────────────────
@@ -104,10 +105,16 @@ if ($path === '/health') {
 
 // ── Static uploads (/uploads/meetings/filename.jpg, etc.) ────────────
 if (str_starts_with($path, '/uploads/')) {
-    $filePath = BASE_PATH . $path;
-    if (!is_file($filePath)) { http_response_code(404); exit; }
+    // Only real files inside uploads/, never scripts, never the private
+    // meeting-files folder (those go through /api/meetings/:id/attachments).
+    $filePath = realpath(BASE_PATH . rawurldecode($path));
+    $root = realpath(UPLOADS_PATH);
+    if (!$filePath || !$root || !str_starts_with($filePath, $root . DIRECTORY_SEPARATOR) || !is_file($filePath)
+        || preg_match('/\.(php\d?|phtml|phar|pht|pl|py|cgi|sh|shtml|htaccess|htpasswd|ini)$/i', $filePath)
+        || str_starts_with($filePath, $root . DIRECTORY_SEPARATOR . 'meeting-files' . DIRECTORY_SEPARATOR)) { http_response_code(404); exit; }
     $mime = mime_content_type($filePath) ?: 'application/octet-stream';
     header('Content-Type: ' . $mime);
+    header('X-Content-Type-Options: nosniff');
     header('Content-Length: ' . filesize($filePath));
     readfile($filePath);
     exit;
@@ -197,7 +204,10 @@ try {
             $method === 'PUT'   && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
             $method === 'POST'  && $c2 === 'checkin'                    => $ctrl->checkIn($c1),
             $method === 'PATCH' && $c2 === 'timer'                      => $ctrl->timer($c1),
-            $method === 'POST'  && $c2 === 'attachments'                => $ctrl->uploadAttachment($c1),
+            $method === 'GET'    && $c2 === 'attachments' && $c3 === ''  => (new MeetingAttachmentController())->index($c1),
+            $method === 'POST'   && $c2 === 'attachments' && $c3 === ''  => (new MeetingAttachmentController())->upload($c1),
+            $method === 'GET'    && $c2 === 'attachments' && $c3 !== ''  => (new MeetingAttachmentController())->file($c1, $c3),
+            $method === 'DELETE' && $c2 === 'attachments' && $c3 !== ''  => (new MeetingAttachmentController())->delete($c1, $c3),
             default => sendError("Route /api/meetings/$c1/$c2 not found", 404),
         };
     }

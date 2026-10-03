@@ -1,3 +1,51 @@
+# Update — 3 Oct (h): photos, files & voice notes on meetings
+
+**Upload:** `api/` (new: `controllers/MeetingAttachmentController.php`, `uploads/.htaccess`, `uploads/meeting-files/`) and `crm/` (`meetings/index.html`, `crm-global.js`, `appointments-reminder-app.js`, `cpr-app.js`), then press **Ctrl+Shift+R** once. The new table is created automatically (`api/database/migration_meeting_attachments.sql` if you prefer to run it).
+
+## Log meeting: Photo · File · Voice note
+- **Log a meeting / Log a follow-up** has a new section, *Photos, files & voice notes*:
+  - **📷 Photo:** on a phone it offers the camera or the gallery; several photos at once.
+  - **📎 File:** PDF, Word, Excel, PowerPoint, CSV, text or images.
+  - **🎙 Voice note:** records from the microphone with a timer, **Stop** and **Cancel**, up to 5 minutes per note. The phone asks for microphone permission the first time.
+  
+  You can review and remove items before saving, then **Save meeting** uploads them ("Uploading 2 of 3…").
+- **Opening a saved meeting** shows its attachments: photo thumbnails (click for full size), files with download, and voice notes with a player. You can add more or remove them there too.
+- **Meeting cards** show 📷 / 📎 / 🎙 counts.
+- **Limits:** 15 MB per file, 30 attachments per meeting.
+- **Who can do what:**
+  - View: everyone who can see the meeting.
+  - Add: the person who logged it, the person it's assigned to, and Manager / Admin / Super Admin.
+  - Remove: whoever added the file, the meeting owner, and Manager / Admin / Super Admin.
+
+## Security fixes (important)
+- **Any file could be uploaded before.** The old meeting-upload endpoint accepted *any* file type, including `.php`, into the public `uploads/` folder under its own name, so an uploaded script could have been run on the server. It is replaced:
+  - files are checked by extension **and** real content;
+  - they're stored under random names in `uploads/meeting-files/`, which the web server never serves directly;
+  - they're only sent to logged-in users through the API.
+- **Scripts can't run in uploads:** `api/uploads/.htaccess` now blocks script files anywhere in the uploads folder.
+- **Direct file links tightened:** links like `/uploads/...` only serve real files inside the uploads folder, never scripts or the private attachments folder.
+
+## Alerts don't cover forms or buttons
+- **Appointment reminders** now appear in the same bottom-right alert stack as the other alerts. Before, they sat at the top right, covering page buttons like "+ Add opportunity" and the top of form drawers.
+- **While a form drawer is open** (Meetings, CPR), the alert stack moves above its Save/Cancel bar and shows only the newest alert. The others come back when the drawer closes.
+
+## Verification
+- **Browser:** 17 checks:
+  - photo, file and a real recorded voice note (fake microphone);
+  - pending remove, save with 3 attachments, card counts;
+  - photo and voice loading in the saved meeting, file download;
+  - live add and delete, mobile layout.
+- **API:** 16 checks:
+  - other users can view but not add or delete;
+  - login required for files;
+  - range requests for audio;
+  - the private folder, `../.env` and `.php` files can't be reached through `/uploads/`;
+  - disguised and oversized files rejected.
+- **Alerts:** 12 checks for reminder placement.
+- **All earlier suites pass.**
+
+---
+
 # Update — 3 Oct (g): CPR register + Saturday review + weekly/monthly reports; quotation fixes
 
 **Upload:** `api/` and `crm/` (new: `crm/cpr/`, `crm/cpr-app.js`, `crm/vendor/pdfjs/`, `api/controllers/CprController.php`, `api/includes/StyledXlsxWriter.php`), then press **Ctrl+Shift+R** once. The new tables are created automatically on first use (`api/database/migration_cpr.sql` if you prefer to run it yourself).
