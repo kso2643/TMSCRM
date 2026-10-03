@@ -111,12 +111,34 @@
   // ── toast stack (appended to <body>, outside the SPA's root, so it
   //    survives client-side navigation between pages) ──────────────
   var stack = null;
+  // Own styles (ar- prefix): hand-coded pages (Meetings, Quotations, …) don't
+  // load the compiled Tailwind CSS, so utility classes would render unstyled.
+  function ensureCss() {
+    if (document.getElementById('appt-reminder-css')) return;
+    var st = document.createElement('style');
+    st.id = 'appt-reminder-css';
+    st.textContent =
+      '#appt-reminder-stack{position:fixed;z-index:9998;top:76px;right:12px;left:12px;display:flex;flex-direction:column;gap:8px;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}' +
+      '@media (min-width:640px){#appt-reminder-stack{left:auto;width:384px}}' +
+      '.ar-card{display:flex;gap:12px;align-items:flex-start;padding:14px;background:#fff;border:1px solid #e2e8f0;border-left:4px solid #1e3a8a;border-radius:12px;box-shadow:0 10px 25px -5px rgba(15,23,42,.18)}' +
+      '.ar-card.ar-amber{border-left-color:#f59e0b}' +
+      '.ar-ico{font-size:20px;line-height:1;flex-shrink:0}' +
+      '.ar-body{flex:1;min-width:0}' +
+      '.ar-t{margin:0;font-size:14px;font-weight:600;color:#0f172a}' +
+      '.ar-s{margin:2px 0 0;font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.ar-w{margin:2px 0 0;font-size:11px;color:#94a3b8}' +
+      '.ar-a{display:inline-block;margin-top:6px;font-size:12px;font-weight:600;color:#1e40af;text-decoration:none}' +
+      '.ar-a:hover{text-decoration:underline}' +
+      '.ar-x{flex-shrink:0;margin-left:8px;background:none;border:none;color:#94a3b8;font-size:14px;cursor:pointer;padding:2px}' +
+      '.ar-x:hover{color:#475569}' +
+      'html.dark .ar-card{background:#0f172a;border-color:#1e293b}html.dark .ar-t{color:#f1f5f9}html.dark .ar-a{color:#93c5fd}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+
   function ensureStack() {
     if (stack && document.body.contains(stack)) return stack;
-    stack = el('div', {
-      id: 'appt-reminder-stack',
-      class: 'fixed z-[9998] top-3 right-3 left-3 sm:left-auto sm:w-96 space-y-2'
-    });
+    ensureCss();
+    stack = el('div', { id: 'appt-reminder-stack' });
     document.body.appendChild(stack);
     return stack;
   }
@@ -138,31 +160,28 @@
 
   function renderAlert(a) {
     var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE';
-    var card = el('div', {
-      class: 'card shadow-lg border-l-4 ' + (isReminder ? 'border-l-amber-500' : 'border-l-primary') +
-             ' p-3.5 flex gap-3 items-start bg-white dark:bg-slate-900'
-    });
-    card.appendChild(el('div', { class: 'text-xl leading-none shrink-0', text: isReminder ? '\u23f0' : '\ud83d\udccc' }));
+    var card = el('div', { class: 'ar-card' + (isReminder ? ' ar-amber' : '') });
+    card.appendChild(el('div', { class: 'ar-ico', text: isReminder ? '\u23f0' : '\ud83d\udccc' }));
     var viewBtn = el('a', {
-      class: 'text-primary dark:text-primary-300 text-xs font-medium mt-1.5 inline-block',
+      class: 'ar-a',
       href: '/appointments/?date=' + encodeURIComponent(a.appointmentDate),
       text: 'View appointment \u2192',
       onclick: function () { markRead(a.id); }
     });
-    card.appendChild(el('div', { class: 'flex-1 min-w-0' }, [
+    card.appendChild(el('div', { class: 'ar-body' }, [
       el('p', {
-        class: 'text-sm font-semibold text-slate-900 dark:text-slate-100',
+        class: 'ar-t',
         text: isReminder ? 'Appointment reminder' : 'New appointment assigned to you'
       }),
       el('p', {
-        class: 'text-xs text-muted mt-0.5 truncate',
+        class: 'ar-s',
         text: a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '')
       }),
-      el('p', { class: 'text-[11px] text-slate-400 mt-0.5', text: fmtWhen(a.appointmentDate, a.appointmentTime) }),
+      el('p', { class: 'ar-w', text: fmtWhen(a.appointmentDate, a.appointmentTime) }),
       viewBtn
     ]));
     card.appendChild(el('button', {
-      class: 'text-slate-400 hover:text-slate-600 shrink-0 ml-2',
+      class: 'ar-x',
       'aria-label': 'Dismiss', text: '\u2715',
       onclick: function () { markRead(a.id); if (card.parentNode) card.parentNode.removeChild(card); }
     }));

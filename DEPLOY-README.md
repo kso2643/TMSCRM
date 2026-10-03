@@ -1,3 +1,19 @@
+# Update — 3 Oct (f): "+ Log meeting" on Meetings & follow-ups
+
+**Upload:** `crm/meetings/index.html` and `crm/appointments-reminder-app.js` (or the whole `crm/` folder), then press Ctrl+Shift+R once. No API changes.
+
+- **New "+ Log meeting" button** at the top right of Meetings & follow-ups. It opens a form with:
+  - **Customer** (required): type part of the company, contact or phone and pick from the list. If the customer doesn't exist, a link takes you to Customers to add them first.
+  - **Meeting date** (required) and time, **type** (Visit, Call, Online, …) and **status**.
+  - **Assign to** (Admin, Super Admin and Manager only).
+  - **Discussion summary**, customer requirements and notes.
+  - **Next follow-up** date, time and priority. The usual follow-up reminder alerts are scheduled automatically.
+- **From the Follow-ups tab** the button opens "Log a follow-up", with tomorrow 10:00 filled in. There, the follow-up date is required.
+- **Direct link:** `/meetings/#new` opens the form straight away, for example from a dashboard shortcut.
+- **Fixed:** on the hand-coded pages (Meetings, Quotations, Payroll and others) the appointment reminder popup showed as plain unstyled text at the bottom of the page. It now has its own styles and appears just below the page header, so it no longer covers header buttons.
+
+---
+
 # Fix — 3 Oct (e): Live tracking page blank
 
 **Problem:** the Live tracking page opened blank. Its script file was in a folder named `admin/live-tracking/`, and ad blockers (uBlock, AdBlock, Brave shields) block any script whose address contains the word "tracking". With the script blocked, the page showed nothing.

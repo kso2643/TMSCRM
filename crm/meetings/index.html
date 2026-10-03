@@ -228,7 +228,34 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 .save-feedback.ok { background: var(--green-light); color: var(--green); }
 .save-feedback.err { background: var(--red-light); color: var(--red); }
 
+.btn-new {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--blue); color: #fff; border: none;
+  border-radius: var(--radius-sm); padding: 8px 14px; font-size: .84rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.btn-new:hover { background: var(--blue-dark); }
+.btn-new svg { flex-shrink: 0; }
+.field-group label .req { color: var(--red); }
+.cust-pick { position: relative; }
+.cust-results {
+  position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px; background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); max-height: 240px; overflow-y: auto; z-index: 5;
+}
+.cust-results.is-hidden { display: none; }
+.cust-results button {
+  display: block; width: 100%; text-align: left; background: none; border: none; padding: 8px 10px; font-size: .84rem; cursor: pointer;
+}
+.cust-results button:hover, .cust-results button:focus { background: var(--bg); }
+.cust-results .cr-sub { display: block; font-size: .74rem; color: var(--muted); }
+.cust-results .cr-empty { padding: 10px; font-size: .8rem; color: var(--muted); }
+.cust-chosen {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--blue); border-radius: var(--radius-sm); font-size: .86rem; background: var(--bg);
+}
+.cust-chosen button { background: none; border: none; color: var(--blue); font-size: .78rem; font-weight: 700; cursor: pointer; }
+.form-section { font-size: .78rem; font-weight: 700; color: var(--dark); border-top: 1px solid var(--border); padding-top: 12px; }
+
 @media (max-width: 640px) {
+  .user-chip #user-name { display: none; }
   .filter-bar { flex-direction: column; align-items: stretch; }
   .filter-bar input[type="text"], .filter-search-wrap input, .filter-bar select { width: 100%; }
   .filter-name-group { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 8px; width: 100%; }
@@ -250,6 +277,10 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
       <h1 class="page-title">Meetings &amp; Follow-ups</h1>
     </div>
     <div class="topbar-right">
+      <button class="btn-new" id="btn-new-meeting" type="button" title="Log a new meeting or follow-up">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="bn-label">Log meeting</span>
+      </button>
       <div class="user-chip">
         <span class="avatar" id="user-avatar">–</span>
         <span id="user-name">–</span>
@@ -376,6 +407,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
   var api = {
     meetings: {
       list: function (params) { return apiFetch("/meetings" + qs(params)); },
+      create: function (body) { return apiFetch("/meetings", { method: "POST", body: JSON.stringify(body) }); },
       update: function (id, body) {
         return apiFetch("/meetings/" + encodeURIComponent(id), { method: "PUT", body: JSON.stringify(body) });
       },
@@ -383,6 +415,9 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     },
     users: {
       list: function () { return apiFetch("/users" + qs({ limit: 200 })); }
+    },
+    customers: {
+      search: function (q) { return apiFetch("/customers" + qs({ search: q, limit: 15 })); }
     }
   };
 
@@ -752,6 +787,170 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
   }
 
   /* ═════════════════════════════════════════════════════════════════════
+     CREATE — "+ Log meeting" opens the same drawer with a new-meeting form
+     (POST /meetings). Opened from the Follow-ups tab it starts with the
+     follow-up date filled in, so logging a follow-up is one step.
+     ═════════════════════════════════════════════════════════════════════ */
+  var createState = { customer: null, searchSeq: 0 };
+
+  function todayInputValue(offsetDays) {
+    var d = new Date(Date.now() + (offsetDays || 0) * 86400000);
+    return d.toLocaleDateString("en-CA", { timeZone: DISPLAY_TZ }); // YYYY-MM-DD
+  }
+  function nowTimeValue() {
+    return new Date().toLocaleTimeString("en-GB", { timeZone: DISPLAY_TZ, hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
+  function optionsHtml(list, selected, blankLabel) {
+    return (blankLabel != null ? '<option value="">' + escapeHtml(blankLabel) + "</option>" : "") +
+      list.map(function (v) { return '<option value="' + v + '"' + (v === selected ? " selected" : "") + ">" + humanize(v) + "</option>"; }).join("");
+  }
+
+  function openCreate() {
+    createState.customer = null;
+    var forFollowup = state.tab === "followups";
+    var me = state.currentUser || {};
+    var assignable = state.users.filter(function (u) { return u.isActive !== false && u.isActive !== 0; });
+    var drawer = document.getElementById("drawer");
+    drawer.innerHTML =
+      '<div class="drawer-header">' +
+        "<div><h2>" + (forFollowup ? "Log a follow-up" : "Log a meeting") + "</h2>" +
+        "<p>Record a visit, call or online meeting and plan the next follow-up</p></div>" +
+        '<button class="drawer-close" id="drawer-close" aria-label="Close">&times;</button>' +
+      "</div>" +
+      '<div class="drawer-body">' +
+        '<div class="field-group"><label for="new-cust-q">Customer <span class="req">*</span></label>' +
+          '<div class="cust-pick" id="cust-pick">' +
+            '<input type="text" id="new-cust-q" placeholder="Type company, contact or phone…" autocomplete="off" />' +
+            '<div class="cust-results is-hidden" id="cust-results"></div>' +
+          "</div>" +
+        "</div>" +
+        '<div class="field-row">' +
+          '<div class="field-group"><label for="new-date">Meeting date <span class="req">*</span></label><input type="date" id="new-date" value="' + todayInputValue() + '" /></div>' +
+          '<div class="field-group"><label for="new-time">Time</label><input type="time" id="new-time" value="' + nowTimeValue() + '" /></div>' +
+        "</div>" +
+        '<div class="field-row">' +
+          '<div class="field-group"><label for="new-type">Type <span class="req">*</span></label><select id="new-type">' + optionsHtml(VALID_TYPES, "VISIT") + "</select></div>" +
+          '<div class="field-group"><label for="new-status">Status</label><select id="new-status">' + optionsHtml(VALID_STATUSES, forFollowup ? "FOLLOW_UP_PENDING" : "NEW_LEAD") + "</select></div>" +
+        "</div>" +
+        (isAdmin(me) && assignable.length
+          ? '<div class="field-group"><label for="new-assign">Assign to</label><select id="new-assign"><option value="">Myself (' + escapeHtml(me.name || "me") + ")</option>" +
+              assignable.filter(function (u) { return u.id !== me.id; }).map(function (u) {
+                return '<option value="' + escapeHtml(u.id) + '">' + escapeHtml(u.name) + (u.role ? " · " + humanize(u.role) : "") + "</option>";
+              }).join("") + "</select></div>"
+          : "") +
+        '<div class="field-group"><label for="new-summary">Discussion summary</label><textarea id="new-summary" placeholder="What was discussed?"></textarea></div>' +
+        '<div class="field-group"><label for="new-req">Customer requirements</label><textarea id="new-req" placeholder="Tools, quantities, specs…" style="min-height:54px"></textarea></div>' +
+        '<div class="field-group"><label for="new-notes">Notes</label><textarea id="new-notes" placeholder="Anything else" style="min-height:54px"></textarea></div>' +
+        '<div class="form-section">Next follow-up</div>' +
+        '<div class="field-row">' +
+          '<div class="field-group"><label for="new-fu-date">Date' + (forFollowup ? ' <span class="req">*</span>' : "") + '</label><input type="date" id="new-fu-date" value="' + (forFollowup ? todayInputValue(1) : "") + '" /></div>' +
+          '<div class="field-group"><label for="new-fu-time">Time</label><input type="time" id="new-fu-time" value="' + (forFollowup ? "10:00" : "") + '" /></div>' +
+        "</div>" +
+        '<div class="field-group"><label for="new-priority">Follow-up priority</label><select id="new-priority">' + optionsHtml(VALID_PRIORITIES, "MEDIUM") + "</select></div>" +
+      "</div>" +
+      '<div id="drawer-feedback"></div>' +
+      '<div class="drawer-footer">' +
+        '<button class="btn-secondary" id="drawer-cancel">Cancel</button>' +
+        '<button class="btn-primary" id="drawer-save">' + (forFollowup ? "Save follow-up" : "Save meeting") + "</button>" +
+      "</div>";
+
+    document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+    document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
+    document.getElementById("drawer-save").addEventListener("click", function () { saveCreate(forFollowup); });
+    var q = document.getElementById("new-cust-q");
+    q.addEventListener("input", function () {
+      clearTimeout(createState.timer);
+      createState.timer = setTimeout(function () { searchCustomers(q.value.trim()); }, 250);
+    });
+    q.addEventListener("focus", function () { searchCustomers(q.value.trim()); });
+    q.addEventListener("blur", function () { setTimeout(function () { var b = document.getElementById("cust-results"); if (b) b.classList.add("is-hidden"); }, 150); });
+    document.getElementById("drawer-backdrop").classList.remove("is-hidden");
+    setTimeout(function () { q.focus(); }, 50);
+  }
+
+  function searchCustomers(term) {
+    var box = document.getElementById("cust-results");
+    if (!box) return;
+    var seq = ++createState.searchSeq;
+    box.classList.remove("is-hidden");
+    box.innerHTML = '<div class="cr-empty">Searching…</div>';
+    api.customers.search(term).then(function (res) {
+      if (seq !== createState.searchSeq) return; // a newer search is running
+      var items = (res.data && (res.data.items || res.data.customers)) || [];
+      if (!items.length) {
+        box.innerHTML = '<div class="cr-empty">No customer found' + (term ? ' for "' + escapeHtml(term) + '"' : "") +
+          '. <a href="/customers/" style="color:var(--blue);font-weight:700">Add the customer first</a>.</div>';
+        return;
+      }
+      box.innerHTML = items.map(function (c, i) {
+        return '<button type="button" data-i="' + i + '"><b>' + escapeHtml(c.companyName) + "</b>" +
+          '<span class="cr-sub">' + escapeHtml([c.contactPerson, c.contactNumber, c.location].filter(Boolean).join(" · ")) + "</span></button>";
+      }).join("");
+      Array.prototype.forEach.call(box.querySelectorAll("button"), function (b) {
+        b.addEventListener("mousedown", function (e) { e.preventDefault(); chooseCustomer(items[+b.getAttribute("data-i")]); });
+      });
+    }).catch(function (err) {
+      if (seq === createState.searchSeq) box.innerHTML = '<div class="cr-empty">' + escapeHtml(err.message || "Couldn’t load customers") + "</div>";
+    });
+  }
+
+  function chooseCustomer(c) {
+    createState.customer = c;
+    var pick = document.getElementById("cust-pick");
+    pick.innerHTML = '<div class="cust-chosen"><span><b>' + escapeHtml(c.companyName) + "</b>" +
+      (c.contactPerson ? ' <span style="color:var(--muted)">· ' + escapeHtml(c.contactPerson) + "</span>" : "") +
+      '</span><button type="button" id="cust-change">Change</button></div>';
+    document.getElementById("cust-change").addEventListener("click", function () {
+      createState.customer = null;
+      pick.innerHTML = '<input type="text" id="new-cust-q" placeholder="Type company, contact or phone…" autocomplete="off" /><div class="cust-results is-hidden" id="cust-results"></div>';
+      var q = document.getElementById("new-cust-q");
+      q.addEventListener("input", function () {
+        clearTimeout(createState.timer);
+        createState.timer = setTimeout(function () { searchCustomers(q.value.trim()); }, 250);
+      });
+      q.focus(); searchCustomers("");
+    });
+  }
+
+  function saveCreate(forFollowup) {
+    var saveBtn = document.getElementById("drawer-save");
+    var feedback = document.getElementById("drawer-feedback");
+    var val = function (id) { var el = document.getElementById(id); return el ? el.value.trim() : ""; };
+    var err = !createState.customer ? "Choose the customer."
+      : !val("new-date") ? "Enter the meeting date."
+      : forFollowup && !val("new-fu-date") ? "Enter the follow-up date."
+      : "";
+    if (err) { feedback.innerHTML = '<div class="save-feedback err">' + err + "</div>"; return; }
+
+    var body = {
+      customerId: createState.customer.id,
+      meetingDate: val("new-date") + "T" + (val("new-time") || "00:00") + ":00",
+      meetingType: val("new-type"),
+      status: val("new-status"),
+      summary: val("new-summary") || undefined,
+      customerRequirements: val("new-req") || undefined,
+      notes: val("new-notes") || undefined,
+      assignedToId: val("new-assign") || undefined,
+      followUpPriority: val("new-priority") || "MEDIUM"
+    };
+    if (val("new-fu-date")) body.nextFollowUp = val("new-fu-date") + "T" + (val("new-fu-time") || "00:00") + ":00";
+    if (val("new-fu-time")) body.followUpTime = val("new-fu-time");
+
+    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    feedback.innerHTML = "";
+    api.meetings.create(body).then(function () {
+      feedback.innerHTML = '<div class="save-feedback ok">Saved' + (body.nextFollowUp ? " — you’ll get a reminder before the follow-up." : ".") + "</div>";
+      state.totals = { meetings: null, followups: null };
+      state.page = 1;
+      setTimeout(function () { closeDrawer(); fetchList().then(refreshOtherTabCount); }, 700);
+    }).catch(function (e) {
+      feedback.innerHTML = '<div class="save-feedback err">' + escapeHtml(e.message || "Couldn’t save. Try again.") + "</div>";
+      saveBtn.disabled = false; saveBtn.textContent = forFollowup ? "Save follow-up" : "Save meeting";
+    });
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════
      EVENT WIRING
      ═════════════════════════════════════════════════════════════════════ */
   function debounced(fn, ms) {
@@ -832,6 +1031,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 
     initFilterEvents();
     initTabs();
+    document.getElementById("btn-new-meeting").addEventListener("click", openCreate);
     document.getElementById("drawer-backdrop").addEventListener("click", function (e) {
       if (e.target === this) closeDrawer();
     });
@@ -851,7 +1051,11 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
       }).catch(function () { /* keep the built-in fallback lists above if this fails */ })
         .then(populateStaticFilterOptions)
     ];
-    Promise.all(startupTasks).then(function () { refreshOtherTabCount(); });
+    Promise.all(startupTasks).then(function () {
+      refreshOtherTabCount();
+      // /meetings/#new (or ?new=1) opens the form straight away — handy for dashboard shortcuts.
+      if (/^#new\b/.test(location.hash) || /[?&]new=1\b/.test(location.search)) openCreate();
+    });
   }
 
   if (document.readyState === "loading") {
