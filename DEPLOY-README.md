@@ -1,3 +1,17 @@
+# Fix — 3 Oct (e): Live tracking page blank
+
+**Problem:** the Live tracking page opened blank. Its script file was in a folder named `admin/live-tracking/`, and ad blockers (uBlock, AdBlock, Brave shields) block any script whose address contains the word "tracking". With the script blocked, the page showed nothing.
+
+**Fix:**
+- The page's script now loads from `_next/static/chunks/app/(dashboard)/admin/live-map/`. The page address `/admin/live-tracking/` stays the same.
+- The new Location history page and the Daily tracking report now call API addresses without "tracking": `/api/route-log/...` and `/api/reports/daily-movement`. The old addresses still work.
+
+**Upload:** `crm/` (including the new `_next/static/chunks/app/(dashboard)/admin/live-map/` folder) and `api/index.php`, then press Ctrl+Shift+R once.
+
+**Verified:** in a browser that blocks every script and API address containing "tracking", Live tracking shows the map and the checked-in employees, Location history loads, and the Daily tracking report downloads.
+
+---
+
 # Update — 3 Oct (d): calendar, alerts page, reports & backup, product import, location history, breaks, meetings
 
 **Upload:** `api/` and `crm/` (now including the new `crm/vendor/leaflet/` folder), then press **Ctrl+Shift+R** once. Nothing to run in the database; new tables are created automatically.

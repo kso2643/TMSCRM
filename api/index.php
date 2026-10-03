@@ -381,7 +381,7 @@ try {
             $method === 'GET' && $c1 === 'trials'         => $ctrl->trials(),
             $method === 'GET' && $c1 === 'appointments'   => $ctrl->appointments(),
             $method === 'GET' && $c1 === 'breaks'         => $ctrl->breaks(),
-            $method === 'GET' && $c1 === 'tracking'       => $ctrl->tracking(),
+            $method === 'GET' && in_array($c1, ['tracking', 'daily-movement'], true)     => $ctrl->tracking(),
             default => sendError("Route /api/reports/$c1 not found", 404),
         };
     }
@@ -398,7 +398,7 @@ try {
     }
 
     // ── Location history (any day) + breaks / stationary alerts ────
-    elseif ($c0 === 'tracking') {
+    elseif ($c0 === 'tracking' || $c0 === 'route-log') { // route-log: same routes without the word ad blockers filter
         $ctrl = new LocationHistoryController();
         match (true) {
             $method === 'GET' && $c1 === 'users'   => $ctrl->users(),

@@ -30,7 +30,7 @@
     ]],
     ['Operations', [
       ['Attendance report', 'Employee attendance and working hours summary', '/attendance/export', 'Clock', '#16a34a', 'attendance'],
-      ['Daily tracking report', 'Punch in/out, location points and distance travelled per person per day', '/reports/tracking', 'Route', '#0f766e', 'tracking'],
+      ['Daily tracking report', 'Punch in/out, location points and distance travelled per person per day', '/reports/daily-movement', 'Route', '#0f766e', 'tracking'],
       ['Breaks report', 'Tea and lunch breaks with start, end and duration', '/reports/breaks', 'Coffee', '#a16207', 'breaks'],
       ['Fuel expense report', 'Meter readings, kilometres and fuel claims', '/fuel-expense/export', 'Fuel', '#ea580c', 'fuel'],
       ['Leave report', 'Leave requests history and approval status', '/leaves/export', 'CalendarOff', '#db2777', 'leave'],

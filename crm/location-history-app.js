@@ -7,7 +7,7 @@
      - stops of 10+ minutes in one place, tea / lunch breaks, stationary and
        location-off alerts
      - distance, points, hours, break time, and a slider to replay the day.
-   Data: GET /api/tracking/users | days | history (LocationHistoryController).
+   Data: GET /api/route-log/users | days | history (LocationHistoryController).
    Map: Leaflet 1.9.4 (bundled in /vendor/leaflet) + OpenStreetMap tiles.
 
    NOTE: part of the hand-patched build. `npm run build` from source will
@@ -126,7 +126,7 @@
     }
     function shift(n) { var d = new Date(state.date + 'T00:00:00'); d.setDate(d.getDate() + n); setDate(iso(d)); }
 
-    api('/tracking/users').then(function (r) {
+    api('/route-log/users').then(function (r) {
       state.users = r.data.users || [];
       userSel.innerHTML = '';
       userSel.appendChild(el('option', { value: '', text: 'Choose a person…' }));
@@ -139,7 +139,7 @@
     function loadDays() {
       days.innerHTML = '';
       if (!state.userId) return;
-      api('/tracking/days?userId=' + encodeURIComponent(state.userId) + '&month=' + state.date.slice(0, 7)).then(function (r) {
+      api('/route-log/days?userId=' + encodeURIComponent(state.userId) + '&month=' + state.date.slice(0, 7)).then(function (r) {
         dayData = r.data.days || [];
         var y = Number(state.date.slice(0, 4)), m = Number(state.date.slice(5, 7));
         var n = new Date(y, m, 0).getDate();
@@ -170,7 +170,7 @@
       }
       mapBox.innerHTML = ''; map = null;
       mapBox.appendChild(el('div', { class: 'lh-empty', text: 'Loading…' }));
-      Promise.all([api('/tracking/history?userId=' + encodeURIComponent(state.userId) + '&date=' + state.date), loadLeaflet().catch(function (e) { return e; })])
+      Promise.all([api('/route-log/history?userId=' + encodeURIComponent(state.userId) + '&date=' + state.date), loadLeaflet().catch(function (e) { return e; })])
         .then(function (res) {
           state.data = res[0].data;
           render(res[1] instanceof Error ? res[1] : null);
