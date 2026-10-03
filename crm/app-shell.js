@@ -35,6 +35,7 @@
   // [tag, attributes] nodes, inlined so pages built from this shell have no
   // external icon dependency.
   var ICONS = {
+    "BadgeIndianRupee": [["path",{"d":"M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"}],["path",{"d":"M8 8h8"}],["path",{"d":"M8 12h8"}],["path",{"d":"m13 17-5-1h1a3 3 0 0 0 0-6"}]],
     "Target": [["circle",{"cx":"12","cy":"12","r":"10"}],["circle",{"cx":"12","cy":"12","r":"6"}],["circle",{"cx":"12","cy":"12","r":"2"}]],
     "Activity": [["path",{"d":"M22 12h-4l-3 9L9 3l-3 9H2"}]],
     "BarChart3": [["path",{"d":"M3 3v18h18"}],["path",{"d":"M18 17V9"}],["path",{"d":"M13 17V5"}],["path",{"d":"M8 17v-3"}]],
@@ -70,7 +71,7 @@
     "Upload": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"17 8 12 3 7 8"}],["line",{"x1":"12","x2":"12","y1":"3","y2":"15"}]]
   };
   // Sidebar label -> icon. Keep in sync with the React layout chunk.
-  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target"};
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -84,6 +85,7 @@
     { label: 'Quotations',            href: '/quotations/',     icon: 'file',      section: 'Sales' },
     { label: 'Orders',                href: '/orders/',         icon: 'clipboard', section: 'Sales' },
     { label: 'Trials',                href: '/trials/',         icon: 'flask',     section: 'Sales' },
+    { label: 'Price requests',        href: '/price-requests/', icon: 'tag',       section: 'Sales' },
     { label: 'CPR & weekly review',   href: '/cpr/',            icon: 'target',    section: 'Sales' },
     { label: 'Stock',                 href: '/stock/',          icon: 'layers',    section: 'Sales' },
     { label: 'Analytics',             href: '/analytics/',      icon: 'chart',     section: 'Reports' },
@@ -346,7 +348,10 @@
     back.addEventListener('click', function () { toggle(false); });
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') toggle(false); });
     wrap.appendChild(back); wrap.appendChild(aside); wrap.appendChild(fab);
+    // Appear in place on load (no slide-in from the left); later opens/closes still animate.
+    aside.style.transition = 'none';
     applyDock();
+    requestAnimationFrame(function () { requestAnimationFrame(function () { aside.style.transition = ''; }); });
     if (mq.addEventListener) mq.addEventListener('change', applyDock); else if (mq.addListener) mq.addListener(applyDock);
     shadow.appendChild(css); shadow.appendChild(st); shadow.appendChild(wrap);
     document.body.appendChild(host);

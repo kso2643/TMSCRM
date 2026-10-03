@@ -1,3 +1,50 @@
+# Update — 4 Oct: Price requests page (multi-item, Excel), smooth transitions
+
+**Upload:** `api/` and `crm/` (new: `crm/price-requests/`, `crm/price-requests-app.js`, `crm/motion.css`), then press **Ctrl+Shift+R** once. The new columns and table are created automatically.
+
+## 1. Price requests: its own page (Sales → Price requests, `/price-requests/`)
+- **New request:**
+  1. Pick the **company** (required).
+  2. Add one or **many items**. Each item has:
+     - **Product** (type a name or item code; product-list suggestions fill the code, list price, unit and category);
+     - **Category \***, **Brand \***, **Regular / One time \*** and **Quantity \***;
+     - Unit, **Target price** (₹ per unit), **Discount %** and a **Note**.
+  3. Optionally add a note for the whole request, then **Raise request**. It gets a number like **PR-2610-0007**.
+  
+  Missing fields are highlighted and listed.
+- **Excel:**
+  - **Excel template** downloads a sheet with those columns, two sample rows and a Lists sheet of your categories.
+  - **Upload items from Excel** reads the filled sheet (.xlsx or .csv). Item codes are matched to your products, "Single/Once" also counts as One time, and rows with problems are listed ("Row 3: brand is required") and highlighted so you can fix them on screen.
+  - Then select the company and raise the request.
+- **Requests:**
+  - **Waiting / Answered / All**, search (company, product, brand, PR number) and, for admins, a filter by engineer.
+  - Each request opens to show its items: list price, asked price and discount.
+- **Admin / Super Admin answer each item:**
+  - **Approve** with the approved price and discount (pre-filled with the asked price, or the list price), or **Reject** with a reason.
+  - "Approve all at asked / list price", then **Save answers** saves them together.
+  - The engineer gets **one** alert per request, e.g. "PR-2610-0007: 3 approved, 1 rejected". Admins also get one alert per new request, not one per item.
+- **Withdraw:** the engineer can withdraw a request while nothing in it has been answered. Admins can delete any request.
+- **Tasks page:** the **Price requests ↗** tab now opens this page (old `/tasks/#prices` links redirect here).
+- **Reports page:** the Price requests report now includes request no., category, brand, Regular/One time, unit, asked and approved discount, and the engineer's note.
+
+## 2. Smoother transitions everywhere (`crm/motion.css`, linked on every page)
+- **Between pages:** a quick cross-fade instead of a white flash, with the sidebar and top bar held still while the content changes (Chrome, Edge and new Safari; other browsers simply load the page).
+- **Content:** page content fades in.
+- **Pop-ups:** forms and pop-ups fade, slide or pop in, and the Meetings and CPR drawers **slide out** when closed.
+- **Controls:** buttons, links and fields have smooth hover and focus changes and a slight press effect.
+- **Alerts:** toast alerts fade out instead of vanishing.
+- **No more jump on Meetings, Quotations and Payroll:** the content no longer jumps right when the sidebar docks, and the sidebar no longer slides in on every visit. Layout shift on Meetings went from 0.23 ("poor") to 0.03 ("good").
+- **Sticky bars:** the break button and alerts move up above sticky bottom bars (Raise request, Save review), so they don't cover them.
+- **Reduced motion:** if a device is set to reduce motion, all animation is switched off.
+
+## Verification
+- **Price requests API:** 24 checks: validation, multi-item save in order, visibility, one alert per request, answers, permissions, template and Excel parsing with per-row problems, report columns, withdraw.
+- **Price requests browser:** 21 checks: form validation, product suggestions, brand required, Excel upload with a problem row, admin answers (reject needs a reason), engineer sees the answer, mobile, Tasks redirect.
+- **Motion:** 19 checks: stylesheet on React and hand-coded pages, sidebar held still, fade-in, drawer slide in and out, reopen during close, layout shift, CPR drawer, reduced motion.
+- **All earlier suites pass.**
+
+---
+
 # Update — 3 Oct (h): photos, files & voice notes on meetings
 
 **Upload:** `api/` (new: `controllers/MeetingAttachmentController.php`, `uploads/.htaccess`, `uploads/meeting-files/`) and `crm/` (`meetings/index.html`, `crm-global.js`, `appointments-reminder-app.js`, `cpr-app.js`), then press **Ctrl+Shift+R** once. The new table is created automatically (`api/database/migration_meeting_attachments.sql` if you prefer to run it).

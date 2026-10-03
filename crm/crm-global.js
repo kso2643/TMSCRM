@@ -60,7 +60,7 @@
   // app and as the newer hand-coded page. A React link would open the old one
   // (and a refresh the new one), so on React pages any click on such a link is
   // turned into a normal page load.
-  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr)\/?$/;
+  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests)\/?$/;
   function hardLinks() {
     if (!window.__next_f) return; // only the compiled React pages need this
     document.addEventListener('click', function (e) {
@@ -404,6 +404,7 @@
       document.getElementById('app-shell-aside') || document.querySelector('aside .sidebar-link'));
     if (sidebarShown) pill.style.left = '272px';                 // just right of the sidebar
     else if (document.getElementById('crm-nav-drawer')) pill.style.bottom = '70px'; // above the Menu button
+    pill.setAttribute('data-base', pill.style.bottom || '16px');
     if (trk.active) {
       var a = trk.active;
       var label = mkEl('span', '', (a.type === 'LUNCH' ? '🍽 Lunch break ' : '☕ Tea break '));
@@ -506,10 +507,23 @@
   // Sit above a page's sticky bottom button bar (e.g. the Trials save/submit
   // bar) — checked continuously since pages render that bar after alerts arrive.
   setInterval(function () {
+    // The break pill (and alerts) also step up over a page's sticky bottom bar
+    // (Price requests "Raise request", CPR "Save review", Trials).
+    var bar = null;
+    document.querySelectorAll('.pr-foot, .cp-save, .trl-bar').forEach(function (b) {
+      var r = b.getBoundingClientRect();
+      if (r.height && r.bottom > window.innerHeight - 40 && r.top < window.innerHeight) bar = r;
+    });
+    var pl = tRoot && tRoot.querySelector('.pill');
+    if (pl) {
+      var base = parseInt(pl.getAttribute('data-base') || '16', 10);
+      pl.style.bottom = (bar ? Math.max(base, Math.ceil(window.innerHeight - bar.top) + 10) : base) + 'px';
+    }
     if (!box) return;
     // ...and above the Save/Cancel footer of an open form drawer (Meetings, CPR).
     var foot = document.querySelector('.drawer-backdrop:not(.is-hidden) .drawer-footer, .cp-back .cp-df');
-    box.style.bottom = document.querySelector('.trl-bar') ? '96px' : foot ? (Math.ceil(foot.getBoundingClientRect().height) + 16) + 'px' : '16px';
+    box.style.bottom = foot ? (Math.ceil(foot.getBoundingClientRect().height) + 16) + 'px'
+      : bar ? (Math.ceil(window.innerHeight - bar.top) + 12) + 'px' : '16px';
     // While a form drawer is open only the newest alert shows, so the stack
     // doesn't cover the form; the rest come back when the drawer closes.
     box.classList.toggle('compact', !!foot);
@@ -528,6 +542,8 @@
       '.t{background:#fff;color:#0f172a;border:1px solid #e2e8f0;border-left:4px solid var(--c);border-radius:12px;padding:12px 12px 10px 14px;' +
       'box-shadow:0 12px 32px rgba(15,23,42,.18);animation:in .25s ease-out}' +
       '@keyframes in{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}' +
+      '.t.out{transition:opacity .2s ease,transform .2s ease;opacity:0;transform:translateX(24px)}' +
+      '@media (prefers-reduced-motion:reduce){.t{animation:none}.t.out{transition:none}}' +
       '.h{display:flex;align-items:flex-start;gap:10px}.ic{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;' +
       'background:color-mix(in srgb,var(--c) 14%,#fff);color:var(--c);font-weight:700;flex-shrink:0}' +
       '.tt{font-weight:600;font-size:14px}.bd{color:#475569;font-size:13px;margin-top:2px;word-break:break-word}' +
@@ -603,7 +619,7 @@
     h.appendChild(txt);
     var x = mk('button', 'x', '✕');
     x.setAttribute('aria-label', 'Dismiss');
-    x.addEventListener('click', function () { t.remove(); refreshSoundHint(); if (ev.onClose) ev.onClose(); });
+    x.addEventListener('click', function () { leave(t); if (ev.onClose) ev.onClose(); });
     h.appendChild(x);
     t.appendChild(h);
     var ft = mk('div', 'ft');
@@ -619,11 +635,17 @@
     box.insertBefore(t, first || null);
     // New tasks stay until dismissed; everything else tidies itself away.
     if (ev.type !== 'TASK_ASSIGNED' && !ev.sticky) {
-      setTimeout(function () { if (t.parentNode && !t.matches(':hover')) { t.remove(); refreshSoundHint(); } }, 20000);
+      setTimeout(function () { if (t.parentNode && !t.matches(':hover')) leave(t); }, 20000);
     }
     // At most 3 on screen, so alerts never bury the page; the rest are summarised.
     var list = box.querySelectorAll('.t');
     for (var i = 3; i < list.length; i++) { hidden++; list[i].remove(); }
+  }
+  // Fade / slide a toast away, then tidy the stack.
+  function leave(t) {
+    if (!t.parentNode || t.classList.contains('out')) return;
+    t.classList.add('out');
+    setTimeout(function () { t.remove(); refreshSoundHint(); }, 200);
   }
   function fmtWhen(at) {
     var d = new Date(String(at || '').replace(' ', 'T'));

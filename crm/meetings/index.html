@@ -299,7 +299,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
   .drawer { width: 100vw; }
 }
 </style>
-<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script><script src="/crm-global.js" defer></script></head>
+<script src="/fuel-expense-app.js" defer></script><script src="/attendance-all-app.js" defer></script><script src="/appointments-reminder-app.js" defer></script><script src="/crm-global.js" defer></script><link rel="stylesheet" href="/motion.css"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 
 <div id="auth-gate" class="state-block" style="max-width:420px;margin:80px auto;">
@@ -793,13 +793,24 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-save").addEventListener("click", function () { saveMeeting(m.id); });
     mountAttachments(document.getElementById("edit-att"), { meetingId: m.id });
 
-    document.getElementById("drawer-backdrop").classList.remove("is-hidden");
+    openBackdrop();
+  }
+
+  function openBackdrop() {
+    var bd = document.getElementById("drawer-backdrop");
+    clearTimeout(bd._closeTimer); // reopened while the close animation was still running
+    bd.classList.remove("crm-leaving", "is-hidden");
   }
 
   function closeDrawer() {
     if (attState && attState.recorder && !confirm("A voice note is still recording. Discard it?")) return;
     teardownAttachments();
-    document.getElementById("drawer-backdrop").classList.add("is-hidden");
+    var bd = document.getElementById("drawer-backdrop");
+    if (bd.classList.contains("is-hidden") || bd.classList.contains("crm-leaving")) return;
+    // Slide out, then hide (see /motion.css); instant when reduced motion is on.
+    var instant = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    bd.classList.add("crm-leaving");
+    bd._closeTimer = setTimeout(function () { bd.classList.remove("crm-leaving"); bd.classList.add("is-hidden"); }, instant ? 0 : 180);
   }
 
   function saveMeeting(id) {
@@ -1232,7 +1243,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     });
     q.addEventListener("focus", function () { searchCustomers(q.value.trim()); });
     q.addEventListener("blur", function () { setTimeout(function () { var b = document.getElementById("cust-results"); if (b) b.classList.add("is-hidden"); }, 150); });
-    document.getElementById("drawer-backdrop").classList.remove("is-hidden");
+    openBackdrop();
     setTimeout(function () { q.focus(); }, 50);
   }
 

@@ -400,7 +400,13 @@
     var dr = el('div', { class: 'cp-drawer', role: 'dialog', 'aria-modal': 'true', 'aria-label': id ? 'Edit opportunity' : 'Add opportunity' });
     back.appendChild(dr);
     back.addEventListener('mousedown', function (e) { if (e.target === back) close(); });
-    function close() { back.remove(); document.removeEventListener('keydown', esc); }
+    function close() {
+      document.removeEventListener('keydown', esc);
+      if (back.classList.contains('crm-leaving')) return;
+      var instant = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      back.classList.add('crm-leaving'); // slide out (see /motion.css), then remove
+      setTimeout(function () { back.remove(); }, instant ? 0 : 180);
+    }
     function esc(e) { if (e.key === 'Escape') close(); }
     document.addEventListener('keydown', esc);
     document.body.appendChild(back);

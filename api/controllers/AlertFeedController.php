@@ -111,24 +111,40 @@ class AlertFeedController
             }
         }
 
-        // Price requests
+        // Price requests (make sure the multi-item columns/table exist before querying them)
+        try { ensure_schema(PriceRequestController::schema(), 'migration_tasks_price_requests.sql'); } catch (Throwable $e) {}
         if ($isManager) {
+            // One alert per request (a multi-item request is one alert, not one per item).
             foreach (self::rows(
-                "SELECT r.id, r.productName, r.createdAt, u.name AS byName FROM `PriceRequest` r
+                "SELECT COALESCE(r.batchId, r.id) AS gid, MIN(r.productName) AS productName, COUNT(*) AS n, MAX(r.createdAt) AS createdAt,
+                        MAX(u.name) AS byName, MAX(c.companyName) AS companyName, MAX(b.requestNo) AS requestNo
+                 FROM `PriceRequest` r
                  LEFT JOIN `User` u ON u.id = r.requestedById
-                 WHERE r.status='PENDING' AND r.createdAt>? AND r.requestedById<>? ORDER BY r.createdAt DESC LIMIT $per",
+                 LEFT JOIN `Customer` c ON c.id = r.customerId
+                 LEFT JOIN `PriceRequestBatch` b ON b.id = r.batchId
+                 WHERE r.status='PENDING' AND r.createdAt>? AND r.requestedById<>?
+                 GROUP BY COALESCE(r.batchId, r.id) ORDER BY MAX(r.createdAt) DESC LIMIT $per",
                 [$since, $me]) as $r) {
-                $add('price-new-' . $r['id'], 'PRICE_REQUEST_NEW', 'New price request',
-                    ($r['byName'] ?: 'An engineer') . ' asks for a price on ' . $r['productName'], '/tasks/#prices', $r['createdAt']);
+                $what = (int) $r['n'] > 1 ? $r['n'] . ' items' : $r['productName'];
+                $add('price-new-' . $r['gid'], 'PRICE_REQUEST_NEW', 'New price request' . ($r['requestNo'] ? ' ' . $r['requestNo'] : ''),
+                    ($r['byName'] ?: 'An engineer') . ' asks for a price on ' . $what . ($r['companyName'] ? ' for ' . $r['companyName'] : ''),
+                    '/price-requests/', $r['createdAt']);
             }
         }
         foreach (self::rows(
-            "SELECT r.id, r.productName, r.status, r.approvedPrice, r.respondedAt FROM `PriceRequest` r
-             WHERE r.requestedById=? AND r.respondedAt>? AND r.respondedById<>? ORDER BY r.respondedAt DESC LIMIT $per",
+            "SELECT COALESCE(r.batchId, r.id) AS gid, MIN(r.productName) AS productName, COUNT(*) AS n, MAX(r.respondedAt) AS respondedAt,
+                    SUM(r.status='APPROVED') AS ok, SUM(r.status='REJECTED') AS bad, MAX(r.approvedPrice) AS approvedPrice, MAX(b.requestNo) AS requestNo
+             FROM `PriceRequest` r LEFT JOIN `PriceRequestBatch` b ON b.id = r.batchId
+             WHERE r.requestedById=? AND r.respondedAt>? AND r.respondedById<>?
+             GROUP BY COALESCE(r.batchId, r.id), r.respondedAt ORDER BY MAX(r.respondedAt) DESC LIMIT $per",
             [$me, $since, $me]) as $r) {
-            $ok = $r['status'] === 'APPROVED';
-            $add('price-answer-' . $r['id'] . '-' . $r['respondedAt'], 'PRICE_REQUEST_ANSWERED', $ok ? 'Price request approved' : 'Price request rejected',
-                $r['productName'] . ($ok ? ' — approved at ₹' . number_format((float) $r['approvedPrice'], 2) : ''), '/tasks/#prices', $r['respondedAt']);
+            // Answers saved together (one admin "Save") arrive as one alert.
+            $n = (int) $r['n']; $ok = (int) $r['ok']; $bad = (int) $r['bad'];
+            $title = $bad === 0 ? 'Price request approved' : ($ok === 0 ? 'Price request rejected' : 'Price request answered');
+            $body = $n === 1
+                ? $r['productName'] . ($ok ? ' — approved at ₹' . number_format((float) $r['approvedPrice'], 2) : '')
+                : ($r['requestNo'] ? $r['requestNo'] . ': ' : '') . $ok . ' approved' . ($bad ? ', ' . $bad . ' rejected' : '');
+            $add('price-answer-' . $r['gid'] . '-' . $r['respondedAt'], 'PRICE_REQUEST_ANSWERED', $title, $body, '/price-requests/', $r['respondedAt']);
         }
 
         // Trials

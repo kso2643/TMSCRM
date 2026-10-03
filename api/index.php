@@ -348,6 +348,12 @@ try {
     elseif ($c0 === 'price-requests') {
         $ctrl = new PriceRequestController();
         match (true) {
+            $method === 'GET'   && $c1 === 'batches'                   => $ctrl->batches(),
+            $method === 'GET'   && $c1 === 'template'                  => $ctrl->template(),
+            $method === 'POST'  && $c1 === 'parse'                     => $ctrl->parse(),
+            $method === 'POST'  && $c1 === 'batch' && $c2 === ''       => $ctrl->createBatch(),
+            $method === 'PATCH' && $c1 === 'batch' && $c3 === 'respond' => $ctrl->respondBatch($c2),
+            $method === 'DELETE'&& $c1 === 'batch' && $c2 !== ''       => $ctrl->deleteBatch($c2),
             $method === 'GET'   && $c1 === ''                          => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                          => $ctrl->create(),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'respond'     => $ctrl->respond($c1),

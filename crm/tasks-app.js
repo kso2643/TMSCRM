@@ -236,14 +236,16 @@
     var tabs = [['mine', 'My tasks']];
     if (isAdminTier()) { tabs.push(['team', 'Team live']); tabs.push(['all', 'All tasks']); }
     tabs.push(['completed', 'Completed']);
-    tabs.push(['prices', 'Price requests']);
+    tabs.push(['prices', 'Price requests ↗']); // opens the Price requests page
 
     var tab = null;
     try { tab = localStorage.getItem('crm_tasks_tab'); } catch (e) {}
     // Links from alerts: /tasks/#completed, /tasks/#prices …
     var hashTab = location.hash.replace(/^#\/?/, '');
+    // Price requests moved to their own page — keep old links working.
+    if (hashTab === 'prices') { location.replace('/price-requests/'); return; }
     if (tabs.some(function (t) { return t[0] === hashTab; })) tab = hashTab;
-    if (!tabs.some(function (t) { return t[0] === tab; })) tab = isAdminTier() ? 'team' : 'mine';
+    if (tab === 'prices' || !tabs.some(function (t) { return t[0] === tab; })) tab = isAdminTier() ? 'team' : 'mine';
 
     var pendingPrices = 0;
     var tabBar = el('div', { class: 'tx-tabs', role: 'tablist' });
@@ -254,7 +256,7 @@
       el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
         el('h1', { class: 'page-title', text: 'Tasks' }),
         canManage() ? el('button', { class: 'btn-primary', text: '+ Assign task', onclick: function () { openTaskDialog(null, function () { reload(); }); } })
-                    : el('button', { class: 'btn-primary', text: '+ Price request', onclick: function () { switchTab('prices'); } })
+                    : el('a', { class: 'btn-primary', href: '/price-requests/#new', text: '+ Price request' })
       ]),
       tabBar,
       panel
@@ -270,6 +272,7 @@
       });
     }
     function switchTab(t) {
+      if (t === 'prices') { location.href = '/price-requests/'; return; }
       tab = t;
       try { localStorage.setItem('crm_tasks_tab', t); } catch (e) {}
       renderTabs();

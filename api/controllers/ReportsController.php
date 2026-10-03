@@ -96,22 +96,30 @@ class ReportsController extends ExportController
     public function priceRequests(): void
     {
         $auth = authenticate(); require_manager($auth);
+        try { ensure_schema(PriceRequestController::schema(), 'migration_tasks_price_requests.sql'); } catch (Throwable $e) {}
         [$w, $p] = $this->where('r.createdAt');
         $rows = $this->rows(
-            "SELECT r.*, u.name AS byName, a.name AS respName, c.companyName FROM `PriceRequest` r
+            "SELECT r.*, u.name AS byName, a.name AS respName, c.companyName, b.requestNo FROM `PriceRequest` r
              LEFT JOIN `User` u ON u.id=r.requestedById LEFT JOIN `User` a ON a.id=r.respondedById
-             LEFT JOIN `Customer` c ON c.id=r.customerId
-             $w ORDER BY r.createdAt DESC", $p);
+             LEFT JOIN `Customer` c ON c.id=r.customerId LEFT JOIN `PriceRequestBatch` b ON b.id=r.batchId
+             $w ORDER BY r.createdAt DESC, r.batchId, r.sortOrder", $p);
         $this->sendExport($rows, [
             ['label' => 'Raised',          'value' => fn($r) => self::dt($r['createdAt'])],
+            ['label' => 'Request no.',     'value' => fn($r) => $r['requestNo'] ?? ''],
             ['label' => 'Requested by',    'value' => fn($r) => $r['byName'] ?? ''],
-            ['label' => 'Product',         'value' => fn($r) => $r['productName'] . ($r['itemCode'] ? ' (' . $r['itemCode'] . ')' : '')],
             ['label' => 'Customer',        'value' => fn($r) => $r['companyName'] ?? ''],
-            ['label' => 'Qty',             'value' => fn($r) => $r['quantity'] ?? ''],
+            ['label' => 'Product',         'value' => fn($r) => $r['productName'] . ($r['itemCode'] ? ' (' . $r['itemCode'] . ')' : '')],
+            ['label' => 'Category',        'value' => fn($r) => $r['category'] ?? ''],
+            ['label' => 'Brand',           'value' => fn($r) => $r['brand'] ?? ''],
+            ['label' => 'Regular / One time', 'value' => fn($r) => PriceRequestController::SUPPLY_TYPES[$r['supplyType'] ?? ''] ?? ''],
+            ['label' => 'Qty',             'value' => fn($r) => ($r['quantity'] ?? '') . (!empty($r['unit']) ? ' ' . $r['unit'] : '')],
             ['label' => 'List price',      'value' => fn($r) => $r['listPrice'] ?? ''],
             ['label' => 'Asked price',     'value' => fn($r) => $r['requestedPrice'] ?? ''],
+            ['label' => 'Asked discount %', 'value' => fn($r) => $r['discount'] ?? ''],
+            ['label' => 'Engineer note',   'value' => fn($r) => $r['notes'] ?? ''],
             ['label' => 'Status',          'value' => fn($r) => $r['status']],
             ['label' => 'Approved price',  'value' => fn($r) => $r['approvedPrice'] ?? ''],
+            ['label' => 'Approved discount %', 'value' => fn($r) => $r['approvedDiscount'] ?? ''],
             ['label' => 'Decided by',      'value' => fn($r) => $r['respName'] ?? ''],
             ['label' => 'Note',            'value' => fn($r) => $r['responseNote'] ?? ''],
         ], 'price-requests-' . $this->stamp(), 'Price Requests Report');
