@@ -52,6 +52,7 @@ require __DIR__ . '/controllers/AppointmentController.php';
 require __DIR__ . '/controllers/OrderController.php';
 require __DIR__ . '/controllers/TaskController.php';
 require __DIR__ . '/controllers/PriceRequestController.php';
+require __DIR__ . '/controllers/TrialController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -331,6 +332,23 @@ try {
             $method === 'PATCH' && $c1 !== '' && $c2 === 'respond'     => $ctrl->respond($c1),
             $method === 'DELETE'&& $c1 !== '' && $c2 === ''            => $ctrl->delete($c1),
             default => sendError("Route /api/price-requests/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Trials — request (existing data) → approval + recommendation → savings report
+    elseif ($c0 === 'trials') {
+        $ctrl = new TrialController();
+        match (true) {
+            $method === 'GET'    && $c1 === 'meta'                     => $ctrl->meta(),
+            $method === 'GET'    && $c1 === ''                         => $ctrl->index(),
+            $method === 'POST'   && $c1 === ''                         => $ctrl->create(),
+            $method === 'GET'    && $c1 !== '' && $c2 === ''           => $ctrl->show($c1),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''           => $ctrl->delete($c1),
+            $method === 'PUT'    && $c1 !== '' && $c2 === 'existing'   => $ctrl->updateExisting($c1),
+            $method === 'PUT'    && $c1 !== '' && $c2 === 'savings'    => $ctrl->updateSavings($c1),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === 'approve'    => $ctrl->approve($c1),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === 'reject'     => $ctrl->reject($c1),
+            default => sendError("Route /api/trials/$c1/$c2 not found", 404),
         };
     }
 

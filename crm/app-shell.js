@@ -54,7 +54,8 @@
     tag:       'M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42zM7 7h.01',
     check:     'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
     activity:  'M22 12h-4l-3 9L9 3l-3 9H2',
-    timer:     'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16z'
+    timer:     'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
+    flask:     'M9 2h6M10 2v6L4.5 18.5A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.8-2.5L14 8V2M7 15h10'
   };
 
   // Same list the React layout renders, plus the standalone pages. Roles
@@ -68,6 +69,7 @@
     { label: 'Products',              href: '/products/',       icon: 'package',   section: 'Sales' },
     { label: 'Quotations',            href: '/quotations/',     icon: 'file',      section: 'Sales' },
     { label: 'Orders',                href: '/orders/',         icon: 'clipboard', section: 'Sales' },
+    { label: 'Trials',                href: '/trials/',         icon: 'flask',     section: 'Sales' },
     { label: 'Stock',                 href: '/stock/',          icon: 'layers',    section: 'Sales' },
     { label: 'Analytics',             href: '/analytics/',      icon: 'chart',     section: 'Reports' },
     { label: 'Attendance',            href: '/attendance/',     icon: 'clock',     section: 'Operations' },

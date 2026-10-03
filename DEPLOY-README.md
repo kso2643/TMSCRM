@@ -1,3 +1,47 @@
+# Update — 3 Oct: new Trials page (Sales → Trials, `/trials/`)
+
+**Upload:** `api/` and `crm/` as usual, then press **Ctrl+Shift+R**. Nothing to run in the database; the API creates the `Trial` table on first use, matching your collation. `api/database/migration_trials.sql` is there if you'd rather run it by hand.
+
+Your HTML tool ("Existing situation data analysis with cost savings") is used **as-is** for both forms. It's added as `crm/trial-sheet.html` and opens inside the Trials page. Only a small bridge script is appended at the end of the file, so each trial's sheets are saved to the CRM database instead of the browser. Opened directly, the file still works exactly as before.
+
+### How a trial works
+1. **Raise a trial request:** the engineer clicks **+ New trial request** and fills the **Existing situation data analysis**. This is the same form as your HTML tool, including the cutting-data library, the Sheet preview and the PDF/Excel downloads.
+   - Customer name and component name are required.
+   - They can optionally link a CRM customer, which fills the customer name in the sheet.
+   - The trial gets a number like `TR-2026-001`, which is also used as the sheet's report number.
+2. **Approval and recommendation (Super Admin / Admin):**
+   - Add one or more recommendations. Each has a category dropdown (**Cutter / Insert / Key / Drill / Tap**) and a **spec**, plus an optional quantity and notes.
+   - If the category is **Insert**, a **Grade** field appears and **both spec and grade are required**.
+   - Or **reject** with a reason. The engineer can then correct the existing data and resubmit it.
+   - After approval the existing data is locked for engineers (admins can still correct it). Admins can also edit the recommendation later.
+3. **Cost savings report (after the trial):** this opens once the trial is approved. It's the **Trial comparison / cost savings** form from your tool.
+   - It's pre-filled from the existing data: customer, engineer, workpiece, material, production and machine.
+   - The first tool column is the **existing tool** and the **recommended tools** are added as the next columns.
+   - **Save draft** at any time. **Submit report & complete trial** marks the trial Completed.
+   - The best tool and the saving per year (and %) are worked out by the tool's own cost calculation and shown in the trials list.
+
+### Who sees what
+- Engineers see their own trials. Super Admin, Admin and Manager see all trials.
+- Only Super Admin and Admin can approve or reject.
+- An engineer can delete their own request while it is pending or rejected.
+
+### Verification
+- **API:** 33 new checks on a `utf8mb4_general_ci` database:
+  - required fields and trial numbering
+  - who can see, approve and edit
+  - the Insert-needs-grade rule and category validation
+  - the existing data locking after approval
+  - draft vs complete for the savings report, and reject → resubmit
+- **Browser:** 28 new checks driving the real embedded sheet in Chromium:
+  - raising a trial, including the CRM customer filling the sheet
+  - the approval form (grade appears only for Insert)
+  - the savings report pre-filled with existing and recommended tools
+  - draft saving, completing, and the read-only view after approval
+  - the HTML file still working on its own
+- **Earlier suites:** 76 + 15 API checks and 43 browser checks, all still passing.
+
+---
+
 # Update — 2 Oct: Team live board + clearer price requests
 
 **Upload:** `api/` and `crm/` (same as before; `api/.env` isn't included, so yours stays as it is), then press **Ctrl+Shift+R** on the Tasks page. Nothing to run in the database.
