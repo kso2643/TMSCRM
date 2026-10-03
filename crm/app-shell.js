@@ -35,6 +35,7 @@
   // [tag, attributes] nodes, inlined so pages built from this shell have no
   // external icon dependency.
   var ICONS = {
+    "Target": [["circle",{"cx":"12","cy":"12","r":"10"}],["circle",{"cx":"12","cy":"12","r":"6"}],["circle",{"cx":"12","cy":"12","r":"2"}]],
     "Activity": [["path",{"d":"M22 12h-4l-3 9L9 3l-3 9H2"}]],
     "BarChart3": [["path",{"d":"M3 3v18h18"}],["path",{"d":"M18 17V9"}],["path",{"d":"M13 17V5"}],["path",{"d":"M8 17v-3"}]],
     "Bell": [["path",{"d":"M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"}],["path",{"d":"M10.3 21a1.94 1.94 0 0 0 3.4 0"}]],
@@ -69,7 +70,7 @@
     "Upload": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"17 8 12 3 7 8"}],["line",{"x1":"12","x2":"12","y1":"3","y2":"15"}]]
   };
   // Sidebar label -> icon. Keep in sync with the React layout chunk.
-  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route"};
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -83,6 +84,7 @@
     { label: 'Quotations',            href: '/quotations/',     icon: 'file',      section: 'Sales' },
     { label: 'Orders',                href: '/orders/',         icon: 'clipboard', section: 'Sales' },
     { label: 'Trials',                href: '/trials/',         icon: 'flask',     section: 'Sales' },
+    { label: 'CPR & weekly review',   href: '/cpr/',            icon: 'target',    section: 'Sales' },
     { label: 'Stock',                 href: '/stock/',          icon: 'layers',    section: 'Sales' },
     { label: 'Analytics',             href: '/analytics/',      icon: 'chart',     section: 'Reports' },
     { label: 'Attendance',            href: '/attendance/',     icon: 'clock',     section: 'Operations' },

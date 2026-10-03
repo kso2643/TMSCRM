@@ -125,6 +125,10 @@ class XlsxReader
                 if ($colIdx > $maxCol) $maxCol = $colIdx;
             }
 
+            // Skip rows with no values: Excel often keeps formatted-but-empty
+            // rows down to row 1,048,576, and padding up to them would build a
+            // million empty arrays (out of memory on shared hosting).
+            if (!array_filter($cells, fn($v) => trim((string) $v) !== '')) continue;
             $dense = [];
             for ($i = 0; $i <= $maxCol; $i++) $dense[] = $cells[$i] ?? '';
             $rows[$rowIndex] = $dense;

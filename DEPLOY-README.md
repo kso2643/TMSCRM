@@ -1,3 +1,56 @@
+# Update — 3 Oct (g): CPR register + Saturday review + weekly/monthly reports; quotation fixes
+
+**Upload:** `api/` and `crm/` (new: `crm/cpr/`, `crm/cpr-app.js`, `crm/vendor/pdfjs/`, `api/controllers/CprController.php`, `api/includes/StyledXlsxWriter.php`), then press **Ctrl+Shift+R** once. The new tables are created automatically on first use (`api/database/migration_cpr.sql` if you prefer to run it yourself).
+
+## 1. CPR & weekly review (new page, Sales → "CPR & weekly review", `/cpr/`)
+The **Master CPR** Excel as forms. Sales engineers see and update their own opportunities; Manager / Admin / Super Admin see everyone's.
+
+- **Register:** every opportunity with the sheet's columns:
+  - Region & City, SE, Channel/Direct, Distributor, Customer;
+  - Material group / sub-group, captured date, Component, Opportunity, EDP;
+  - Product group, Focus product group, C/P/R, Annual potential, Objective, Competition, Person responsible, Time line;
+  - Expected sale, Order value till date, Status, and a Red/Yellow/Green colour.
+  
+  It has totals (in Rs lakhs), status counts, search, filters (engineer, status, colour, C/P/R, product group) and sorting. The **+ Add opportunity** form uses the same dropdown lists as the sheet's *List Master*.
+- **Saturday review:** opens on this week's Saturday, with one card per opportunity:
+  - the last review's remark;
+  - this week's status, R/Y/G, expected sale, order value, time line and remark.
+  
+  Save once for all changed cards. A progress bar shows how many open opportunities have been reviewed. Admins see the cards grouped by engineer. Saving again on the same date updates that review; it doesn't duplicate it.
+- **Weekly and monthly reports (separate downloads):** Excel files in the **Master CPR layout**:
+  - the same columns A–W, plus Status R/Y/G;
+  - "Total in Lakhs" subtotals in row 1, frozen headings and filters;
+  - a **"Remarks as on dd.mm.yyyy"** column for each review: the weekly file has this week's and the previous review's remarks, the monthly file has every Saturday in the month.
+  
+  Extra sheets: **Summary** (key figures, and totals by status, engineer, product group and C/P/R), **This week review** (each entry, with status before → after), **New opportunities**, and **List Master**. Admins can download for one engineer or for everyone.
+- **Import your CPR Excel** (Manager and above, on the reports tab):
+  - Columns are matched by heading, and "Remarks as on …" columns become dated reviews.
+  - Re-importing the same sheet updates the existing entries; it doesn't duplicate them.
+  - Tested with *Master - CPR 010221 - Uthay.xlsx*: 1,333 opportunities and 72 remarks, with totals identical to the sheet (potential 2,358.46 L, expected 662.55 L, orders 35.22 L).
+  - The SE "Uthay" is linked automatically to a CRM user named Uthay, if one exists. Until then, the name from the sheet is shown.
+
+## 2. Quotations
+- **Fixed: items shuffled when you open an old quotation.** All items of a quotation were saved with the same timestamp, and the list was sorted by that timestamp only, so the order came back random (reproduced: 15 items came back out of order). Items now keep a saved position, so they always come back in the order you entered them, both on reopening and after editing.
+  - Quotations saved *before* this update are re-sorted by their internal IDs, which almost always follow the original order.
+- **Fixed: item notes were lost on save.** They are now stored and reloaded.
+- **APJ: "Upload PDF"** (top bar, next to *Saved*):
+  - Opens a quotation PDF in the editor.
+  - PDFs downloaded from the APJ page now carry the full quotation inside them, so they reload **exactly**: customer, all items in order, notes and terms.
+  - Older PDFs without that data are read from their printed text and table, including multi-page PDFs and wrapped specifications. Check the details, then Save.
+  - If the quotation still exists in the CRM, Save updates it; otherwise Save creates a new one.
+  - The PDF reader (pdf.js) is bundled in `crm/vendor/pdfjs/`.
+
+## 3. Excel imports use less memory
+Excel files that keep formatted-but-empty rows down to row 1,048,576 (your CPR file does) were padded with a million empty rows when read. Empty rows are now skipped. This applies to every Excel import (products, customers, stock, CPR).
+
+## Verification
+- **CPR API:** 27 checks: visibility, permissions, SE forced to self, list normalisation, validation, review save/update, older reviews not overwriting newer ones, reports, template, delete.
+- **CPR browser:** 27 checks: register, filters, form, add for another SE, sales-engineer view, Saturday review save/update, both report downloads with the right file contents, admin grouping, mobile layout, link from React pages.
+- **Quotation:** order and notes kept on save and edit (fails on the old code); APJ PDF round-trip exact; old-PDF text read for 8 items, 30 items (3 pages) and wrapped specs.
+- **Files open in LibreOffice Calc.** All earlier browser suites pass (43 + 31 + 45 + 29 + 10 + 15), and the backup round-trip passes with the new tables.
+
+---
+
 # Update — 3 Oct (f): "+ Log meeting" on Meetings & follow-ups
 
 **Upload:** `crm/meetings/index.html` and `crm/appointments-reminder-app.js` (or the whole `crm/` folder), then press Ctrl+Shift+R once. No API changes.

@@ -36,6 +36,7 @@ require __DIR__ . '/includes/ActivityLogger.php';
 require __DIR__ . '/includes/SchemaGuard.php';
 require __DIR__ . '/includes/XlsxWriter.php';
 require __DIR__ . '/includes/XlsxReader.php';
+require __DIR__ . '/includes/StyledXlsxWriter.php';
 require __DIR__ . '/includes/SimplePdf.php';
 require __DIR__ . '/includes/ApjQuotationPdf.php';
 require __DIR__ . '/includes/TMSQuotationPdf.php';
@@ -61,6 +62,7 @@ require __DIR__ . '/controllers/ExportController.php';
 require __DIR__ . '/controllers/ReportsController.php';   // extends ExportController — must come after it
 require __DIR__ . '/controllers/BackupController.php';
 require __DIR__ . '/controllers/LocationHistoryController.php';
+require __DIR__ . '/controllers/CprController.php';      // CPR opportunity register + Saturday review + weekly/monthly reports
 require __DIR__ . '/controllers/PayrollController.php';  // Payroll, Salary Advances, Advance Recovery, Employee Ledger
 
 // ── CORS — mirrors the Express CORS config exactly ───────────────────
@@ -405,6 +407,25 @@ try {
             $method === 'GET' && $c1 === 'days'    => $ctrl->days(),
             $method === 'GET' && $c1 === 'history' => $ctrl->history(),
             default => sendError("Route /api/tracking/$c1 not found", 404),
+        };
+    }
+    // ── CPR: opportunity register, Saturday review, weekly / monthly reports ──
+    elseif ($c0 === 'cpr') {
+        $ctrl = new CprController();
+        match (true) {
+            $method === 'GET'    && $c1 === 'meta'         => $ctrl->meta(),
+            $method === 'GET'    && $c1 === 'review'       => $ctrl->reviewSheet(),
+            $method === 'POST'   && $c1 === 'review'       => $ctrl->saveReview(),
+            $method === 'GET'    && $c1 === 'review-dates' => $ctrl->reviewDates(),
+            $method === 'GET'    && $c1 === 'report'       => $ctrl->report(),
+            $method === 'GET'    && $c1 === 'template'     => $ctrl->template(),
+            $method === 'POST'   && $c1 === 'import'       => $ctrl->import(),
+            $method === 'GET'    && $c1 === ''             => $ctrl->index(),
+            $method === 'POST'   && $c1 === ''             => $ctrl->create(),
+            $method === 'GET'    && $c1 !== ''             => $ctrl->show($c1),
+            $method === 'PUT'    && $c1 !== ''             => $ctrl->update($c1),
+            $method === 'DELETE' && $c1 !== ''             => $ctrl->delete($c1),
+            default => sendError("Route /api/cpr/$c1 not found", 404),
         };
     }
     elseif ($c0 === 'breaks') {
