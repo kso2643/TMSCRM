@@ -1814,7 +1814,7 @@ function quotationServerToLocal(q) {
         unitPrice: String(i.unitPrice || 0),
         discount: String(i.discount || 0),
         delivery: i.delivery || '',
-        notes: '',
+        notes: i.notes || '',
       };
     }),
   };
@@ -2281,6 +2281,7 @@ function quotationServerToLocal(q) {
                 unitPrice: i.unitPrice || 0,
                 discount: i.discount || 0,
                 delivery: i.delivery || "",
+                notes: i.notes || "",
             };
         }
 
@@ -3650,6 +3651,10 @@ curY += 10;
       <button class="btn btn-ghost" id="nav-saved" onclick="apj_showSection('saved'); apj_loadCompletedQuotations();">
         <span>⊞</span><span class="btn-label">Saved</span>
       </button>
+      <button class="btn btn-amber" id="nav-upload-pdf" type="button" title="Open a quotation PDF to edit it" onclick="document.getElementById('apj-pdf-upload-input').click()">
+        <span>📤</span><span class="btn-label">Upload PDF</span>
+      </button>
+      <input type="file" id="apj-pdf-upload-input" accept="application/pdf,.pdf" style="display:none" onchange="apj_handleQuotationPdfUpload(this.files[0]); this.value='';" />
     </nav>
   </header>
 
@@ -4268,6 +4273,7 @@ function apj_itemToApi(i) {
     unitPrice: i.unitPrice || 0,
     discount: i.discount || 0,
     delivery: i.delivery || '',
+    notes: i.notes || '',
   };
 }
 
@@ -4866,6 +4872,7 @@ async function apj_downloadPDF() {
     }
 
     const cname=(v('to-name')||'customer').replace(/[^a-zA-Z0-9]/g,'-').substring(0,25);
+    await apj_embedData(pdf);
     pdf.save('APJ-' + (v('meta-no')||'quotation') + '-' + cname + '.pdf');
     showToast('PDF downloaded!', '📄');
 
@@ -4875,6 +4882,317 @@ async function apj_downloadPDF() {
   } finally {
     overlay.classList.remove('show');
     gid('pdf-btn').disabled = false;
+  }
+}
+
+/* ─────── LOAD A QUOTATION BACK FROM AN UPLOADED PDF ───────
+   PDFs made by this page carry the whole quotation (customer, items in
+   order, notes, terms) in their metadata — see apj_embedData() — so they
+   reload exactly. Older PDFs without that data are read from their
+   printed text instead (pdf.js), using the table/labels this page prints. */
+function apj_ab2b64(buf) {
+  let bin = ''; const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function apj_b642ab(b64) {
+  const bin = atob(b64); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+async function apj_pack(obj) {
+  const json = JSON.stringify(obj);
+  if (typeof CompressionStream !== 'undefined') {
+    try {
+      const buf = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+      return 'GZ:' + apj_ab2b64(buf);
+    } catch (e) { /* plain encoding below */ }
+  }
+  return 'RAW:' + btoa(unescape(encodeURIComponent(json)));
+}
+async function apj_unpack(packed) {
+  if (packed.indexOf('GZ:') === 0) {
+    const text = await new Response(new Blob([apj_b642ab(packed.slice(3))]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    return JSON.parse(text);
+  }
+  if (packed.indexOf('RAW:') === 0) return JSON.parse(decodeURIComponent(escape(atob(packed.slice(4)))));
+  throw new Error('Unrecognized embedded data format');
+}
+async function apj_embedData(pdf) {
+  try {
+    const d = apj_collectDraft();
+    d.serverId = editingQuotationId || null;
+    d.items = items.map(i => ({ productCode: i.productCode, spec: i.spec, moq: i.moq, unitPrice: i.unitPrice, discount: i.discount, delivery: i.delivery, notes: i.notes || '' }));
+    pdf.setProperties({ keywords: 'APJQDATA_V1[' + (await apj_pack(d)) + ']APJQDATA_END' });
+  } catch (e) { console.warn('Could not embed editable data into PDF:', e); }
+}
+
+function apj_findEmbedded(text) {
+  const tags = [['APJQDATA_V1[', ']APJQDATA_END'], ['TMSQDATA_V1[', ']TMSQDATA_END']];
+  for (const [a, b] of tags) {
+    const s = text.indexOf(a); if (s === -1) continue;
+    const e = text.indexOf(b, s + a.length); if (e === -1) continue;
+    return text.slice(s + a.length, e).replace(/[^A-Za-z0-9+/=:]/g, '');
+  }
+  return null;
+}
+
+let apj_pdfjsPromise = null;
+function apj_loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (apj_pdfjsPromise) return apj_pdfjsPromise;
+  apj_pdfjsPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/vendor/pdfjs/pdf.min.js';
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js'; resolve(window.pdfjsLib); };
+    s.onerror = () => { apj_pdfjsPromise = null; reject(new Error('PDF reader could not be loaded (upload crm/vendor/pdfjs/).')); };
+    document.head.appendChild(s);
+  });
+  return apj_pdfjsPromise;
+}
+
+/* "03 Oct 2026" / "03-10-2026" / "2026-10-03" → "2026-10-03" */
+function apj_parseDate(s) {
+  s = String(s || '').trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return m[0];
+  m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/); if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+  m = s.match(/^(\d{1,2})[\s-]+([A-Za-z]{3,})[\s,-]+(\d{4})$/);
+  if (m) {
+    const mi = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].slice(0, 3).toLowerCase());
+    if (mi >= 0) return m[3] + '-' + String(mi + 1).padStart(2, '0') + '-' + m[1].padStart(2, '0');
+  }
+  return '';
+}
+const apj_num = s => { const n = String(s || '').replace(/rs\.?|₹|,|%|\s/gi, ''); return /^-?\d+(\.\d+)?$/.test(n) ? String(parseFloat(n)) : ''; };
+
+/* Read an older PDF (no embedded data) from its text: lines are rebuilt from
+   text positions, the item table is found by its header row and every cell
+   is assigned to the header column it sits under. */
+async function apj_parsePdfText(buffer) {
+  const pdfjs = await apj_loadPdfJs();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer), isEvalSupported: false }).promise;
+  const lines = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const rows = [];
+    tc.items.forEach(it => {
+      const str = (it.str || '').trim(); if (!str) return;
+      const x = it.transform[4], y = it.transform[5], w = it.width || 0;
+      let row = rows.find(r => Math.abs(r.y - y) < 1.6);
+      if (!row) { row = { y, cells: [] }; rows.push(row); }
+      row.cells.push({ x, x2: x + w, str });
+    });
+    rows.sort((a, b) => b.y - a.y);
+    rows.forEach(r => { r.cells.sort((a, b) => a.x - b.x); r.page = p; r.text = r.cells.map(c => c.str).join(' '); lines.push(r); });
+  }
+  const out = { items: [], terms: {}, sign: {} };
+  const after = (label) => {
+    for (const l of lines) {
+      const c = l.cells.findIndex(c => c.str.replace(/[:.]+$/, '').toLowerCase() === label.toLowerCase());
+      if (c !== -1 && l.cells[c + 1]) return l.cells.slice(c + 1).map(x => x.str).join(' ').trim();
+    }
+    return '';
+  };
+  out.quotationNo = after('Quotation No') || after('Quotation No.') || after('Quote No');
+  out.date = apj_parseDate(after('Date'));
+  out.enquiryDate = apj_parseDate(after('Enq. Date') || after('Enq Date') || after('Enquiry Date'));
+  const dash = s => (s === '-' ? '' : s);
+  out.attention = dash(after('Kind Attn'));
+  out.designation = dash(after('Designation'));
+  out.enquiryRef = dash(after('Enq. Ref.') || after('Enq. Ref') || after('Enquiry Ref'));
+  const subj = lines.find(l => /^sub(ject)?\s*:/i.test(l.text));
+  out.subject = subj ? subj.text.replace(/^sub(ject)?\s*:\s*/i, '') : '';
+  out.terms.tax = dash(after('Sales Tax'));
+  out.terms.payment = dash(after('Payment'));
+  out.terms.validity = dash(after('Validity'));
+  out.terms.delivery = dash(after('Delivery Charges'));
+
+  // Customer block: the lines after the "TO" label, left half of the page.
+  const toIdx = lines.findIndex(l => l.cells[0] && /^(to|bill to)$/i.test(l.cells[0].str));
+  if (toIdx !== -1) {
+    const limitX = lines[toIdx].cells[0].x + 250;
+    const block = [];
+    for (let i = toIdx + 1; i < lines.length && block.length < 6; i++) {
+      const l = lines[i];
+      if (/^sub(ject)?\s*:/i.test(l.text) || /product code|item spec/i.test(l.text)) break;
+      const left = l.cells.filter(c => c.x < limitX).map(c => c.str).join(' ').trim();
+      if (left && !/^(quotation info|quotation no)/i.test(left)) block.push(left);
+    }
+    out.customer = block[0] || '';
+    const addr = block.slice(1);
+    out.addr1 = addr[0] || ''; out.addr2 = addr[1] || ''; out.state = addr.slice(2).join(', ');
+  }
+
+  // Item table.
+  const FIELDS = [
+    ['sno', /^(#|s\.?\s*no\.?|sl\.?\s*no\.?)$/i],
+    ['productCode', /product\s*code|item\s*code|code/i],
+    ['spec', /spec|description|particular/i],
+    ['moq', /moq|qty|quantity/i],
+    ['unitPrice', /list\s*price|unit\s*price|^price|rate$/i],
+    ['discount', /disc/i],
+    ['net', /net/i],
+    ['total', /total/i],
+    ['delivery', /deliv/i],
+  ];
+  let cols = null;
+  lines.forEach((l, li) => {
+    const hits = l.cells.filter(c => /product code|item spec|moq|list price|disc|delivery|qty/i.test(c.str)).length;
+    if (hits >= 3) {
+      const hdr = [];
+      l.cells.forEach(c => {
+        const f = FIELDS.find(([k, re]) => re.test(c.str.trim()) && !hdr.some(h => h.key === k));
+        if (f) hdr.push({ key: f[0], x: c.x, x2: c.x2, mid: (c.x + c.x2) / 2 });
+      });
+      if (hdr.length >= 3) { hdr.sort((a, b) => a.x - b.x); (cols = cols || []).push({ line: li, page: l.page, hdr }); }
+    }
+  });
+  if (cols) {
+    let cur = null;
+    cols.forEach((t, ti) => {
+      const end = ti + 1 < cols.length ? cols[ti + 1].line : lines.length;
+      const hdr = t.hdr;
+      // Column edges: headings are often centred while values are left/right
+      // aligned, so take the edges from rows that have a value in every
+      // column (their n-th cell is the n-th column). Fall back to midpoints
+      // between heading centres when no such row exists.
+      const full = [];
+      for (let i = t.line + 1; i < end; i++) {
+        if (/grand total|terms of supply|total moq/i.test(lines[i].text)) break;
+        if (lines[i].cells.length === hdr.length) full.push(lines[i].cells);
+      }
+      let starts = null;
+      if (full.length) starts = hdr.map((h, ci) => Math.min.apply(null, full.map(r => r[ci].x)));
+      else {
+        // No complete row (e.g. every spec wraps): group the start positions
+        // of all values in the table; one group per column when it lines up.
+        const xs = [];
+        for (let i = t.line + 1; i < end; i++) {
+          const l = lines[i];
+          if (/grand total|terms of supply|total moq/i.test(l.text)) break;
+          if (/^note:/i.test(l.text)) continue;
+          l.cells.forEach(c => xs.push(c.x));
+        }
+        xs.sort((p, q) => p - q);
+        const groups = [];
+        xs.forEach(x => { const g = groups[groups.length - 1]; if (g && x - g.max <= 8) g.max = x; else groups.push({ min: x, max: x }); });
+        if (groups.length === hdr.length) starts = groups.map(g => g.min);
+      }
+      if (!starts) starts = hdr.map((h, i) => i === 0 ? -1e9 : (hdr[i - 1].mid + h.mid) / 2);
+      const bounds = hdr.map((h, i) => ({ key: h.key, from: i === 0 ? -1e9 : starts[i] - 3, to: i === hdr.length - 1 ? 1e9 : starts[i + 1] - 3 }));
+      const colOf = c => (bounds.find(b => c.x >= b.from && c.x < b.to) || bounds[bounds.length - 1]).key;
+      const hasSno = hdr.some(h => h.key === 'sno');
+      // 1) classify every line of this table
+      const tl = [];
+      for (let i = t.line + 1; i < end; i++) {
+        const l = lines[i];
+        if (/grand total|terms of supply|total moq/i.test(l.text)) break;
+        if (/^page \d+ of \d+$/i.test(l.text) || l.text.indexOf('Confidential') !== -1) continue;
+        const cells = {}; l.cells.forEach(c => { const k = colOf(c); cells[k] = (cells[k] ? cells[k] + ' ' : '') + c.str; });
+        let kind = 'wrap';
+        if (/^note:/i.test(l.text)) kind = 'note';
+        else if (hasSno ? (cells.sno && /^\d+$/.test(cells.sno.trim())) : (apj_num(cells.moq) && apj_num(cells.unitPrice))) kind = 'row';
+        else {
+          const prev = tl[tl.length - 1];
+          if (prev && (prev.kind === 'note' || prev.kind === 'notecont') && prev.page === l.page &&
+              Math.abs(l.cells[0].x - prev.x0) < 6 && prev.y - l.y < 14) kind = 'notecont';
+        }
+        tl.push({ kind, cells, y: l.y, page: l.page, x0: l.cells[0].x, text: l.text });
+      }
+      // 2) wrapped code/spec lines belong to the nearest numbered row on the
+      //    same page (the row's values are vertically centred on its block)
+      tl.forEach((ln, i) => {
+        if (ln.kind !== 'wrap') return;
+        let best = null, bestD = 1e9;
+        for (const dir of [-1, 1]) {
+          for (let j = i + dir; j >= 0 && j < tl.length; j += dir) {
+            const o = tl[j];
+            if (o.page !== ln.page || o.kind === 'note' || o.kind === 'notecont') break;
+            if (o.kind === 'row') { const d = Math.abs(o.y - ln.y); if (d < bestD) { bestD = d; best = o; } break; }
+          }
+        }
+        if (best) (best.extra = best.extra || []).push(ln);
+      });
+      // 3) build items top-to-bottom
+      let cur = null;
+      tl.forEach(ln => {
+        if (ln.kind === 'row') {
+          const parts = [ln].concat(ln.extra || []).sort((x, y) => y.y - x.y);
+          const join = k => parts.map(p => p.cells[k]).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+          cur = { productCode: join('productCode'), spec: join('spec'), moq: apj_num(ln.cells.moq), unitPrice: apj_num(ln.cells.unitPrice),
+                  discount: apj_num(ln.cells.discount), delivery: join('delivery'), notes: '' };
+          out.items.push(cur);
+        } else if (ln.kind === 'note' && cur) {
+          cur.notes = (cur.notes ? cur.notes + '\n' : '') + ln.text.replace(/^note:\s*/i, '');
+        } else if (ln.kind === 'notecont' && cur) {
+          cur.notes += ' ' + ln.text;
+        }
+      });
+    });
+  }
+  out.items = out.items.filter(i => i.productCode || i.spec);
+  return out;
+}
+
+function apj_applyLoaded(q) {
+  const set = (id, val) => { const el = gid(id); if (el) el.value = val || ''; };
+  set('to-customerId', q.customerId);
+  set('to-name', q.customer);
+  set('to-addr1', q.addr1); set('to-addr2', q.addr2); set('to-state', q.state);
+  set('meta-no', q.quotationNo);
+  if (q.date) set('meta-date', q.date);
+  if (q.enquiryDate) set('meta-date1', q.enquiryDate);
+  set('meta-attn', q.attention); set('meta-desig', q.designation);
+  set('meta-enq', q.enquiryRef); set('meta-subject', q.subject);
+  const t = q.terms || {};
+  if (t.tax) set('terms-tax', t.tax);
+  if (t.payment) set('terms-payment', t.payment);
+  if (t.validity) set('terms-validity2', t.validity);
+  if (t.delivery) set('terms-delivery', t.delivery);
+  const sg = q.sign || {};
+  if (sg.company) set('sign-company', sg.company);
+  if (sg.name) set('sign-name', sg.name);
+  if (sg.designation) set('sign-designation', sg.designation);
+  itemId = 0;
+  items = (q.items || []).map(i => ({
+    id: ++itemId, productCode: i.productCode || '', spec: i.spec || '', moq: String(i.moq || ''),
+    unitPrice: String(i.unitPrice || ''), discount: String(i.discount || ''), delivery: i.delivery || '', notes: i.notes || '',
+  }));
+  renderItems();
+  // Match the customer to a CRM customer so Save works straight away.
+  if (!q.customerId && q.customer && typeof apj_applyCustomerIfKnown === 'function') { try { apj_applyCustomerIfKnown(); } catch (e) {} }
+}
+
+async function apj_handleQuotationPdfUpload(file) {
+  if (!file) return;
+  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { showToast('Please choose a PDF file.', '⚠️'); return; }
+  showToast('Reading ' + file.name + '…', '📄');
+  try {
+    const buffer = await file.arrayBuffer();
+    const packed = apj_findEmbedded(new TextDecoder('latin1').decode(new Uint8Array(buffer)));
+    let q, exact = false;
+    if (packed) { q = await apj_unpack(packed); exact = true; }
+    else q = await apj_parsePdfText(buffer);
+    if (!q || (!q.items || !q.items.length) && !q.customer) {
+      showToast('No quotation details could be read from this PDF. Enter them manually.', '⚠️');
+      return;
+    }
+    // Keep editing the same saved quotation when it still exists; otherwise Save creates a new one.
+    editingQuotationId = null;
+    const sid = q.serverId || (typeof q.id === 'string' ? q.id : null);
+    if (sid) {
+      try { const r = await apiFetch('/quotations/' + encodeURIComponent(sid)); if (r && r.data && r.data.quotation) editingQuotationId = sid; } catch (e) { /* not in this CRM — save as new */ }
+    }
+    apj_applyLoaded(q);
+    apj_showSection('create');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast(exact
+      ? 'Quotation loaded from PDF (' + items.length + ' items, original order). Edit and Save.'
+      : 'Read ' + items.length + ' items from the PDF text — please check the details, then Save.', exact ? '✅' : '🔎');
+  } catch (err) {
+    console.error(err);
+    showToast('Could not read this PDF: ' + err.message, '⚠️');
   }
 }
 
@@ -4904,6 +5222,7 @@ async function apj_downloadPDF() {
   window.apj_downloadSavedQuotation = apj_downloadSavedQuotation;
   window.apj_searchCustomers = apj_searchCustomers;
   window.apj_applyCustomerIfKnown = apj_applyCustomerIfKnown;
+  window.apj_handleQuotationPdfUpload = apj_handleQuotationPdfUpload;
 })();
 </script>
 

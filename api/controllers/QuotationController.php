@@ -1,6 +1,17 @@
 <?php
 class QuotationController
 {
+    public function __construct()
+    {
+        // sortOrder keeps line items in the order they were entered: every item
+        // of a save shares one createdAt (second precision), so ordering by that
+        // alone returned them shuffled. notes = the per-item note in the editor.
+        ensure_schema(['QuotationItem' => ['create' => '', 'columns' => [
+            'sortOrder' => 'INT NOT NULL DEFAULT 0',
+            'notes'     => 'TEXT NULL',
+        ]]], 'QuotationItem sortOrder/notes columns');
+    }
+
     /** Recognised brands. First entry is the fallback/default for legacy rows. */
     private const COMPANIES = ['TMS', 'APJ'];
 
@@ -215,7 +226,7 @@ class QuotationController
         $is = db()->prepare(
             'SELECT qi.*, p.itemCode AS p_code, p.hsnCode AS p_hsn
              FROM `QuotationItem` qi LEFT JOIN `Product` p ON p.id=qi.productId
-             WHERE qi.quotationId=? ORDER BY qi.createdAt ASC'
+             WHERE qi.quotationId=? ORDER BY qi.sortOrder ASC, qi.createdAt ASC, qi.id ASC'
         );
         $is->execute([$id]);
         $quotItems = array_map(function($r) {
@@ -280,6 +291,7 @@ class QuotationController
             'unit'        => $item['unit']        ?? 'PCS',
             'delivery'    => $item['delivery']    ?? '',
             'hsnCode'     => $item['hsnCode']     ?? '',
+            'notes'       => ($item['notes'] ?? '') === '' ? null : (string) $item['notes'],
         ], $this->calcItem($item)), $items);
 
         $totalAmount = round(array_sum(array_column($calcedItems, 'totalPrice')) * 100) / 100;
@@ -304,15 +316,15 @@ class QuotationController
 
         $ins = db()->prepare(
             'INSERT INTO `QuotationItem` (id,quotationId,productId,itemCode,productName,description,category,unit,
-             quantity,unitPrice,discount,netPrice,totalPrice,delivery,hsnCode,createdAt)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             quantity,unitPrice,discount,netPrice,totalPrice,delivery,hsnCode,notes,sortOrder,createdAt)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
-        foreach ($calcedItems as $ci) {
+        foreach (array_values($calcedItems) as $pos => $ci) {
             $ins->execute([
                 gen_id(), $id, $ci['productId'], $ci['itemCode'], $ci['productName'],
                 $ci['description'], $ci['category'], $ci['unit'],
                 $ci['quantity'], $ci['unitPrice'], $ci['discount'], $ci['netPrice'], $ci['totalPrice'],
-                $ci['delivery'], $ci['hsnCode'], $now,
+                $ci['delivery'], $ci['hsnCode'], $ci['notes'], $pos + 1, $now,
             ]);
         }
 
@@ -365,6 +377,7 @@ class QuotationController
                 'unit'        => $item['unit']        ?? 'PCS',
                 'delivery'    => $item['delivery']    ?? '',
                 'hsnCode'     => $item['hsnCode']     ?? '',
+                'notes'       => ($item['notes'] ?? '') === '' ? null : (string) $item['notes'],
             ], $this->calcItem($item)), $items);
 
             $totalAmount = round(array_sum(array_column($calcedItems, 'totalPrice')) * 100) / 100;
@@ -375,14 +388,14 @@ class QuotationController
             $now = now_sql();
             $ins = db()->prepare(
                 'INSERT INTO `QuotationItem` (id,quotationId,productId,itemCode,productName,description,category,unit,
-                 quantity,unitPrice,discount,netPrice,totalPrice,delivery,hsnCode,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 quantity,unitPrice,discount,netPrice,totalPrice,delivery,hsnCode,notes,sortOrder,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
-            foreach ($calcedItems as $ci) {
+            foreach (array_values($calcedItems) as $pos => $ci) {
                 $ins->execute([
                     gen_id(), $id, $ci['productId'], $ci['itemCode'], $ci['productName'],
                     $ci['description'], $ci['category'], $ci['unit'],
                     $ci['quantity'], $ci['unitPrice'], $ci['discount'], $ci['netPrice'], $ci['totalPrice'],
-                    $ci['delivery'], $ci['hsnCode'], $now,
+                    $ci['delivery'], $ci['hsnCode'], $ci['notes'], $pos + 1, $now,
                 ]);
             }
         }
@@ -447,7 +460,7 @@ class QuotationController
         if (!$q) sendError('Quotation not found.', 404);
 
         $is = db()->prepare(
-            'SELECT qi.* FROM `QuotationItem` qi WHERE qi.quotationId=? ORDER BY qi.createdAt ASC'
+            'SELECT qi.* FROM `QuotationItem` qi WHERE qi.quotationId=? ORDER BY qi.sortOrder ASC, qi.createdAt ASC, qi.id ASC'
         );
         $is->execute([$id]);
         $q['items'] = $is->fetchAll();
