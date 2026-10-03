@@ -16,7 +16,7 @@
  *    Submitting it completes the trial; a short summary (best tool, saving
  *    per year, %) is kept on the row for the list view.
  *
- * Both sheets are the customer-facing HTML tool (crm/trial-sheet.html),
+ * Both sheets are the customer-facing HTML tool (crm/trial-sheet/index.html),
  * embedded by crm/trials-app.js — this API only stores their JSON.
  *
  * Visibility: everyone sees their own trials; admin-tier (incl. Manager)

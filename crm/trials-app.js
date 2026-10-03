@@ -10,9 +10,9 @@
      3. After the trial: the engineer fills the "Trial comparison / cost
         savings report" sheet; submitting it completes the trial.
 
-   Both sheets are the customer-facing HTML tool (/trial-sheet.html),
+   Both sheets are the customer-facing HTML tool (/trial-sheet/index.html),
    embedded in an iframe with ?embed=eda|cmp. It talks to this page over
-   postMessage (see the bridge at the end of trial-sheet.html); this page
+   postMessage (see the bridge at the end of trial-sheet/index.html); this page
    saves the sheets' JSON through /api/trials (TrialController.php).
 
    NOTE: part of the hand-patched build. `npm run build` from source will
@@ -22,7 +22,8 @@
   'use strict';
 
   var API = 'https://api.apjtech.in';
-  var SHEET_URL = '/trial-sheet.html';
+  // A folder with index.html, like every other standalone page (/orders/, /tasks/).
+  var SHEET_URL = '/trial-sheet/';
   var CATEGORIES = [['CUTTER', 'Cutter'], ['INSERT', 'Insert'], ['KEY', 'Key'], ['DRILL', 'Drill'], ['TAP', 'Tap']];
   var STATUS = {
     PENDING_APPROVAL: { label: 'Waiting for approval', badge: 'badge-yellow' },
@@ -152,6 +153,24 @@
     this.changed = false;
     this.ready = new Promise(function (res) { readyResolve = res; });
     this.iframe = el('iframe', { class: 'trl-frame', src: SHEET_URL + '?embed=' + kind, title: kind === 'eda' ? 'Existing situation data analysis' : 'Cost savings report' });
+    // If the sheet file is missing on the server the frame shows the host's
+    // 404 page and never says "ready" — replace that with a clear message.
+    var isReady = false;
+    this.ready.then(function () { isReady = true; });
+    this.node = el('div', {}, [this.iframe]);
+    this.iframe.addEventListener('load', function () {
+      setTimeout(function () {
+        if (isReady) return;
+        var doc = null;
+        try { doc = self.iframe.contentDocument; } catch (e) {}
+        if (doc && doc.getElementById('view-editor')) return; // still starting up
+        self.node.innerHTML = '';
+        self.node.appendChild(el('div', { class: 'trl-banner trl-err' }, [
+          el('p', { class: 'font-semibold', text: 'The trial form could not be loaded.' }),
+          el('p', { text: 'The file ' + location.origin + SHEET_URL + ' was not found on the server. Upload the folder crm/trial-sheet/ (it contains index.html) from the latest zip, then reload this page with Ctrl+Shift+R.' })
+        ]));
+      }, 2500);
+    });
     this.onMessage = function (d) {
       if (d.type === 'ready') readyResolve();
       else if (d.type === 'change') self.changed = true;
@@ -307,7 +326,7 @@
         el('span', { class: 'trl-lab', text: 'Link to a CRM customer (optional — fills the customer name in the sheet)' }),
         custBox
       ]),
-      sheet.iframe,
+      sheet.node,
       err,
       el('div', { class: 'trl-bar' }, [
         el('span', { class: 'trl-help mr-auto', text: 'Use the Edit / Sheet tabs inside the form to preview. PDF and Excel downloads work as usual.' }),
@@ -425,7 +444,7 @@
           isMine(t) ? el('p', { text: 'Correct the existing data below and press “Save & resubmit for approval”.' }) : null
         ]) : null,
         !editable ? el('p', { class: 'trl-help', text: t.status === 'PENDING_APPROVAL' || t.status === 'REJECTED' ? 'View only.' : 'The existing data is locked after approval (view only). Use the Sheet tab inside to see the print layout and download the PDF.' }) : null,
-        sheet.iframe, msg,
+        sheet.node, msg,
         editable ? el('div', { class: 'trl-bar' }, [btn]) : null
       ]);
       function save() {
@@ -535,7 +554,7 @@
         }).catch(function (e) { busy = false; msg.appendChild(el('div', { class: 'trl-banner trl-err', text: e.message })); });
       }
 
-      return el('div', { class: 'space-y-3' }, [head, sheet.iframe, msg,
+      return el('div', { class: 'space-y-3' }, [head, sheet.node, msg,
         editable ? el('div', { class: 'trl-bar' }, [saveBtn, doneBtn]) : el('p', { class: 'trl-help', text: 'View only.' })]);
     }
   }

@@ -1,8 +1,24 @@
+# Fix — 3 Oct (b): "This Page Does Not Exist" inside the Trials form
+
+The form inside the Trials page was a single root-level file (`crm/trial-sheet.html`), and it wasn't found on the server, so Hostinger's 404 page appeared inside the form box. The form now lives in its own folder, **`crm/trial-sheet/index.html`** (opened at `/trial-sheet/`), the same layout as every other page that already works (`orders/`, `tasks/`).
+
+If the form ever can't load, the Trials page now says exactly which file is missing, instead of showing a 404 inside the box.
+
+**Make sure these are on the server after uploading `crm/`:**
+- `crm/trial-sheet/index.html` (about 2 MB)
+- `crm/trials/index.html`
+- `crm/trials-app.js`
+- `api/controllers/TrialController.php`, plus the updated `api/index.php`
+
+The old `crm/trial-sheet.html` is no longer used and can be deleted.
+
+---
+
 # Update — 3 Oct: new Trials page (Sales → Trials, `/trials/`)
 
 **Upload:** `api/` and `crm/` as usual, then press **Ctrl+Shift+R**. Nothing to run in the database; the API creates the `Trial` table on first use, matching your collation. `api/database/migration_trials.sql` is there if you'd rather run it by hand.
 
-Your HTML tool ("Existing situation data analysis with cost savings") is used **as-is** for both forms. It's added as `crm/trial-sheet.html` and opens inside the Trials page. Only a small bridge script is appended at the end of the file, so each trial's sheets are saved to the CRM database instead of the browser. Opened directly, the file still works exactly as before.
+Your HTML tool ("Existing situation data analysis with cost savings") is used **as-is** for both forms. It is added as `crm/trial-sheet/index.html` (opened at `/trial-sheet/`) and opens inside the Trials page. Only a small bridge script is appended at the end of the file, so each trial's sheets are saved to the CRM database instead of the browser. Opened directly, the file still works exactly as before.
 
 ### How a trial works
 1. **Raise a trial request:** the engineer clicks **+ New trial request** and fills the **Existing situation data analysis**. This is the same form as your HTML tool, including the cutting-data library, the Sheet preview and the PDF/Excel downloads.
