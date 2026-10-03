@@ -1,3 +1,21 @@
+# Fix — 4 Oct (b): pages pushed to the right after visiting Meetings
+
+**Upload:** `crm/crm-global.js` and `crm/meetings/index.html` (or the whole `crm/` folder), then press Ctrl+Shift+R once.
+
+**Problem:** after opening Meetings & follow-ups (or Quotations / Payroll) and then going to another page, that page was pushed right by the width of an extra sidebar.
+
+**Cause:** the add-on menu built for the pages without a sidebar was also being added to the React pages (Customers, Dashboard, Products …) when it checked for a sidebar before React had drawn its own. On desktop that menu docks by adding 256px of space on the left, and that space stayed after React replaced the page.
+
+**Fix:**
+- The add-on menu is never added to React pages, which always draw their own sidebar.
+- As a safety net, any leftover menu or extra space is removed as soon as a page's own sidebar is present.
+- Meetings, Quotations and Payroll still get their docked menu.
+- The Meetings filter boxes no longer change width while loading.
+
+**Verified:** the bug reproduced in the browser (content started at 512px instead of 256px after Meetings → Customers / Dashboard / Products). After the fix: 256px on all three, and the docked menu still present on Meetings, Quotations and Payroll. All other suites pass.
+
+---
+
 # Update — 4 Oct: Price requests page (multi-item, Excel), smooth transitions
 
 **Upload:** `api/` and `crm/` (new: `crm/price-requests/`, `crm/price-requests-app.js`, `crm/motion.css`), then press **Ctrl+Shift+R** once. The new columns and table are created automatically.

@@ -50,9 +50,27 @@
     sc.onload = cb;
     document.head.appendChild(sc);
   }
+  // React pages always draw their own sidebar — just a moment after loading,
+  // so "no sidebar yet" must not be mistaken for "no sidebar".
+  function isReactPage() {
+    return !!(window.__next_f || document.querySelector('script[src*="/_next/static/chunks/main-app"]'));
+  }
+  // If the add-on menu (or the padding it docks with) ever ends up on a page
+  // that has its own sidebar, take it away again.
+  function dropExtraMenu() {
+    if (!document.querySelector('aside .sidebar-link') && !document.getElementById('app-shell-aside')) return;
+    var d = document.getElementById('crm-nav-drawer');
+    if (d) d.remove();
+    var html = document.documentElement;
+    if (html.classList.contains('crm-docked') || html.classList.contains('crm-docked-early')) {
+      html.classList.remove('crm-docked', 'crm-docked-early');
+      html.style.paddingLeft = '';
+    }
+  }
   function ensureMenu() {
+    if (isReactPage()) { dropExtraMenu(); return; }
     if (hasSidebar() || document.getElementById('crm-nav-drawer')) return;
-    loadShell(function () { if (window.AppShell && AppShell.drawer && !hasSidebar()) AppShell.drawer(); });
+    loadShell(function () { if (window.AppShell && AppShell.drawer && !hasSidebar() && !isReactPage()) AppShell.drawer(); });
   }
 
   // ── 5. React pages → hand-coded pages always open as a full page ──────
@@ -713,6 +731,7 @@
     productButtons();
     startTracking();
     setTimeout(ensureMenu, 1500); // React pages render their sidebar a moment after load
+    setTimeout(dropExtraMenu, 3000);
     poll(true);
     setInterval(function () { poll(false); }, POLL_MS);
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') poll(true); });
