@@ -282,6 +282,54 @@ class TaskController
         sendSuccess(['tasks' => array_map(fn($r) => $this->shape($r), $s->fetchAll())]);
     }
 
+    // GET /api/tasks/completed?from=YYYY-MM-DD&to=YYYY-MM-DD&assignedToId=&search=
+    // Completed-task history with full details, newest first, plus totals:
+    // count, time spent, on-time vs late (against the due date) and a
+    // per-person breakdown. Admin-tier sees everyone; others see their own.
+    public function completed(): void
+    {
+        $auth = authenticate();
+        $where = ["t.status='COMPLETED'"]; $params = [];
+        if (!is_admin_tier($auth['role'])) { $where[] = 't.assignedToId=?'; $params[] = $auth['id']; }
+        elseif (qp('assignedToId')) { $where[] = 't.assignedToId=?'; $params[] = qp('assignedToId'); }
+        if ($from = to_date_only(qp('from'))) { $where[] = 't.completedAt>=?'; $params[] = $from . ' 00:00:00'; }
+        if ($to = to_date_only(qp('to')))     { $where[] = 't.completedAt<DATE_ADD(?, INTERVAL 1 DAY)'; $params[] = $to; }
+        if (qp('search')) {
+            $like = '%' . qp('search') . '%';
+            $where[] = '(t.title LIKE ? OR t.description LIKE ? OR t.completionNote LIKE ? OR c.companyName LIKE ?)';
+            array_push($params, $like, $like, $like, $like);
+        }
+        $w = 'WHERE ' . implode(' AND ', $where);
+        $s = db()->prepare(
+            "SELECT t.*, a.name AS assignedToName, a.role AS assignedToRole, b.name AS assignedByName, c.companyName AS customerName
+             FROM `AdminTask` t
+             LEFT JOIN `User` a ON a.id = t.assignedToId
+             LEFT JOIN `User` b ON b.id = t.assignedById
+             LEFT JOIN `Customer` c ON c.id = t.customerId
+             $w ORDER BY t.completedAt DESC LIMIT 500"
+        );
+        $s->execute($params);
+        $tasks = []; $total = 0; $onTime = 0; $late = 0; $byPerson = [];
+        foreach ($s->fetchAll() as $r) {
+            $t = $this->shape($r);
+            $t['onTime'] = $r['dueDate'] ? (substr((string) $r['completedAt'], 0, 10) <= $r['dueDate']) : null;
+            $t['waitSeconds'] = ($r['startedAt'] && $r['createdAt'])
+                ? max(0, strtotime($r['startedAt']) - strtotime($r['createdAt'])) : null;
+            $tasks[] = $t;
+            $total += $t['elapsedSeconds'];
+            if ($t['onTime'] === true) $onTime++; elseif ($t['onTime'] === false) $late++;
+            $pid = $r['assignedToId'];
+            if (!isset($byPerson[$pid])) $byPerson[$pid] = ['id' => $pid, 'name' => $r['assignedToName'], 'count' => 0, 'seconds' => 0];
+            $byPerson[$pid]['count']++; $byPerson[$pid]['seconds'] += $t['elapsedSeconds'];
+        }
+        usort($byPerson, fn($a, $b) => $b['count'] <=> $a['count']);
+        sendSuccess([
+            'tasks'   => $tasks,
+            'summary' => ['count' => count($tasks), 'seconds' => $total, 'onTime' => $onTime, 'late' => $late,
+                          'avgSeconds' => count($tasks) ? (int) round($total / count($tasks)) : 0, 'byPerson' => array_values($byPerson)],
+        ]);
+    }
+
     // POST /api/tasks  (admin) — appended to the end of the assignee's queue
     public function create(): void
     {

@@ -204,6 +204,12 @@
     window.addEventListener('beforeunload', function (e) {
       if (current && current.sheet && current.sheet.changed) { e.preventDefault(); e.returnValue = ''; }
     });
+    // A trial alert arrived (crm-global.js): refresh the list — never an open form.
+    window.addEventListener('crm-alert', function (e) {
+      var ev = (e.detail && e.detail.events) || [];
+      if (!ev.some(function (x) { return /^TRIAL_/.test(x.type); })) return;
+      if (location.hash.replace(/^#\/?/, '') === '') route();
+    });
     route();
   }
   function go(hash) { location.hash = hash; }

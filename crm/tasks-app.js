@@ -235,10 +235,14 @@
     injectCss();
     var tabs = [['mine', 'My tasks']];
     if (isAdminTier()) { tabs.push(['team', 'Team live']); tabs.push(['all', 'All tasks']); }
+    tabs.push(['completed', 'Completed']);
     tabs.push(['prices', 'Price requests']);
 
     var tab = null;
     try { tab = localStorage.getItem('crm_tasks_tab'); } catch (e) {}
+    // Links from alerts: /tasks/#completed, /tasks/#prices …
+    var hashTab = location.hash.replace(/^#\/?/, '');
+    if (tabs.some(function (t) { return t[0] === hashTab; })) tab = hashTab;
     if (!tabs.some(function (t) { return t[0] === tab; })) tab = isAdminTier() ? 'team' : 'mine';
 
     var pendingPrices = 0;
@@ -271,6 +275,7 @@
       renderTabs();
       panel.innerHTML = '';
       reload = t === 'mine' ? myTasksTab(panel)
+             : t === 'completed' ? completedTab(panel)
              : t === 'team' ? teamTab(panel)
              : t === 'all' ? allTasksTab(panel)
              : priceRequestsTab(panel, function (n) { pendingPrices = n; renderTabs(); });
@@ -295,6 +300,22 @@
       if (document.querySelector('[data-tx-dialog]')) return;
       if (tab === 'team' || (tab !== 'prices' && ticks % 3 === 0)) reload();
     }, 20000);
+
+    // A sound alert arrived (crm-global.js) — refresh what's on screen.
+    window.addEventListener('crm-alert', function (e) {
+      var types = ((e.detail && e.detail.events) || []).map(function (x) { return x.type; });
+      if (types.some(function (ty) { return /^PRICE_/.test(ty); })) {
+        api('GET', '/price-requests?status=PENDING').then(function (res) { pendingPrices = (res.data && res.data.pendingCount) || 0; renderTabs(); }).catch(function () {});
+      }
+      var a = document.activeElement;
+      if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+      if (document.querySelector('[data-tx-dialog]')) return;
+      reload();
+    });
+    window.addEventListener('hashchange', function () {
+      var h = location.hash.replace(/^#\/?/, '');
+      if (h !== tab && tabs.some(function (t) { return t[0] === h; })) switchTab(h);
+    });
 
     switchTab(tab);
   }
@@ -819,6 +840,141 @@
       }, 300);
     });
     return el('div', {}, [input, list]);
+  }
+
+  // ── Completed tasks — full details ───────────────────────────────────
+  function completedTab(p) {
+    var range = 'week', from = '', to = '', who = '', search = '', openId = null;
+    var data = null, users = [];
+    if (canManage()) api('GET', '/tasks/assignees').then(function (r) { users = r.data.users || []; if (data) render(); }).catch(function () {});
+
+    function iso(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+    function rangeDates() {
+      var now = new Date(), f = new Date(now);
+      if (range === 'today') return [iso(now), iso(now)];
+      if (range === 'week') { f.setDate(f.getDate() - 6); return [iso(f), iso(now)]; }
+      if (range === 'month') return [iso(new Date(now.getFullYear(), now.getMonth(), 1)), iso(now)];
+      if (range === 'all') return ['', ''];
+      return [from, to];
+    }
+    function load() {
+      if (!data) loading(p);
+      var d = rangeDates(), q = [];
+      if (d[0]) q.push('from=' + d[0]);
+      if (d[1]) q.push('to=' + d[1]);
+      if (who) q.push('assignedToId=' + encodeURIComponent(who));
+      if (search) q.push('search=' + encodeURIComponent(search));
+      api('GET', '/tasks/completed' + (q.length ? '?' + q.join('&') : '')).then(function (r) { data = r.data; render(); })
+        .catch(function (e) { errorBox(p, e.message, load); });
+    }
+
+    function csv() {
+      var rows = [['Completed at', 'Task', 'Customer', 'Assigned to', 'Assigned by', 'Priority', 'Assigned at', 'Started at', 'Time taken (hh:mm:ss)', 'Due date', 'On time', 'Completion note', 'Description']];
+      data.tasks.forEach(function (t) {
+        rows.push([t.completedAt, t.title, t.customer ? t.customer.companyName : '', t.assignedTo.name, t.assignedBy.name, t.priority,
+          t.createdAt, t.startedAt || '', fmtDuration(t.elapsedSeconds), t.dueDate || '', t.onTime === null ? '' : (t.onTime ? 'Yes' : 'Late'),
+          t.completionNote || '', t.description || '']);
+      });
+      var text = rows.map(function (r) { return r.map(function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\n');
+      var a = el('a', { href: URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv' })), download: 'completed-tasks-' + iso(new Date()) + '.csv' });
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    function render() {
+      p.innerHTML = '';
+      var S = data.summary;
+      // Filters
+      var bar = el('div', { class: 'flex items-center gap-2 flex-wrap mb-4' });
+      [['today', 'Today'], ['week', 'Last 7 days'], ['month', 'This month'], ['all', 'All time'], ['custom', 'Custom']].forEach(function (r) {
+        bar.appendChild(el('button', { class: 'tx-pill' + (range === r[0] ? ' tx-pill-on' : ''), text: r[1], onclick: function () { range = r[0]; if (r[0] !== 'custom') load(); else render(); } }));
+      });
+      if (range === 'custom') {
+        var fI = el('input', { type: 'date', class: INPUT, style: 'width:auto' }); fI.value = from;
+        var tI = el('input', { type: 'date', class: INPUT, style: 'width:auto' }); tI.value = to;
+        fI.addEventListener('change', function () { from = fI.value; load(); });
+        tI.addEventListener('change', function () { to = tI.value; load(); });
+        bar.appendChild(fI); bar.appendChild(el('span', { class: 'text-xs text-muted', text: 'to' })); bar.appendChild(tI);
+      }
+      if (isAdminTier()) {
+        var people = users.length ? users : (S.byPerson || []);
+        var sel = el('select', { class: INPUT, style: 'width:auto;max-width:220px', 'aria-label': 'Person' },
+          [el('option', { value: '', text: 'Everyone' })].concat(people.map(function (x) { return el('option', { value: x.id, text: x.name }); })));
+        sel.value = who;
+        sel.addEventListener('change', function () { who = sel.value; load(); });
+        bar.appendChild(sel);
+      }
+      var sI = el('input', { type: 'search', class: INPUT, placeholder: 'Search task, customer or note…', style: 'width:auto;min-width:220px' });
+      sI.value = search;
+      var st;
+      sI.addEventListener('input', function () { clearTimeout(st); st = setTimeout(function () { search = sI.value.trim(); load(); }, 350); });
+      bar.appendChild(sI);
+      if (data.tasks.length) bar.appendChild(el('button', { class: 'btn-secondary btn-sm', text: 'Download CSV', onclick: csv }));
+      p.appendChild(bar);
+
+      // Summary
+      var tiles = el('div', { class: 'tx-tiles mb-4' });
+      [['Tasks completed', String(S.count)], ['Total time spent', fmtDuration(S.seconds)], ['Average per task', fmtDuration(S.avgSeconds)],
+       ['On time / late', S.onTime + ' / ' + S.late]].forEach(function (x) {
+        tiles.appendChild(el('div', { class: 'tx-tile', style: 'cursor:default' }, [el('p', { class: 'text-xs text-muted', text: x[0] }), el('p', { class: 'tx-tile-n tx-timer', text: x[1] })]));
+      });
+      p.appendChild(tiles);
+      if (isAdminTier() && !who && S.byPerson && S.byPerson.length > 1) {
+        var chips = el('div', { class: 'flex gap-2 flex-wrap mb-4' });
+        S.byPerson.forEach(function (x) {
+          chips.appendChild(el('button', { class: 'tx-pill', onclick: function () { who = x.id; load(); } },
+            [x.name + ' · ' + x.count + (x.count === 1 ? ' task · ' : ' tasks · ') + fmtDurationShort(x.seconds)]));
+        });
+        p.appendChild(chips);
+      }
+
+      if (!data.tasks.length) { p.appendChild(el('div', { class: 'card p-10 text-center text-muted', text: 'No completed tasks in this period.' })); return; }
+
+      var heads = ['Completed', 'Task', 'Done by', 'Assigned by', 'Priority', 'Time taken', 'Due', 'Note'];
+      var tbody = el('tbody');
+      data.tasks.forEach(function (t) {
+        var open = openId === t.id;
+        var due = t.dueDate ? el('span', { class: 'badge ' + (t.onTime ? 'badge-green' : 'badge-red'), text: (t.onTime ? 'On time · ' : 'Late · ') + fmtDate(t.dueDate) }) : el('span', { class: 'text-muted', text: '—' });
+        var tr = el('tr', { class: 'table-row cursor-pointer', 'aria-expanded': open ? 'true' : 'false', tabindex: '0' }, [
+          el('td', { class: 'px-3 py-3 tx-nowrap', text: fmtDateTime(t.completedAt) }),
+          el('td', { class: 'px-3 py-3' }, [el('p', { class: 'font-medium', text: t.title }), t.customer ? el('p', { class: 'text-xs text-muted', text: t.customer.companyName }) : null]),
+          el('td', { class: 'px-3 py-3 tx-nowrap', text: t.assignedTo.name || '—' }),
+          el('td', { class: 'px-3 py-3 tx-nowrap text-muted', text: t.assignedBy.name || '—' }),
+          el('td', { class: 'px-3 py-3' }, [el('span', { class: 'badge ' + PRIORITY_BADGE[t.priority], text: labelOf(PRIORITIES, t.priority) })]),
+          el('td', { class: 'px-3 py-3 tx-nowrap font-semibold tx-timer', text: fmtDuration(t.elapsedSeconds) }),
+          el('td', { class: 'px-3 py-3 tx-nowrap' }, [due]),
+          el('td', { class: 'px-3 py-3 text-muted', style: 'max-width:260px', text: t.completionNote ? (t.completionNote.length > 60 ? t.completionNote.slice(0, 60) + '…' : t.completionNote) : '—' })
+        ]);
+        function toggle() { openId = open ? null : t.id; render(); }
+        tr.addEventListener('click', toggle);
+        tr.addEventListener('keydown', function (e) { if (e.key === 'Enter') toggle(); });
+        tbody.appendChild(tr);
+        if (open) tbody.appendChild(el('tr', {}, [el('td', { colspan: String(heads.length), class: 'px-4 py-4 bg-slate-50' }, [detail(t)])]));
+      });
+      p.appendChild(el('div', { class: 'card overflow-hidden' }, [el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm' }, [
+        el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, heads.map(function (h) { return el('th', { class: 'table-head text-left px-3 py-3 tx-nowrap', text: h }); }))]),
+        tbody
+      ])])]));
+    }
+
+    function detail(t) {
+      function step(label, when, extra) {
+        return el('div', { class: 'tx-muted-box' }, [el('p', { class: 'text-xs text-muted', text: label }), el('p', { class: 'text-sm font-semibold', text: when ? fmtDateTime(when) : '—' }), extra ? el('p', { class: 'text-xs text-muted', text: extra }) : null]);
+      }
+      return el('div', { class: 'space-y-3' }, [
+        el('div', { class: 'grid grid-cols-1 sm:grid-cols-4 gap-2' }, [
+          step('Assigned', t.createdAt, 'by ' + (t.assignedBy.name || '—')),
+          step('Started', t.startedAt, t.waitSeconds !== null ? 'waited ' + fmtDurationShort(t.waitSeconds) + ' in queue' : null),
+          step('Completed', t.completedAt, t.onTime === null ? null : t.onTime ? 'before the due date' : 'after the due date (' + fmtDate(t.dueDate) + ')'),
+          el('div', { class: 'tx-muted-box' }, [el('p', { class: 'text-xs text-muted', text: 'Time spent working' }), el('p', { class: 'text-lg font-bold tx-timer', text: fmtDuration(t.elapsedSeconds) }), el('p', { class: 'text-xs text-muted', text: 'timer time, pauses excluded' })])
+        ]),
+        t.description ? el('div', {}, [el('p', { class: 'text-xs text-muted', text: 'Task description' }), el('p', { class: 'text-sm whitespace-pre-wrap', text: t.description })]) : null,
+        el('div', {}, [el('p', { class: 'text-xs text-muted', text: 'Completion note' }), el('p', { class: 'text-sm whitespace-pre-wrap', text: t.completionNote || 'No note was added.' })]),
+        t.customer ? el('p', { class: 'text-sm', text: 'Customer: ' + t.customer.companyName }) : null
+      ]);
+    }
+
+    load();
+    return load;
   }
 
   // ── Price requests ───────────────────────────────────────────────────

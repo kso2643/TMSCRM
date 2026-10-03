@@ -31,32 +31,40 @@
   // nav items never appear for a role that would get a 403 behind them.
   var ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
 
-  // 24x24 stroke icon paths (lucide-compatible), inlined so pages built
-  // from this shell have no external icon dependency.
-  var I = {
-    dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
-    users:     'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
-    map:       'M9 20l-6-3V4l6 3m0 13l6-3m-6 3V7m6 10l6 3V7l-6-3m0 13V4',
-    calendar:  'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
-    package:   'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z',
-    file:      'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
-    layers:    'M12 2L2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
-    chart:     'M3 3v18h18M18 17V9M13 17V5M8 17v-3',
-    clock:     'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
-    fuel:      'M3 22h12V4a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2zM3 10h12M15 9h2a2 2 0 0 1 2 2v6a2 2 0 0 0 2 2M18 5l3 3',
-    idcard:    'M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM7 15c0-1.66 1.79-3 4-3M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM15 8h4M15 12h4',
-    appts:     'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8 14h2M8 17h2M14 14h2M14 17h2',
-    clipboard: 'M9 2h6a1 1 0 0 1 1 1v2H8V3a1 1 0 0 1 1-1zM8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2M9 12l2 2 4-4',
-    bell:      'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0',
-    logout:    'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
-    menu:      'M3 12h18M3 6h18M3 18h18',
-    nav:       'M3 11l19-9-9 19-2-8-8-2z',
-    tag:       'M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42zM7 7h.01',
-    check:     'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
-    activity:  'M22 12h-4l-3 9L9 3l-3 9H2',
-    timer:     'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
-    flask:     'M9 2h6M10 2v6L4.5 18.5A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.8-2.5L14 8V2M7 15h10'
+  // Lucide icons (same set, same picks as the compiled React sidebar), as
+  // [tag, attributes] nodes, inlined so pages built from this shell have no
+  // external icon dependency.
+  var ICONS = {
+    "Activity": [["path",{"d":"M22 12h-4l-3 9L9 3l-3 9H2"}]],
+    "BarChart3": [["path",{"d":"M3 3v18h18"}],["path",{"d":"M18 17V9"}],["path",{"d":"M13 17V5"}],["path",{"d":"M8 17v-3"}]],
+    "Bell": [["path",{"d":"M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"}],["path",{"d":"M10.3 21a1.94 1.94 0 0 0 3.4 0"}]],
+    "Boxes": [["path",{"d":"M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"}],["path",{"d":"m7 16.5-4.74-2.85"}],["path",{"d":"m7 16.5 5-3"}],["path",{"d":"M7 16.5v5.17"}],["path",{"d":"M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"}],["path",{"d":"m17 16.5-5-3"}],["path",{"d":"m17 16.5 4.74-2.85"}],["path",{"d":"M17 16.5v5.17"}],["path",{"d":"M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"}],["path",{"d":"M12 8 7.26 5.15"}],["path",{"d":"m12 8 4.74-2.85"}],["path",{"d":"M12 13.5V8"}]],
+    "Building2": [["path",{"d":"M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"}],["path",{"d":"M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"}],["path",{"d":"M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"}],["path",{"d":"M10 6h4"}],["path",{"d":"M10 10h4"}],["path",{"d":"M10 14h4"}],["path",{"d":"M10 18h4"}]],
+    "CalendarCheck": [["rect",{"width":"18","height":"18","x":"3","y":"4","rx":"2","ry":"2"}],["line",{"x1":"16","x2":"16","y1":"2","y2":"6"}],["line",{"x1":"8","x2":"8","y1":"2","y2":"6"}],["line",{"x1":"3","x2":"21","y1":"10","y2":"10"}],["path",{"d":"m9 16 2 2 4-4"}]],
+    "CalendarOff": [["path",{"d":"M4.18 4.18A2 2 0 0 0 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 1.82-1.18"}],["path",{"d":"M21 15.5V6a2 2 0 0 0-2-2H9.5"}],["path",{"d":"M16 2v4"}],["path",{"d":"M3 10h7"}],["path",{"d":"M21 10h-5.5"}],["line",{"x1":"2","x2":"22","y1":"2","y2":"22"}]],
+    "ChevronRight": [["path",{"d":"m9 18 6-6-6-6"}]],
+    "ClipboardList": [["rect",{"width":"8","height":"4","x":"8","y":"2","rx":"1","ry":"1"}],["path",{"d":"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"}],["path",{"d":"M12 11h4"}],["path",{"d":"M12 16h4"}],["path",{"d":"M8 11h.01"}],["path",{"d":"M8 16h.01"}]],
+    "Clock": [["circle",{"cx":"12","cy":"12","r":"10"}],["polyline",{"points":"12 6 12 12 16 14"}]],
+    "Contact": [["path",{"d":"M17 18a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2"}],["rect",{"width":"18","height":"18","x":"3","y":"4","rx":"2"}],["circle",{"cx":"12","cy":"10","r":"2"}],["line",{"x1":"8","x2":"8","y1":"2","y2":"4"}],["line",{"x1":"16","x2":"16","y1":"2","y2":"4"}]],
+    "FileText": [["path",{"d":"M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"}],["polyline",{"points":"14 2 14 8 20 8"}],["line",{"x1":"16","x2":"8","y1":"13","y2":"13"}],["line",{"x1":"16","x2":"8","y1":"17","y2":"17"}],["line",{"x1":"10","x2":"8","y1":"9","y2":"9"}]],
+    "FlaskConical": [["path",{"d":"M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2"}],["path",{"d":"M8.5 2h7"}],["path",{"d":"M7 16h10"}]],
+    "Fuel": [["line",{"x1":"3","x2":"15","y1":"22","y2":"22"}],["line",{"x1":"4","x2":"14","y1":"9","y2":"9"}],["path",{"d":"M14 22V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v18"}],["path",{"d":"M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 5"}]],
+    "Handshake": [["path",{"d":"m11 17 2 2a1 1 0 1 0 3-3"}],["path",{"d":"m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4"}],["path",{"d":"m21 3 1 11h-2"}],["path",{"d":"M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3"}],["path",{"d":"M3 4h8"}]],
+    "LayoutDashboard": [["rect",{"width":"7","height":"9","x":"3","y":"3","rx":"1"}],["rect",{"width":"7","height":"5","x":"14","y":"3","rx":"1"}],["rect",{"width":"7","height":"9","x":"14","y":"12","rx":"1"}],["rect",{"width":"7","height":"5","x":"3","y":"16","rx":"1"}]],
+    "ListChecks": [["path",{"d":"m3 17 2 2 4-4"}],["path",{"d":"m3 7 2 2 4-4"}],["path",{"d":"M13 6h8"}],["path",{"d":"M13 12h8"}],["path",{"d":"M13 18h8"}]],
+    "LogOut": [["path",{"d":"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"}],["polyline",{"points":"16 17 21 12 16 7"}],["line",{"x1":"21","x2":"9","y1":"12","y2":"12"}]],
+    "MapPin": [["path",{"d":"M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"}],["circle",{"cx":"12","cy":"10","r":"3"}]],
+    "Menu": [["line",{"x1":"4","x2":"20","y1":"12","y2":"12"}],["line",{"x1":"4","x2":"20","y1":"6","y2":"6"}],["line",{"x1":"4","x2":"20","y1":"18","y2":"18"}]],
+    "Package": [["path",{"d":"m7.5 4.27 9 5.15"}],["path",{"d":"M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"}],["path",{"d":"m3.3 7 8.7 5 8.7-5"}],["path",{"d":"M12 22V12"}]],
+    "Radio": [["path",{"d":"M4.9 19.1C1 15.2 1 8.8 4.9 4.9"}],["path",{"d":"M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"}],["circle",{"cx":"12","cy":"12","r":"2"}],["path",{"d":"M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"}],["path",{"d":"M19.1 4.9C23 8.8 23 15.1 19.1 19"}]],
+    "ShieldCheck": [["path",{"d":"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"}],["path",{"d":"m9 12 2 2 4-4"}]],
+    "Tags": [["path",{"d":"M9 5H2v7l6.29 6.29c.94.94 2.48.94 3.42 0l3.58-3.58c.94-.94.94-2.48 0-3.42L9 5Z"}],["path",{"d":"M6 9.01V9"}],["path",{"d":"m15 5 6.3 6.3a2.4 2.4 0 0 1 0 3.4L17 19"}]],
+    "TrendingUp": [["polyline",{"points":"22 7 13.5 15.5 8.5 10.5 2 17"}],["polyline",{"points":"16 7 22 7 22 13"}]],
+    "Users": [["path",{"d":"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"}],["circle",{"cx":"9","cy":"7","r":"4"}],["path",{"d":"M22 21v-2a4 4 0 0 0-3-3.87"}],["path",{"d":"M16 3.13a4 4 0 0 1 0 7.75"}]],
+    "Wallet": [["path",{"d":"M21 12V7H5a2 2 0 0 1 0-4h14v4"}],["path",{"d":"M3 5v14a2 2 0 0 0 2 2h16v-5"}],["path",{"d":"M18 12a2 2 0 0 0 0 4h4v-4Z"}]]
   };
+  // Sidebar label -> icon. Keep in sync with the React layout chunk.
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -115,9 +123,11 @@
     svg.setAttribute('stroke-linecap', 'round');
     svg.setAttribute('stroke-linejoin', 'round');
     svg.setAttribute('class', cls || 'w-4 h-4 shrink-0');
-    var p = document.createElementNS(ns, 'path');
-    p.setAttribute('d', I[name] || I.dashboard);
-    svg.appendChild(p);
+    (ICONS[name] || ICONS.LayoutDashboard).forEach(function (node) {
+      var c = document.createElementNS(ns, node[0]);
+      Object.keys(node[1]).forEach(function (k) { c.setAttribute(k, node[1][k]); });
+      svg.appendChild(c);
+    });
     return svg;
   }
 
@@ -125,7 +135,7 @@
     return e('a', {
       href: item.href,
       class: 'sidebar-link' + (item.href === activeHref ? ' sidebar-link-active' : '')
-    }, [icon(item.icon), e('span', { class: 'flex-1', text: item.label })]);
+    }, [icon(ICON_FOR[item.label] || item.icon), e('span', { class: 'flex-1', text: item.label })]);
   }
 
   function buildSidebar(role, user, activeHref, onClose) {
@@ -153,7 +163,7 @@
         try { localStorage.removeItem('crm_token'); localStorage.removeItem('crm_user'); } catch (x) {}
         location.href = '/login/';
       }
-    }, [icon('logout'), ' Sign out']);
+    }, [icon('LogOut'), ' Sign out']);
 
     return e('aside', {
       id: 'app-shell-aside',
@@ -164,7 +174,7 @@
       e('div', { class: 'flex items-center justify-between px-4 h-16 border-b border-slate-200 dark:border-slate-700 shrink-0' }, [
         e('div', { class: 'flex items-center gap-2.5' }, [
           e('div', { class: 'w-8 h-8 bg-primary rounded-lg flex items-center justify-center shrink-0' },
-            [icon('users', 'w-4 h-4 text-white')]),
+            [icon('Users', 'w-4 h-4 text-white')]),
           e('div', {}, [
             e('p', { class: 'text-sm font-bold text-slate-900 dark:text-white leading-none', text: 'Industrial CRM' }),
             e('p', { class: 'text-[10px] text-slate-400 mt-0.5', text: ROLE_LABELS[role] || role })
@@ -173,7 +183,7 @@
         e('button', { class: 'md:hidden p-1 rounded text-slate-400 hover:text-slate-600', text: '✕', onclick: onClose })
       ]),
       e('div', { class: 'px-2 pt-3' }, [
-        e('a', { href: '/alerts/', class: 'sidebar-link relative' }, [icon('bell'), e('span', { class: 'flex-1', text: 'Alerts & reminders' })])
+        e('a', { href: '/alerts/', class: 'sidebar-link relative' }, [icon('Bell'), e('span', { class: 'flex-1', text: 'Alerts & reminders' })])
       ]),
       nav,
       e('div', { class: 'p-3 border-t border-slate-200 dark:border-slate-700 shrink-0' }, [
@@ -209,7 +219,7 @@
              'bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700'
     }, [
       e('button', { class: 'md:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800', onclick: onMenu },
-        [icon('menu', 'w-5 h-5')]),
+        [icon('Menu', 'w-5 h-5')]),
       e('h1', { class: 'text-base font-semibold text-slate-900 dark:text-slate-100 truncate hidden sm:block', text: title }),
       e('div', { class: 'flex-1' }),
       themeBtn
@@ -260,5 +270,63 @@
     onReady(content, { role: role, user: user });
   }
 
-  window.AppShell = { mount: mount, el: e, icon: icon, ADMIN_ROLES: ADMIN_ROLES };
+  /**
+   * For pages that keep their own layout (Meetings, Quotations, Payroll…):
+   * a floating "Menu" button that slides out the same CRM sidebar, so every
+   * menu option is reachable from every page. Rendered in a Shadow DOM with
+   * the CRM stylesheet, so the page's CSS and the sidebar's can't affect
+   * each other. Called by crm-global.js on pages that have no sidebar.
+   */
+  function drawer() {
+    if (document.getElementById('crm-nav-drawer')) return;
+    var user = null, hasToken = false;
+    try { user = JSON.parse(localStorage.getItem('crm_user') || 'null'); hasToken = !!localStorage.getItem('crm_token'); } catch (x) {}
+    if (!hasToken) return;
+    var role = (user && user.role) || 'SALES';
+
+    // Highlight the menu item whose link is the longest prefix of this page.
+    var path = location.pathname.replace(/index\.html$/, '');
+    if (path.slice(-1) !== '/') path += '/';
+    var active = '';
+    NAV.concat(ADMIN_NAV).forEach(function (i) { if (path.indexOf(i.href) === 0 && i.href.length > active.length) active = i.href; });
+
+    var host = e('div', { id: 'crm-nav-drawer' });
+    var shadow = host.attachShadow({ mode: 'open' });
+    var css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = '/_next/static/css/808bab28f4c17593.css';
+    var st = document.createElement('style');
+    st.textContent =
+      ':host{all:initial}' +
+      '.crm-fab{position:fixed;left:16px;bottom:16px;z-index:2147482000;display:flex;align-items:center;gap:8px;padding:10px 16px;' +
+      'border-radius:9999px;border:0;background:#1e3a5f;color:#fff;font:600 13px/1 Inter,system-ui,-apple-system,Segoe UI,sans-serif;' +
+      'box-shadow:0 8px 24px rgba(15,23,42,.28);cursor:pointer}.crm-fab:hover{background:#274b78}' +
+      '.crm-wrap{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}' +
+      '.crm-back{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:2147482001}' +
+      '#app-shell-aside{z-index:2147482002!important;box-shadow:0 10px 40px rgba(15,23,42,.3)}';
+    var dark = false;
+    try { dark = localStorage.getItem('crm_theme') === 'dark'; } catch (x) {}
+    var wrap = e('div', { class: 'crm-wrap' + (dark ? ' dark' : '') });
+    var back = e('div', { class: 'crm-back', hidden: 'hidden' });
+    var aside = buildSidebar(role, user, active, function () { toggle(false); });
+    aside.classList.remove('md:translate-x-0'); // always a drawer here, even on desktop
+    var closeBtn = aside.querySelector('button.md\\:hidden');
+    if (closeBtn) closeBtn.classList.remove('md:hidden'); // keep the ✕ visible on desktop too
+    function toggle(open) {
+      aside.classList.toggle('translate-x-0', open);
+      aside.classList.toggle('-translate-x-full', !open);
+      if (open) back.removeAttribute('hidden'); else back.setAttribute('hidden', 'hidden');
+      fab.style.display = open ? 'none' : 'flex';
+    }
+    var fab = e('button', { class: 'crm-fab', type: 'button', 'aria-label': 'Open CRM menu', onclick: function () { toggle(true); } },
+      [icon('Menu', ''), 'Menu']);
+    fab.firstChild.setAttribute('width', '16'); fab.firstChild.setAttribute('height', '16');
+    back.addEventListener('click', function () { toggle(false); });
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') toggle(false); });
+    wrap.appendChild(back); wrap.appendChild(aside); wrap.appendChild(fab);
+    shadow.appendChild(css); shadow.appendChild(st); shadow.appendChild(wrap);
+    document.body.appendChild(host);
+  }
+
+  window.AppShell = { mount: mount, drawer: drawer, el: e, icon: icon, ADMIN_ROLES: ADMIN_ROLES };
 })();

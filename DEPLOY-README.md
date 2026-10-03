@@ -1,3 +1,67 @@
+# Update — 3 Oct (c): sound alerts, completed task details, same menu and icons on every page
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. Nothing to run in the database.
+
+### 1. Alerts with sound, on every page
+A new site-wide script, `crm/crm-global.js`, is added to every page. While the CRM is open it checks for news every 30 seconds. When something arrives it plays a short **chime** and shows an alert in the **bottom-right** corner. The alert has an **Open →** link, and you can get a desktop notification if you allow them.
+
+Who is alerted:
+
+| Who | Gets alerted when |
+|---|---|
+| The person a task is assigned to | a task is **assigned** to them (with priority) |
+| The admin who assigned it (Super Admin: every task) | a task is **completed**: who did it, how long it took, and the completion note |
+| Super Admin / Admin | a new **price request** or **trial request** arrives, or a trial is **completed** |
+| Engineers | their price request is **approved or rejected**, or their trial is **approved or rejected** |
+
+Behaviour:
+- **Sound:** browsers only allow sound after you click somewhere on the page once. Until then the alert says "Click anywhere on the page to turn on alert sounds".
+- **Controls:** each alert bar has **Mute**, **Desktop alerts** and **Dismiss all** buttons.
+- **Staying on screen:** "New task" alerts stay until you close them; the others close themselves after 20 seconds. At most 3 show at once ("+N more alerts — see all").
+- **No repeats:** an alert is never shown twice. If several CRM tabs are open, only one tab checks for alerts.
+- **When you were away:** alerts from the last 12 hours show the first time you open the CRM.
+- **Auto-refresh:** the Tasks and Trials pages refresh themselves when a relevant alert arrives.
+
+The server feed is `GET /api/alerts-feed` (`api/controllers/AlertFeedController.php`). It reads the existing tables; no new table is needed.
+
+### 2. Completed task details (Tasks → **Completed** tab)
+- **Filters:** Today, Last 7 days, This month, All time, or a custom date range. There's also a person filter (admins) and a search over task, customer and note.
+- **Totals:** tasks completed, total time spent, average time per task, and on time vs late (against the due date). Admins also get a per-person breakdown.
+- **Table:** completed time, task and customer, who did it, who assigned it, priority, time taken, due date with an on time or late badge, and the note.
+- **Details:** click a row for the full timeline (assigned → started, with time waited in queue → completed), the time spent working (timer time, pauses excluded), the description and the full completion note.
+- **Download CSV** of what's shown.
+- The "Task completed" alert opens this tab (`/tasks/#completed`).
+
+### 3. Tasks and Trials missing from the sidebar on older pages
+There were two causes, both fixed:
+- **Old cached copy of the React sidebar.** The React pages (Dashboard, Customers, Products…) were still running a cached copy of their sidebar file. That file kept the same name between builds, so browsers and Hostinger's cache never fetched the update. The patched sidebar is now saved under a new file name, `layout-c7e41a9d2b6f0358.js`, and all 39 page files point to it. The old file is kept too, so nothing breaks.
+- **Some pages had no CRM sidebar at all.** Meetings, Quotations and all the Payroll pages use their own layouts. They now get a **Menu** button in the bottom-left that slides out the same CRM sidebar, with the same items and role rules. It's drawn in an isolated layer, so it can't disturb those pages' own styling.
+
+### 4. Professional icons
+Every sidebar item now has its own icon from the same lucide set the app already uses, identical in both sidebars. Before, Orders, Trials, Quotations and Payroll all shared one document icon, and Fuel expense shared Attendance's clock. New icons:
+
+| Item | New icon |
+|---|---|
+| Orders | clipboard list |
+| Trials | lab flask |
+| Tasks | checklist |
+| Fuel expense | fuel pump |
+| Meetings & follow-ups | handshake |
+| Payroll | wallet |
+| HR | contact card |
+| Activity logs | activity line |
+
+### Verification
+- **API:** 76 + 15 + 33 earlier checks, plus 21 new ones for the alert feed and completed history. They cover who gets which alert, no self-alerts, the completed list's date, person and search filters, the on-time / late counts, and per-person totals.
+- **Browser:** 43 + 29 earlier checks, plus 28 new ones:
+  - Tasks and Trials appear on a React page
+  - identical icons in both sidebars
+  - the Menu drawer on Meetings, Payroll and Quotations
+  - an assigned task showing an alert *and* playing the chime, with no duplicates and the newest on top
+  - the Completed tab, its row details and the CSV download
+
+---
+
 # Fix — 3 Oct (b): "This Page Does Not Exist" inside the Trials form
 
 The form inside the Trials page was a single root-level file (`crm/trial-sheet.html`), and it wasn't found on the server, so Hostinger's 404 page appeared inside the form box. The form now lives in its own folder, **`crm/trial-sheet/index.html`** (opened at `/trial-sheet/`), the same layout as every other page that already works (`orders/`, `tasks/`).

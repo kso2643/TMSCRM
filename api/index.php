@@ -53,6 +53,7 @@ require __DIR__ . '/controllers/OrderController.php';
 require __DIR__ . '/controllers/TaskController.php';
 require __DIR__ . '/controllers/PriceRequestController.php';
 require __DIR__ . '/controllers/TrialController.php';
+require __DIR__ . '/controllers/AlertFeedController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -310,6 +311,7 @@ try {
             $method === 'GET'   && $c1 === 'meta'                      => $ctrl->meta(),
             $method === 'GET'   && $c1 === 'assignees'                 => $ctrl->assignees(),
             $method === 'GET'   && $c1 === 'overview'                  => $ctrl->overview(),
+            $method === 'GET'   && $c1 === 'completed'                 => $ctrl->completed(),
             $method === 'GET'   && $c1 === ''                          => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                          => $ctrl->create(),
             $method === 'PUT'   && $c1 !== '' && $c2 === ''            => $ctrl->update($c1),
@@ -349,6 +351,15 @@ try {
             $method === 'PATCH'  && $c1 !== '' && $c2 === 'approve'    => $ctrl->approve($c1),
             $method === 'PATCH'  && $c1 !== '' && $c2 === 'reject'     => $ctrl->reject($c1),
             default => sendError("Route /api/trials/$c1/$c2 not found", 404),
+        };
+    }
+
+    // ── Live alert feed for the site-wide toast + sound (crm-global.js)
+    elseif ($c0 === 'alerts-feed') {
+        $ctrl = new AlertFeedController();
+        match (true) {
+            $method === 'GET' && $c1 === '' => $ctrl->feed(),
+            default => sendError("Route /api/alerts-feed/$c1 not found", 404),
         };
     }
 
