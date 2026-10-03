@@ -61,10 +61,15 @@
     "Tags": [["path",{"d":"M9 5H2v7l6.29 6.29c.94.94 2.48.94 3.42 0l3.58-3.58c.94-.94.94-2.48 0-3.42L9 5Z"}],["path",{"d":"M6 9.01V9"}],["path",{"d":"m15 5 6.3 6.3a2.4 2.4 0 0 1 0 3.4L17 19"}]],
     "TrendingUp": [["polyline",{"points":"22 7 13.5 15.5 8.5 10.5 2 17"}],["polyline",{"points":"16 7 22 7 22 13"}]],
     "Users": [["path",{"d":"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"}],["circle",{"cx":"9","cy":"7","r":"4"}],["path",{"d":"M22 21v-2a4 4 0 0 0-3-3.87"}],["path",{"d":"M16 3.13a4 4 0 0 1 0 7.75"}]],
-    "Wallet": [["path",{"d":"M21 12V7H5a2 2 0 0 1 0-4h14v4"}],["path",{"d":"M3 5v14a2 2 0 0 0 2 2h16v-5"}],["path",{"d":"M18 12a2 2 0 0 0 0 4h4v-4Z"}]]
+    "Wallet": [["path",{"d":"M21 12V7H5a2 2 0 0 1 0-4h14v4"}],["path",{"d":"M3 5v14a2 2 0 0 0 2 2h16v-5"}],["path",{"d":"M18 12a2 2 0 0 0 0 4h4v-4Z"}]],
+    "Route": [["circle",{"cx":"6","cy":"19","r":"3"}],["path",{"d":"M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"}],["circle",{"cx":"18","cy":"5","r":"3"}]],
+    "Coffee": [["path",{"d":"M17 8h1a4 4 0 1 1 0 8h-1"}],["path",{"d":"M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"}],["line",{"x1":"6","x2":"6","y1":"2","y2":"4"}],["line",{"x1":"10","x2":"10","y1":"2","y2":"4"}],["line",{"x1":"14","x2":"14","y1":"2","y2":"4"}]],
+    "Database": [["ellipse",{"cx":"12","cy":"5","rx":"9","ry":"3"}],["path",{"d":"M3 5V19A9 3 0 0 0 21 19V5"}],["path",{"d":"M3 12A9 3 0 0 0 21 12"}]],
+    "Download": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"7 10 12 15 17 10"}],["line",{"x1":"12","x2":"12","y1":"15","y2":"3"}]],
+    "Upload": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"17 8 12 3 7 8"}],["line",{"x1":"12","x2":"12","y1":"3","y2":"15"}]]
   };
   // Sidebar label -> icon. Keep in sync with the React layout chunk.
-  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity"};
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -88,6 +93,7 @@
   ];
   var ADMIN_NAV = [
     { label: 'Live tracking', href: '/admin/live-tracking/', icon: 'nav',      roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
+    { label: 'Location history', href: '/admin/location-history/', icon: 'nav', roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
     { label: 'Categories',    href: '/admin/categories/',    icon: 'tag',      roles: ADMIN_ROLES },
     { label: 'Users',         href: '/admin/users/',         icon: 'users',    roles: ADMIN_ROLES },
     { label: 'HR',            href: '/hr/',                  icon: 'idcard',   roles: ADMIN_ROLES },
@@ -183,7 +189,7 @@
         e('button', { class: 'md:hidden p-1 rounded text-slate-400 hover:text-slate-600', text: '✕', onclick: onClose })
       ]),
       e('div', { class: 'px-2 pt-3' }, [
-        e('a', { href: '/alerts/', class: 'sidebar-link relative' }, [icon('Bell'), e('span', { class: 'flex-1', text: 'Alerts & reminders' })])
+        e('a', { href: '/alerts/', class: 'sidebar-link relative' + (activeHref === '/alerts/' ? ' sidebar-link-active' : '') }, [icon('Bell'), e('span', { class: 'flex-1', text: 'Alerts & reminders' })])
       ]),
       nav,
       e('div', { class: 'p-3 border-t border-slate-200 dark:border-slate-700 shrink-0' }, [
@@ -312,11 +318,25 @@
     aside.classList.remove('md:translate-x-0'); // always a drawer here, even on desktop
     var closeBtn = aside.querySelector('button.md\\:hidden');
     if (closeBtn) closeBtn.classList.remove('md:hidden'); // keep the ✕ visible on desktop too
+    var docked = false;
     function toggle(open) {
+      if (docked) open = true; // the docked desktop sidebar can't be closed
       aside.classList.toggle('translate-x-0', open);
       aside.classList.toggle('-translate-x-full', !open);
       if (open) back.removeAttribute('hidden'); else back.setAttribute('hidden', 'hidden');
-      fab.style.display = open ? 'none' : 'flex';
+      if (docked) back.setAttribute('hidden', 'hidden');
+      fab.style.display = open || docked ? 'none' : 'flex';
+    }
+    // Desktop: dock the sidebar on the left and push the page over, exactly
+    // like every other CRM page. Phones / small tablets: Menu button + drawer.
+    var mq = window.matchMedia ? window.matchMedia('(min-width: 1024px)') : { matches: false };
+    function applyDock() {
+      docked = !!mq.matches;
+      document.documentElement.style.paddingLeft = docked ? '256px' : '';
+      document.documentElement.classList.toggle('crm-docked', docked);
+      if (closeBtn) closeBtn.style.display = docked ? 'none' : '';
+      aside.style.boxShadow = docked ? 'none' : '';
+      toggle(docked);
     }
     var fab = e('button', { class: 'crm-fab', type: 'button', 'aria-label': 'Open CRM menu', onclick: function () { toggle(true); } },
       [icon('Menu', ''), 'Menu']);
@@ -324,6 +344,8 @@
     back.addEventListener('click', function () { toggle(false); });
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') toggle(false); });
     wrap.appendChild(back); wrap.appendChild(aside); wrap.appendChild(fab);
+    applyDock();
+    if (mq.addEventListener) mq.addEventListener('change', applyDock); else if (mq.addListener) mq.addListener(applyDock);
     shadow.appendChild(css); shadow.appendChild(st); shadow.appendChild(wrap);
     document.body.appendChild(host);
   }

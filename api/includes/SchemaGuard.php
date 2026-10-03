@@ -186,3 +186,28 @@ function ensure_schema(array $tables, string $migrationHint): void
 
     $done[$key] = true;
 }
+
+/**
+ * Builds an ensure_schema() definition straight from a migration file's
+ * CREATE TABLE statements (so the two can't drift). The fallback for each
+ * table is the same statement with its FOREIGN KEY constraints removed.
+ */
+function schema_from_sql_file(string $file): array
+{
+    static $cache = [];
+    if (isset($cache[$file])) return $cache[$file];
+    $sql = @file_get_contents($file) ?: '';
+    $sql = preg_replace('/--[^\n]*/', '', $sql); // strip comments
+    $out = [];
+    if (preg_match_all('/CREATE TABLE IF NOT EXISTS `([A-Za-z0-9_]+)`\s*\((.*?)\)\s*(ENGINE=[^;]*);/s', $sql, $m, PREG_SET_ORDER)) {
+        foreach ($m as $t) {
+            $lines = array_map('trim', preg_split('/,\s*\n/', trim($t[2])));
+            $noFk = array_filter($lines, fn($l) => stripos($l, 'FOREIGN KEY') === false);
+            $out[$t[1]] = [
+                'create'   => "CREATE TABLE IF NOT EXISTS `{$t[1]}` (\n  " . implode(",\n  ", $lines) . "\n) {$t[3]}",
+                'fallback' => "CREATE TABLE IF NOT EXISTS `{$t[1]}` (\n  " . implode(",\n  ", $noFk) . "\n) {$t[3]}",
+            ];
+        }
+    }
+    return $cache[$file] = $out;
+}

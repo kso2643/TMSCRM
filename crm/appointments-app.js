@@ -385,6 +385,7 @@
 
     var bodySlot = el('div', { class: 'mt-4' });
     var headerHost = el('div');
+    injectCalendarCss();
 
     function render() {
       root.innerHTML = '';
@@ -492,49 +493,117 @@
       return map;
     }
 
+    // Engineer -> stable colour, so each person's visits are easy to pick out.
+    var PALETTE = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d', '#dc2626', '#4f46e5', '#0d9488'];
+    function colorFor(id) {
+      var h = 0; String(id || '').split('').forEach(function (c) { h = (h * 31 + c.charCodeAt(0)) >>> 0; });
+      return PALETTE[h % PALETTE.length];
+    }
+
     function renderMonthGrid() {
+      injectCalendarCss();
       var byDay = apptsByDay();
       var year = state.refDate.getFullYear(), month = state.refDate.getMonth();
-      var firstOfMonth = new Date(year, month, 1);
-      var startOffset = firstOfMonth.getDay(); // 0=Sun
-      var daysInMonth = new Date(year, month + 1, 0).getDate();
+      var first = new Date(year, month, 1);
+      var gridStart = new Date(year, month, 1 - first.getDay()); // Sunday on/before the 1st
       var today = new Date();
 
-      var grid = el('div', { class: 'grid grid-cols-7 gap-px bg-slate-200 dark:bg-slate-800 rounded-lg overflow-hidden min-w-[640px]' });
-      WEEKDAYS.forEach(function (w) {
-        grid.appendChild(el('div', { class: 'bg-slate-50 dark:bg-slate-900 px-2 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 text-center', text: w }));
+      // Summary + engineer legend for the month
+      var people = {}, total = 0, done = 0;
+      state.appointments.forEach(function (a) {
+        total++; if (a.status === 'COMPLETED') done++;
+        var who = a.assignedTo || a.user || {};
+        if (who.id) people[who.id] = who.name;
       });
-      for (var i = 0; i < startOffset; i++) grid.appendChild(el('div', { class: 'bg-white dark:bg-slate-950 min-h-[92px]' }));
-      for (var day = 1; day <= daysInMonth; day++) {
-        (function (day) {
-          var dateObj = new Date(year, month, day);
+      var legend = el('div', { class: 'ap-legend' }, [
+        el('span', { class: 'ap-sum', text: total + (total === 1 ? ' visit' : ' visits') + ' this month · ' + done + ' completed' })
+      ].concat(Object.keys(people).map(function (id) {
+        return el('span', { class: 'ap-leg' }, [el('i', { style: 'background:' + colorFor(id) }), people[id]]);
+      })));
+
+      var grid = el('div', { class: 'ap-grid', role: 'grid', 'aria-label': MONTHS[month] + ' ' + year });
+      WEEKDAYS.forEach(function (w, i) {
+        grid.appendChild(el('div', { class: 'ap-wd' + (i === 0 || i === 6 ? ' ap-we' : ''), role: 'columnheader', text: w }));
+      });
+      for (var i = 0; i < 42; i++) {
+        (function (dateObj) {
+          var inMonth = dateObj.getMonth() === month;
           var dateStr = toDateStr(dateObj);
-          var dayAppts = byDay[dateStr] || [];
-          var isToday = isSameDate(dateObj, today);
+          var dayAppts = (byDay[dateStr] || []).slice().sort(function (a, b) { return (a.appointmentTime || '99') < (b.appointmentTime || '99') ? -1 : 1; });
+          var wd = dateObj.getDay();
           var cell = el('div', {
-            class: 'bg-white dark:bg-slate-950 min-h-[92px] p-1.5 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900 flex flex-col gap-1',
-            onclick: function () { switchView('day', dateObj); }
+            class: 'ap-cell' + (inMonth ? '' : ' ap-out') + (wd === 0 || wd === 6 ? ' ap-we' : '') + (isSameDate(dateObj, today) ? ' ap-today' : ''),
+            role: 'gridcell', tabindex: '0', title: 'Open ' + dateObj.toDateString(),
+            onclick: function () { switchView('day', dateObj); },
+            onkeydown: function (e) { if (e.key === 'Enter') switchView('day', dateObj); }
           });
-          cell.appendChild(el('span', {
-            class: 'text-xs font-medium w-5 h-5 flex items-center justify-center rounded-full ' +
-              (isToday ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300'),
-            text: String(day)
-          }));
+          cell.appendChild(el('div', { class: 'ap-num' }, [
+            el('span', { text: String(dateObj.getDate()) }),
+            dayAppts.length ? el('em', { text: String(dayAppts.length) }) : null
+          ]));
           dayAppts.slice(0, 3).forEach(function (a) {
+            var who = a.assignedTo || a.user || {};
+            var cust = (a.customer && (a.customer.companyName || a.customer.name)) || '';
             cell.appendChild(el('button', {
               type: 'button',
-              class: 'text-left text-[10px] leading-tight px-1 py-0.5 rounded truncate ' + (STATUS_BADGE[a.status] || STATUS_BADGE.SCHEDULED),
-              text: (a.appointmentTime ? fmtTime12(a.appointmentTime) + ' ' : '') + a.title,
+              class: 'ap-ev ap-st-' + (a.status || 'SCHEDULED'),
+              style: '--c:' + colorFor(who.id),
+              title: [a.appointmentTime ? fmtTime12(a.appointmentTime) : 'Any time', a.title, cust, who.name, a.status].filter(Boolean).join(' · '),
               onclick: function (e) { e.stopPropagation(); openApptDialog(a, null, loadAndRenderBody); }
-            }));
+            }, [
+              el('b', { text: a.appointmentTime ? fmtTime12(a.appointmentTime) : '•' }),
+              el('span', { text: (cust || a.title) + (who.name ? ' · ' + who.name.split(' ')[0] : '') })
+            ]));
           });
-          if (dayAppts.length > 3) {
-            cell.appendChild(el('span', { class: 'text-[10px] text-slate-400 px-1', text: '+' + (dayAppts.length - 3) + ' more' }));
-          }
+          if (dayAppts.length > 3) cell.appendChild(el('span', { class: 'ap-more', text: '+' + (dayAppts.length - 3) + ' more' }));
           grid.appendChild(cell);
-        })(day);
+        })(new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i));
       }
-      return el('div', { class: 'overflow-x-auto' }, [grid]);
+      return el('div', { class: 'space-y-3' }, [legend, el('div', { class: 'ap-scroll' }, [grid])]);
+    }
+
+    function injectCalendarCss() {
+      if (document.getElementById('ap-calendar-css')) return;
+      var st = document.createElement('style');
+      st.id = 'ap-calendar-css';
+      st.textContent = [
+        '.ap-scroll{overflow-x:auto}',
+        '.ap-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));min-width:700px;border:1px solid #e2e8f0;border-radius:.75rem;overflow:hidden;background:#e2e8f0;gap:1px}',
+        '.dark .ap-grid{border-color:#334155;background:#334155}',
+        '.ap-wd{background:#f8fafc;padding:.55rem;text-align:center;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b}',
+        '.dark .ap-wd{background:#0f172a;color:#94a3b8}',
+        '.ap-cell{background:#fff;min-height:118px;padding:.4rem .45rem;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .12s}',
+        '.ap-cell:hover{background:#f1f5f9}.ap-cell:focus{outline:2px solid #1e3a5f;outline-offset:-2px}',
+        '.dark .ap-cell{background:#020617}.dark .ap-cell:hover{background:#0f172a}',
+        '.ap-we{background:#fafafa}.dark .ap-we{background:#0b1222}',
+        '.ap-wd.ap-we{background:#f1f5f9}',
+        '.ap-out{opacity:.45}',
+        '.ap-num{display:flex;align-items:center;justify-content:space-between;font-size:.8rem;font-weight:600;color:#334155}',
+        '.dark .ap-num{color:#cbd5e1}',
+        '.ap-num span{width:1.6rem;height:1.6rem;display:inline-flex;align-items:center;justify-content:center;border-radius:9999px}',
+        '.ap-num em{font-style:normal;font-size:.66rem;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:9999px;padding:0 .4rem}',
+        '.ap-today{box-shadow:inset 0 0 0 2px #1e3a5f}.ap-today .ap-num span{background:#1e3a5f;color:#fff}',
+        '.dark .ap-today{box-shadow:inset 0 0 0 2px #60a5fa}',
+        '.ap-ev{display:flex;gap:.3rem;align-items:center;text-align:left;width:100%;border:0;cursor:pointer;font-size:.7rem;line-height:1.25;',
+        '  padding:.18rem .35rem;border-radius:.35rem;border-left:3px solid var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);color:#0f172a;overflow:hidden}',
+        '.dark .ap-ev{background:color-mix(in srgb,var(--c) 25%,#020617);color:#f1f5f9}',
+        '.ap-ev b{font-weight:700;white-space:nowrap}.ap-ev span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.ap-ev:hover{filter:brightness(.96)}',
+        '.ap-st-COMPLETED{opacity:.7}.ap-st-COMPLETED span{text-decoration:line-through}',
+        '.ap-st-CANCELLED{opacity:.45}.ap-st-CANCELLED span{text-decoration:line-through}',
+        '.ap-more{font-size:.68rem;font-weight:600;color:#1e3a5f;padding-left:.35rem}.dark .ap-more{color:#93c5fd}',
+        '.ap-legend{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center;font-size:.78rem;color:#475569}',
+        '.dark .ap-legend{color:#cbd5e1}',
+        '.ap-sum{font-weight:600;color:#0f172a;margin-right:.4rem}.dark .ap-sum{color:#f1f5f9}',
+        '.ap-leg{display:inline-flex;align-items:center;gap:.35rem}.ap-leg i{width:.65rem;height:.65rem;border-radius:.2rem;display:inline-block}',
+        // utilities this file uses that the compiled CSS lacks
+        '.p-0\\.5{padding:.125rem}.p-3\\.5{padding:.875rem}.pt-0\\.5{padding-top:.125rem}.px-2\\.5{padding-left:.625rem;padding-right:.625rem}',
+        '.mt-1\\.5{margin-top:.375rem}.mt-5{margin-top:1.25rem}.rounded-md{border-radius:.375rem}.self-stretch{align-self:stretch}.w-1\\.5{width:.375rem}',
+        '.leading-tight{line-height:1.25}.max-h-56{max-height:14rem}.text-\\[11px\\]{font-size:11px}.last\\:border-0:last-child{border-width:0}',
+        '.z-\\[9999\\]{z-index:9999}.dark .dark\\:text-slate-200{color:#e2e8f0}.dark .dark\\:border-slate-800{border-color:#1e293b}',
+        '@media(min-width:640px){.sm\\:max-w-lg{max-width:32rem}}'
+      ].join('\n');
+      document.head.appendChild(st);
     }
 
     function renderDayList() {

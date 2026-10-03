@@ -1,3 +1,89 @@
+# Update — 3 Oct (d): calendar, alerts page, reports & backup, product import, location history, breaks, meetings
+
+**Upload:** `api/` and `crm/` (now including the new `crm/vendor/leaflet/` folder), then press **Ctrl+Shift+R** once. Nothing to run in the database; new tables are created automatically.
+
+## 1. Appointments: real monthly calendar
+The month view now displays as a proper 7-column calendar. Before, the grid styles were missing from the compiled stylesheet, so it showed as one long list.
+- **Layout:** a full 6-week view with the neighbouring months' days greyed out; weekends shaded, and today highlighted.
+- **Visits:** each visit is a chip with time, customer and engineer, coloured per engineer, with a colour legend. A day count shows on busy days, and "+N more" opens that day.
+- **Summary:** a "N visits this month · N completed" line.
+- **Robustness:** the Appointments API now creates its own tables if they're missing, like the other modules.
+
+## 2. Alerts & reminders page (hand-coded) with tasks, trials and leave
+`/alerts/` is now one page for everything:
+- **Tabs:** All · Follow-ups · Appointments · Tasks · Trials · Leave · Price requests · Breaks & location (Super Admin).
+- **Behaviour:** grouped by day, with "new" dots, Mark as read / Mark all as read, a 7–60 day period, and an "Open →" link on every item.
+- **Leave alerts (new):** Super Admin / Admin get a sound alert for every new leave request; the employee gets one when their leave is approved or rejected.
+- **Links:** the sidebar "Alerts & reminders" link and the top-bar bell (previously a dead button) now open this page.
+
+## 3. Reports: every page downloadable, plus full backup
+`/admin/reports/` is now a hand-coded page with **16 reports**, each downloadable as CSV, Excel or PDF for any date range (presets: Today, This month, Last month, This year, All time):
+- **CRM & sales:** Customers, Follow-ups, Quotations, Products, **Orders**, **Trials**, **Price requests**.
+- **Operations:** Attendance, **Daily tracking** (punch times, location points, km, breaks), **Breaks**, Fuel expense, Leave, **Appointments**, **Tasks**.
+- **Team & audit:** Team, Activity log.
+
+**Fixed:** the existing **Leave report always failed** with an SQL error, because `Leave` is a reserved word in MySQL and MariaDB.
+
+**Full data backup (Super Admin):**
+- **Export full backup:** downloads every table as one JSON file. It's streamed, so large databases are fine.
+- **Import backup:** merges a backup file back in. Records are added, or updated if the same ID exists. **Nothing is ever deleted.** It runs as one transaction, so if anything fails, nothing changes.
+- **Not included:** uploaded files (`api/uploads/`); back those up from the hosting file manager.
+
+## 4. Products: Excel template + import
+On the Products page (Admin / Super Admin), two buttons appear next to **Add product**:
+- **⤓ Excel template:** downloads a ready-to-fill template.
+- **⤒ Import from Excel:** upload the filled `.xlsx` or `.csv`.
+  - Existing item codes are updated and new ones are added.
+  - Blank cells keep the current value.
+  - Columns are matched by heading, so their order doesn't matter.
+  - Wrong rows are listed with the reason (e.g. "Row 3: price 'abc' is not a number").
+
+## 5. Location history, mandatory location, tea / lunch breaks
+- **Location history (new page, Admin → Location history):** for Super Admin, Admin and Manager.
+  - Pick any person and any previous day; a day strip shows which days have data, with days punched in without location in red.
+  - The map shows the route, punch-in and punch-out points, stops of 10+ minutes, and tea / lunch break locations, with a slider to replay the day.
+  - Alongside: distance, points, time on duty, break time, and a timeline.
+  - The map library (Leaflet) is bundled in `crm/vendor/leaflet/`, so no outside CDN is needed.
+- **Location is mandatory for punch in / punch out:**
+  - The API refuses a punch without a location.
+  - The page now waits up to 15 seconds for GPS (before, it gave up after 5 seconds and punched in without location).
+  - If location is off or blocked, the employee sees how to turn it on.
+- **Tracking from every page:** while punched in, a location point is recorded every 2 minutes from any CRM page. Before, this only happened while the Attendance page was open.
+- **30 minutes in one place:** after 30 minutes within about 150 m, the employee hears a chime and gets **"Are you on a break?"** with three choices:
+  - ☕ Tea break, or 🍽 Lunch break;
+  - "No — I'm working here", which asks again after another hour.
+  
+  If they don't answer within 10 minutes, Super Admin is told.
+- **Break button:** in the corner, "☕ Take a break" (tea or lunch) any time, and while on a break, a running timer with **End break**. Punching out ends any open break.
+- **Location turned off while punched in:** a red banner tells the employee, and Super Admin is alerted (at most once per 30 minutes).
+- **Super Admin alerts:** break started (and whether it came from the 30-minute prompt), stationary with "working here" or no answer, and location off. These appear as sound alerts and on the Alerts page.
+- **Fixed:** Super Admin could not view an engineer's location trail (the check allowed only the "ADMIN" role).
+
+## 6. Meetings & follow-ups: one page, same sidebar as everywhere
+- **One version of the page:** clicking Meetings (or Reports or Alerts) in the sidebar now opens the same hand-coded page that a refresh shows. Before, the link opened the old built-in React page.
+- **Back-links fixed:** the Check-in page's "back to meetings" links were fixed too.
+- **Safety net:** any click inside the React app on a link to a hand-coded page now does a full page load.
+- **Sidebar on hand-coded pages:** Meetings, Quotations and Payroll now show the CRM sidebar docked on the left on desktop, exactly like every other page. On phones they keep the Menu button.
+
+## Notes
+- **Breaks need the CRM open:** break detection and 2-minute tracking run in the browser, so they only work while the CRM is open on the employee's phone or laptop (it can be in the background). A browser can't track a closed app; that would need a native mobile app.
+- **Fresh file names:** the React sidebar file is renamed again (`layout-3b9d61f0a47e2c85.js`), and so is the Check-in page file, so browsers can't keep serving old copies.
+- **Download file names:** the API now exposes `Content-Disposition`, so downloads keep their proper file names across domains.
+
+## Verification
+- **API:** 220 checks. That includes 75 new ones for leave alerts, alert history, location-required punches, breaks, stationary and location-off logging, location history, all 7 new reports in all 3 formats, the 9 existing exports, backup export/import round-trip, and product import.
+- **Browser:** 148 checks. The 45 new ones cover:
+  - the calendar grid;
+  - the Alerts page;
+  - report downloads and backup import;
+  - product import on the React page;
+  - punch-in with location denied (help shown, nothing recorded) and allowed;
+  - the 30-minute break prompt, tea break, End break and a manual lunch break;
+  - Location history with the Super Admin break alert;
+  - Meetings opening the hand-coded page, docked on desktop and with a drawer on mobile.
+
+---
+
 # Update — 3 Oct (c): sound alerts, completed task details, same menu and icons on every page
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. Nothing to run in the database.

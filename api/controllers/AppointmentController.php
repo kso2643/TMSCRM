@@ -1,6 +1,13 @@
 <?php
 class AppointmentController
 {
+    public function __construct()
+    {
+        // Creates the Appointment tables if migration_appointments.sql was never
+        // run (or failed) on this database — see includes/SchemaGuard.php.
+        ensure_schema(schema_from_sql_file(BASE_PATH . '/database/migration_appointments.sql'), 'migration_appointments.sql');
+    }
+
     private const VALID_STATUSES = ['SCHEDULED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED'];
 
     // Evening threshold (24h, server/IST time) at which the "day before" reminder

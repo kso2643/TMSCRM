@@ -7,10 +7,10 @@
 class ExportController
 {
     /** "2025-07-01" stamp for filenames, matching JS filenameStamp(). */
-    private function stamp(): string { return date('Y-m-d'); }
+    protected function stamp(): string { return date('Y-m-d'); }
 
     /** Parses ?from and ?to query params, returns [whereSql, params] fragments ready to append. */
-    private function dateRange(string $col): array
+    protected function dateRange(string $col): array
     {
         $from = qp('from'); $to = qp('to');
         $clauses = []; $params = [];
@@ -24,7 +24,7 @@ class ExportController
 
     // ── Shared renderers ─────────────────────────────────────────────
 
-    private function toCSV(array $rows, array $columns): string
+    protected function toCSV(array $rows, array $columns): string
     {
         $esc = fn($v) => preg_match('/[",\r\n]/', (string)$v)
             ? '"' . str_replace('"', '""', (string)$v) . '"'
@@ -35,7 +35,7 @@ class ExportController
         return implode("\r\n", array_merge([$header], $lines));
     }
 
-    private function toXlsx(array $rows, array $columns, string $sheetName): string
+    protected function toXlsx(array $rows, array $columns, string $sheetName): string
     {
         $w = new XlsxWriter(substr($sheetName, 0, 31));
         $w->addRow(array_column($columns, 'label'));
@@ -45,7 +45,7 @@ class ExportController
         return $w->output();
     }
 
-    private function toPdf(array $rows, array $columns, string $title, string $filenameBase): void
+    protected function toPdf(array $rows, array $columns, string $title, string $filenameBase): void
     {
         $landscape = count($columns) > 5;
         if ($landscape) {
@@ -102,7 +102,7 @@ class ExportController
         exit;
     }
 
-    private function sendExport(array $rows, array $columns, string $filenameBase, string $title): void
+    protected function sendExport(array $rows, array $columns, string $filenameBase, string $title): void
     {
         $fmt = strtolower(qp('format', 'csv'));
         if ($fmt === 'excel' || $fmt === 'xlsx') {
@@ -293,8 +293,8 @@ class ExportController
         [$clauses, $params] = $this->dateRange('l.fromDate');
         $w = $clauses ? 'WHERE ' . implode(' AND ', $clauses) : '';
         $s = db()->prepare(
-            "SELECT l.*, u.name AS u_name, u.department FROM Leave l
-             LEFT JOIN User u ON u.id=l.userId
+            "SELECT l.*, u.name AS u_name, u.department FROM `Leave` l
+             LEFT JOIN `User` u ON u.id=l.userId
              $w ORDER BY l.fromDate DESC"
         );
         $s->execute($params);

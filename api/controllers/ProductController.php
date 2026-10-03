@@ -158,4 +158,128 @@ class ProductController
         foreach(['cat_id','cat_name','cat_color','stock_id','availableStock','stock_price','minimumStock','xceedLp'] as $k) unset($r[$k]);
         return $r;
     }
+
+    // ── Excel template + bulk import ─────────────────────────────────
+    // Columns are matched by their header text (any order, case-insensitive),
+    // so an exported product list can be edited and imported straight back.
+    private const IMPORT_COLUMNS = [
+        'itemCode'       => ['item code', 'itemcode', 'code', 'item no', 'part no'],
+        'productName'    => ['product name', 'productname', 'name', 'item name', 'itemname', 'product'],
+        'description'    => ['description', 'desc'],
+        'unit'           => ['unit', 'uom'],
+        'standardPrice'  => ['standard price', 'price', 'rate', 'list price', 'price (₹)', 'standardprice'],
+        'category'       => ['category', 'item group', 'group'],
+        'hsnCode'        => ['hsn code', 'hsn', 'hsncode'],
+        'drawingNumber'  => ['drawing number', 'drawing', 'drawing no'],
+        'revisionNumber' => ['revision number', 'revision', 'rev'],
+        'productRef'     => ['product ref', 'reference', 'ref'],
+        'isActive'       => ['active', 'is active', 'status'],
+    ];
+
+    // GET /api/products/template
+    public function template(): void
+    {
+        authenticate();
+        $w = new XlsxWriter('Products');
+        $w->setForceTextColumns([0, 6]); // keep item codes / HSN like 0012 as text
+        $w->addRow(['Item Code *', 'Product Name *', 'Description', 'Unit', 'Standard Price', 'Category', 'HSN Code', 'Drawing Number', 'Revision Number', 'Product Ref', 'Active (Yes/No)']);
+        $w->addRow(['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Carbide insert for steel finishing', 'nos', 250, 'Inserts', '82090090', '', '', '', 'Yes']);
+        $w->addRow(['ER32-COLLET-12', 'ER32 Collet 12mm', '', 'nos', 1100, 'Holders', '84669310', '', '', '', 'Yes']);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="product-upload-template.xlsx"');
+        echo $w->output(); exit;
+    }
+
+    // POST /api/products/import  (multipart "file": .xlsx or .csv)
+    // Upserts by item code: existing codes are updated, new codes are created.
+    // Blank cells leave an existing product's value unchanged.
+    public function import(): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) sendError('Please choose the filled-in Excel (.xlsx) or CSV file.', 400);
+        $tmp = $_FILES['file']['tmp_name']; $name = $_FILES['file']['name'] ?? '';
+        $rows = [];
+        if (preg_match('/\.csv$/i', $name)) {
+            if (($fh = fopen($tmp, 'r')) !== false) { while (($r = fgetcsv($fh)) !== false) $rows[] = $r; fclose($fh); }
+        } elseif (preg_match('/\.xlsx$/i', $name)) {
+            try { $rows = XlsxReader::readFirstSheetRows($tmp); } catch (\Exception $e) { sendError('Could not read the Excel file: ' . $e->getMessage(), 400); }
+        } else {
+            sendError('Upload an .xlsx (Excel) or .csv file. Old .xls files: open in Excel and "Save As" .xlsx first.', 400);
+        }
+        if (count($rows) < 2) sendError('The file has no product rows under the header.', 400);
+
+        // Map headers -> fields
+        $norm = fn($h) => trim(preg_replace('/\s+/', ' ', strtolower(str_replace(['*', '(yes/no)'], '', (string) $h))));
+        $map = [];
+        foreach ($rows[0] as $i => $h) {
+            $h = $norm($h);
+            foreach (self::IMPORT_COLUMNS as $field => $aliases) {
+                if (!isset($map[$field]) && in_array($h, $aliases, true)) { $map[$field] = $i; break; }
+            }
+        }
+        if (!isset($map['itemCode']) || !isset($map['productName'])) {
+            sendError('The first row must have "Item Code" and "Product Name" columns — download the template to see the layout.', 400);
+        }
+
+        $cats = [];
+        try { foreach (db()->query('SELECT id, name FROM `Category`')->fetchAll() as $c) $cats[strtolower(trim($c['name']))] = $c['id']; } catch (PDOException $e) {}
+        $find = db()->prepare('SELECT * FROM `Product` WHERE itemCode=? LIMIT 1');
+        $created = $updated = $skipped = 0; $errors = [];
+        $seen = [];
+
+        foreach ($rows as $i => $r) {
+            if ($i === 0) continue;
+            $get = function ($f) use ($r, $map) { return isset($map[$f]) ? trim((string) ($r[$map[$f]] ?? '')) : ''; };
+            $code = strtoupper($get('itemCode'));
+            $pname = $get('productName');
+            if ($code === '' && $pname === '') continue; // blank line
+            $line = $i + 1;
+            if ($code === '') { $errors[] = "Row $line: item code is missing."; $skipped++; continue; }
+            if (isset($seen[$code])) { $errors[] = "Row $line: item code $code appears twice — only the first was used."; $skipped++; continue; }
+            $seen[$code] = true;
+            $priceRaw = str_replace([',', '₹', ' '], '', $get('standardPrice'));
+            if ($priceRaw !== '' && !is_numeric($priceRaw)) { $errors[] = "Row $line ($code): price \"" . $get('standardPrice') . "\" is not a number."; $skipped++; continue; }
+            $activeRaw = strtolower($get('isActive'));
+            $active = $activeRaw === '' ? null : (in_array($activeRaw, ['no', 'n', '0', 'false', 'inactive'], true) ? 0 : 1);
+            $cat = $get('category');
+            $vals = [
+                'productName' => $pname, 'description' => $get('description'), 'unit' => $get('unit'),
+                'standardPrice' => $priceRaw === '' ? null : (float) $priceRaw, 'category' => $cat,
+                'categoryId' => $cat !== '' ? ($cats[strtolower($cat)] ?? null) : null,
+                'hsnCode' => $get('hsnCode'), 'drawingNumber' => $get('drawingNumber'),
+                'revisionNumber' => $get('revisionNumber'), 'productRef' => $get('productRef'), 'isActive' => $active,
+            ];
+            try {
+                $find->execute([$code]);
+                $ex = $find->fetch();
+                if ($ex) {
+                    $sets = []; $params = [];
+                    foreach ($vals as $k => $v) {
+                        if ($v === null || $v === '') continue; // blank = keep existing
+                        if ($k === 'categoryId' && $v === null) continue;
+                        $sets[] = "`$k`=?"; $params[] = $v;
+                    }
+                    if ($sets) {
+                        $params[] = now_sql(); $params[] = $ex['id'];
+                        db()->prepare('UPDATE `Product` SET ' . implode(',', $sets) . ',updatedAt=? WHERE id=?')->execute($params);
+                    }
+                    $updated++;
+                } else {
+                    if ($pname === '') { $errors[] = "Row $line ($code): product name is needed for a new product."; $skipped++; continue; }
+                    db()->prepare(
+                        'INSERT INTO `Product` (id,itemCode,productName,description,unit,standardPrice,category,categoryId,hsnCode,drawingNumber,revisionNumber,productRef,isActive,createdAt,updatedAt)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                    )->execute([gen_id(), $code, $pname, $vals['description'] ?: null, $vals['unit'] ?: null, $vals['standardPrice'] ?? 0,
+                        $cat ?: null, $vals['categoryId'], $vals['hsnCode'] ?: null, $vals['drawingNumber'] ?: null, $vals['revisionNumber'] ?: null,
+                        $vals['productRef'] ?: null, $active ?? 1, now_sql(), now_sql()]);
+                    $created++;
+                }
+            } catch (PDOException $e) {
+                $errors[] = "Row $line ($code): " . $e->getMessage(); $skipped++;
+            }
+        }
+        log_activity($auth['id'], 'PRODUCTS_IMPORTED', 'Product', null, ['created' => $created, 'updated' => $updated, 'skipped' => $skipped, 'file' => $name]);
+        sendSuccess(['created' => $created, 'updated' => $updated, 'skipped' => $skipped, 'errors' => array_slice($errors, 0, 50)],
+            "Imported: $created new, $updated updated" . ($skipped ? ", $skipped skipped" : ''));
+    }
 }

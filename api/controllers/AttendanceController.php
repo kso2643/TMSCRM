@@ -12,8 +12,12 @@ class AttendanceController
         $s->execute([$auth['id'], $start, $end]);
         if ($s->fetch()) sendError('Already checked in today.', 400);
 
-        $lat = isset($b['lat']) ? (float)$b['lat'] : null;
-        $lng = isset($b['lng']) ? (float)$b['lng'] : null;
+        $lat = isset($b['lat']) && is_numeric($b['lat']) ? (float)$b['lat'] : null;
+        $lng = isset($b['lng']) && is_numeric($b['lng']) ? (float)$b['lng'] : null;
+        // Location is mandatory: live tracking and the location history depend on it.
+        if ($lat === null || $lng === null) {
+            sendError('Location is required to punch in. Turn on location (GPS) on your device and allow this site to use it, then try again.', 400);
+        }
         $id = gen_id();
         db()->prepare(
             'INSERT INTO `Attendance` (id,userId,date,checkIn,checkInLat,checkInLng,status,createdAt,updatedAt)
@@ -39,8 +43,13 @@ class AttendanceController
 
         $checkInTs = strtotime($record['checkIn']);
         $hours = round((time() - $checkInTs) / 3600, 2);
-        $lat = isset($b['lat']) ? (float)$b['lat'] : null;
-        $lng = isset($b['lng']) ? (float)$b['lng'] : null;
+        $lat = isset($b['lat']) && is_numeric($b['lat']) ? (float)$b['lat'] : null;
+        $lng = isset($b['lng']) && is_numeric($b['lng']) ? (float)$b['lng'] : null;
+        if ($lat === null || $lng === null) {
+            sendError('Location is required to punch out. Turn on location (GPS) on your device and allow this site to use it, then try again.', 400);
+        }
+        // Punching out ends any break that's still running.
+        LocationHistoryController::closeOpenBreaks($auth['id']);
 
         db()->prepare(
             'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,workingHours=?,updatedAt=? WHERE id=?'
@@ -206,7 +215,7 @@ class AttendanceController
         $s->execute([$id]);
         $record = $s->fetch();
         if (!$record) sendError('Attendance record not found.', 404);
-        if ($auth['role'] !== 'ADMIN' && $record['userId'] !== $auth['id'])
+        if (!is_admin_tier($auth['role']) && $record['userId'] !== $auth['id'])
             sendError('Not authorized to view this record.', 403);
         $record['user'] = ['id'=>$record['u_id'],'name'=>$record['u_name']];
         unset($record['u_id'],$record['u_name']);

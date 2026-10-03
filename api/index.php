@@ -58,6 +58,9 @@ require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
 require __DIR__ . '/controllers/ExportController.php';
+require __DIR__ . '/controllers/ReportsController.php';   // extends ExportController — must come after it
+require __DIR__ . '/controllers/BackupController.php';
+require __DIR__ . '/controllers/LocationHistoryController.php';
 require __DIR__ . '/controllers/PayrollController.php';  // Payroll, Salary Advances, Advance Recovery, Employee Ledger
 
 // ── CORS — mirrors the Express CORS config exactly ───────────────────
@@ -74,6 +77,8 @@ function sendCorsHeaders(): void
     header('Access-Control-Allow-Credentials: true');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    // Let the CRM (a different origin) read download file names.
+    header('Access-Control-Expose-Headers: Content-Disposition');
     header('Vary: Origin');
 }
 
@@ -210,6 +215,8 @@ try {
             $method === 'DELETE'&& $c1 === 'stock' && $c2 !== ''         => $sc->delete($c2),
             // Product sub-routes
             $method === 'GET'   && $c1 === 'export'                      => $exp->exportProducts(),
+            $method === 'GET'   && $c1 === 'template'                    => $pc->template(),
+            $method === 'POST'  && $c1 === 'import'                      => $pc->import(),
             $method === 'GET'   && $c1 === 'search'                      => $pc->search(),
             $method === 'GET'   && $c1 === 'code' && $c2 !== ''          => $pc->byCode($c2),
             $method === 'GET'   && $c1 === ''                            => $pc->index(),
@@ -359,7 +366,55 @@ try {
         $ctrl = new AlertFeedController();
         match (true) {
             $method === 'GET' && $c1 === '' => $ctrl->feed(),
+            $method === 'GET' && $c1 === 'history' => $ctrl->history(),
             default => sendError("Route /api/alerts-feed/$c1 not found", 404),
+        };
+    }
+
+    // ── Reports for the newer modules (CSV / Excel / PDF) ─────────
+    elseif ($c0 === 'reports') {
+        $ctrl = new ReportsController();
+        match (true) {
+            $method === 'GET' && $c1 === 'orders'         => $ctrl->orders(),
+            $method === 'GET' && $c1 === 'tasks'          => $ctrl->tasks(),
+            $method === 'GET' && $c1 === 'price-requests' => $ctrl->priceRequests(),
+            $method === 'GET' && $c1 === 'trials'         => $ctrl->trials(),
+            $method === 'GET' && $c1 === 'appointments'   => $ctrl->appointments(),
+            $method === 'GET' && $c1 === 'breaks'         => $ctrl->breaks(),
+            $method === 'GET' && $c1 === 'tracking'       => $ctrl->tracking(),
+            default => sendError("Route /api/reports/$c1 not found", 404),
+        };
+    }
+
+    // ── Full data backup (Super Admin) ──────────────────────────────
+    elseif ($c0 === 'backup') {
+        $ctrl = new BackupController();
+        match (true) {
+            $method === 'GET'  && $c1 === 'summary' => $ctrl->summary(),
+            $method === 'GET'  && $c1 === 'export'  => $ctrl->export(),
+            $method === 'POST' && $c1 === 'import'  => $ctrl->import(),
+            default => sendError("Route /api/backup/$c1 not found", 404),
+        };
+    }
+
+    // ── Location history (any day) + breaks / stationary alerts ────
+    elseif ($c0 === 'tracking') {
+        $ctrl = new LocationHistoryController();
+        match (true) {
+            $method === 'GET' && $c1 === 'users'   => $ctrl->users(),
+            $method === 'GET' && $c1 === 'days'    => $ctrl->days(),
+            $method === 'GET' && $c1 === 'history' => $ctrl->history(),
+            default => sendError("Route /api/tracking/$c1 not found", 404),
+        };
+    }
+    elseif ($c0 === 'breaks') {
+        $ctrl = new LocationHistoryController();
+        match (true) {
+            $method === 'GET'  && $c1 === 'today'      => $ctrl->today(),
+            $method === 'POST' && $c1 === 'start'      => $ctrl->start(),
+            $method === 'POST' && $c1 === 'end'        => $ctrl->end(),
+            $method === 'POST' && $c1 === 'stationary' => $ctrl->stationary(),
+            default => sendError("Route /api/breaks/$c1 not found", 404),
         };
     }
 

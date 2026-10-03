@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charSet="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Location history · Industrial CRM</title>
+<link rel="stylesheet" href="/_next/static/css/808bab28f4c17593.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script>
+  try {
+    if (localStorage.getItem('crm_theme') === 'dark') {
+      document.documentElement.classList.add('dark');
+    }
+  } catch (e) {}
+</script>
+</head>
+<body class="font-sans antialiased bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors">
+
+<script src="/app-shell.js"></script>
+<script src="/location-history-app.js"></script>
+<script src="/appointments-reminder-app.js" defer></script><script src="/crm-global.js" defer></script>
+<script>
+  AppShell.mount({ activeHref: '/admin/location-history/', title: 'Location history' }, function (content) {
+    window.LocationHistory.mountPage(content);
+  });
+</script>
+</body>
+</html>
