@@ -1,3 +1,21 @@
+# Fix — 4 Oct (c): dashboard "Unknown Customer"; price requests off the Tasks page
+
+**Upload:** `api/controllers/DashboardAnalyticsController.php` and `crm/` (`tasks-app.js`, the dashboard page files, `sw.js`), then press Ctrl+Shift+R once.
+
+## Dashboard: Overdue follow-ups showed "Unknown Customer / Unknown Person"
+- **The data was always in the database.** The API sent the company and contact name as plain fields, but the dashboard reads them from a nested `customer` object, so it fell back to "Unknown". The API now sends both shapes, and the dashboard shows the real company and contact.
+- **"Last meeting"** was hard-coded to "-". It now shows the meeting date.
+- **The overdue count** on the dashboard was capped at 10 (it counted the 10-row list). It now shows the real total, for both the admin and the sales-user dashboards.
+- **New file name:** the dashboard page file is renamed (`page-6d2f81c4a9e0b357.js`) so browsers load the fixed version.
+
+## Tasks page: price requests removed
+- The Price requests tab, its counter, the "+ Price request" button and all the old price-request code are gone from Tasks. Price requests live only on the **Price requests** page (sidebar → Sales).
+- Old `/tasks/#prices` links still redirect to the Price requests page.
+
+**Verified:** 14 checks: API rows carry the customer; the overdue count is not capped; admin and sales dashboards show real names and last-meeting dates with no "Unknown"; Tasks has no price tab or button; old links redirect. The other suites pass.
+
+---
+
 # Fix — 4 Oct (b): pages pushed to the right after visiting Meetings
 
 **Upload:** `crm/crm-global.js` and `crm/meetings/index.html` (or the whole `crm/` folder), then press Ctrl+Shift+R once.

@@ -19,7 +19,8 @@ class DashboardController
 
         $s=$db->prepare('SELECT COUNT(*) FROM `Meeting` WHERE nextFollowUp>=? AND nextFollowUp<?'); $s->execute([$sod,$eod]); $followUpsToday=(int)$s->fetchColumn();
 
-        $s=$db->prepare('SELECT m.*,c.companyName,c.contactPerson FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId WHERE m.nextFollowUp<? AND m.status NOT IN (\'CLOSED\',\'LOST\') ORDER BY m.nextFollowUp ASC LIMIT 10'); $s->execute([$sod]); $overdueList=$s->fetchAll();
+        $s=$db->prepare('SELECT m.*,c.companyName,c.contactPerson,c.contactNumber FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId WHERE m.nextFollowUp<? AND m.status NOT IN (\'CLOSED\',\'LOST\') ORDER BY m.nextFollowUp ASC LIMIT 10'); $s->execute([$sod]); $overdueList=self::withCustomer($s->fetchAll());
+        $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` WHERE nextFollowUp<? AND status NOT IN ('CLOSED','LOST')"); $s->execute([$sod]); $overdueTotal=(int)$s->fetchColumn();
 
         $s=$db->query("SELECT COUNT(*) FROM `Meeting` WHERE status='TRIAL_PLANNED'");     $trialsPlanned  =(int)$s->fetchColumn();
         $s=$db->query("SELECT COUNT(*) FROM `Meeting` WHERE status='TRIAL_COMPLETED'");   $trialsCompleted=(int)$s->fetchColumn();
@@ -38,7 +39,7 @@ class DashboardController
             'totalCustomers'    => $totalCustomers,
             'newCustomers'      => $newCustomers,
             'followUpsToday'    => $followUpsToday,
-            'overdueFollowUps'  => count($overdueList),
+            'overdueFollowUps'  => $overdueTotal,
             'trialsPlanned'     => $trialsPlanned,
             'trialsCompleted'   => $trialsCompleted,
             'quotationsSent'    => $quotationsSent,
@@ -61,7 +62,8 @@ class DashboardController
 
         $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` WHERE userId=? AND nextFollowUp>=? AND nextFollowUp<?"); $s->execute([$uid,$sod,$eod]); $myFollowUpsToday=(int)$s->fetchColumn();
 
-        $s=$db->prepare("SELECT m.*,c.companyName,c.contactPerson FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId WHERE m.userId=? AND m.nextFollowUp<? AND m.status NOT IN ('CLOSED','LOST') ORDER BY m.nextFollowUp ASC LIMIT 10"); $s->execute([$uid,$sod]); $overdueList=$s->fetchAll();
+        $s=$db->prepare("SELECT m.*,c.companyName,c.contactPerson,c.contactNumber FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId WHERE m.userId=? AND m.nextFollowUp<? AND m.status NOT IN ('CLOSED','LOST') ORDER BY m.nextFollowUp ASC LIMIT 10"); $s->execute([$uid,$sod]); $overdueList=self::withCustomer($s->fetchAll());
+        $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` WHERE userId=? AND nextFollowUp<? AND status NOT IN ('CLOSED','LOST')"); $s->execute([$uid,$sod]); $overdueTotal=(int)$s->fetchColumn();
 
         $s=$db->prepare("SELECT COUNT(*) FROM `Customer` WHERE createdById=? AND isActive=1"); $s->execute([$uid]); $myCustomers=(int)$s->fetchColumn();
         $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` WHERE userId=? AND meetingDate>=?");   $s->execute([$uid,$som]); $meetingsThisMonth=(int)$s->fetchColumn();
@@ -74,7 +76,7 @@ class DashboardController
 
         sendSuccess([
             'myFollowUpsToday' => $myFollowUpsToday,
-            'myOverdue'        => count($overdueList),
+            'myOverdue'        => $overdueTotal,
             'myQuotations'     => $myQuotations,
             'myCustomers'      => $myCustomers,
             'checkedIn'        => $checkedIn,
@@ -82,6 +84,18 @@ class DashboardController
             'overdueList'      => $overdueList,
             'monthlyActivity'  => $monthlyActivity,
         ], 'User dashboard data fetched');
+    }
+
+    /** The dashboard reads row.customer.companyName / .contactPerson — nest them (flat fields kept too). */
+    private static function withCustomer(array $rows): array
+    {
+        return array_map(function ($r) {
+            $r['customer'] = $r['customerId'] ? [
+                'id' => $r['customerId'], 'companyName' => $r['companyName'] ?? null,
+                'contactPerson' => $r['contactPerson'] ?? null, 'contactNumber' => $r['contactNumber'] ?? null,
+            ] : null;
+            return $r;
+        }, $rows);
     }
 
     private function buildMonthly(int $months, ?string $userId): array

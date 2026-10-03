@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════
-   Tasks — admin-assigned work queue with a timer, plus price requests.
+   Tasks — admin-assigned work queue with a timer.
 
    Tabs:
      My tasks        — the signed-in person's queue. The current task shows
@@ -13,9 +13,7 @@
      All tasks       — admin-tier (incl. Manager) sees everyone's queues.
                        Super Admin / Admin also assign, edit, reorder and
                        delete — matches TaskController.php.
-     Price requests  — engineers raise a request for a price on a product;
-                       Super Admin / Admin approve (with the price) or reject
-                       (with a reason) — matches PriceRequestController.php.
+     (Price requests have their own page: /price-requests/.)
 
    The timer is server-side (TaskController keeps workedSeconds and the
    start of the running segment); this page only ticks the display forward
@@ -40,9 +38,9 @@
     try { return JSON.parse(localStorage.getItem('crm_user') || 'null'); } catch (e) { return null; }
   }
   function role() { var u = currentUser(); return (u && u.role) || ''; }
-  /** Sees everyone's tasks / price requests — matches is_admin_tier(). */
+  /** Sees everyone's tasks — matches is_admin_tier(). */
   function isAdminTier() { return ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(role()) !== -1; }
-  /** Assigns tasks and answers price requests — matches require_admin(). */
+  /** Assigns tasks — matches require_admin(). */
   function canManage() { return ['SUPER_ADMIN', 'ADMIN'].indexOf(role()) !== -1; }
 
   function api(method, path, body) {
@@ -188,25 +186,7 @@
       '.dark .tx-timer-mid{color:#f1f5f9}',
       '.tx-muted-box{background:#f8fafc;border-radius:.5rem;padding:.6rem .75rem}',
       '.dark .tx-muted-box{background:rgba(30,41,59,.6)}',
-      // Price requests
-      '.tx-pr{border-left:4px solid #cbd5e1}',
-      '.tx-pr-PENDING{border-left-color:#f59e0b}.tx-pr-APPROVED{border-left-color:#22c55e}.tx-pr-REJECTED{border-left-color:#ef4444}',
-      '.tx-cmp{display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:.5rem}',
-      '@media(min-width:640px){.tx-cmp{grid-template-columns:repeat(3,minmax(0,1fr))}}',
-      '.tx-cmp-cell{border:1px solid #e2e8f0;border-radius:.5rem;padding:.55rem .75rem}',
-      '.dark .tx-cmp-cell{border-color:#334155}',
-      '.tx-cmp-final{border-color:#86efac;background:#f0fdf4}',
-      '.dark .tx-cmp-final{border-color:#166534;background:rgba(22,101,52,.2)}',
-      '.tx-big{font-size:1.15rem;font-weight:700;color:#0f172a}',
-      '.dark .tx-big{color:#f1f5f9}',
-      '.tx-down{color:#b45309;font-size:.72rem;font-weight:600}.tx-up{color:#15803d;font-size:.72rem;font-weight:600}',
-      '.tx-banner{border-radius:.5rem;padding:.6rem .75rem;font-size:.875rem}',
-      '.tx-banner-PENDING{background:#fffbeb;color:#92400e}.tx-banner-APPROVED{background:#f0fdf4;color:#166534}.tx-banner-REJECTED{background:#fef2f2;color:#991b1b}',
-      '.dark .tx-banner-PENDING{background:rgba(146,64,14,.2);color:#fde68a}.dark .tx-banner-APPROVED{background:rgba(22,101,52,.25);color:#bbf7d0}',
-      '.dark .tx-banner-REJECTED{background:rgba(153,27,27,.25);color:#fecaca}',
-      '.tx-decide{border:1px dashed #1e3a5f;border-radius:.5rem;padding:.75rem}',
-      '.dark .tx-decide{border-color:#60a5fa}',
-      '.tx-help{font-size:.75rem;color:#64748b}'
+      '.tx-help{font-size:.75rem;color:#64748b}',
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -236,18 +216,16 @@
     var tabs = [['mine', 'My tasks']];
     if (isAdminTier()) { tabs.push(['team', 'Team live']); tabs.push(['all', 'All tasks']); }
     tabs.push(['completed', 'Completed']);
-    tabs.push(['prices', 'Price requests ↗']); // opens the Price requests page
 
     var tab = null;
     try { tab = localStorage.getItem('crm_tasks_tab'); } catch (e) {}
-    // Links from alerts: /tasks/#completed, /tasks/#prices …
+    // Links from alerts: /tasks/#completed …
     var hashTab = location.hash.replace(/^#\/?/, '');
     // Price requests moved to their own page — keep old links working.
     if (hashTab === 'prices') { location.replace('/price-requests/'); return; }
     if (tabs.some(function (t) { return t[0] === hashTab; })) tab = hashTab;
-    if (tab === 'prices' || !tabs.some(function (t) { return t[0] === tab; })) tab = isAdminTier() ? 'team' : 'mine';
+    if (!tabs.some(function (t) { return t[0] === tab; })) tab = isAdminTier() ? 'team' : 'mine';
 
-    var pendingPrices = 0;
     var tabBar = el('div', { class: 'tx-tabs', role: 'tablist' });
     var panel = el('div', { class: 'mt-5' });
     var reload = function () {};
@@ -255,8 +233,7 @@
     root.appendChild(el('div', { class: 'space-y-4' }, [
       el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
         el('h1', { class: 'page-title', text: 'Tasks' }),
-        canManage() ? el('button', { class: 'btn-primary', text: '+ Assign task', onclick: function () { openTaskDialog(null, function () { reload(); }); } })
-                    : el('a', { class: 'btn-primary', href: '/price-requests/#new', text: '+ Price request' })
+        canManage() ? el('button', { class: 'btn-primary', text: '+ Assign task', onclick: function () { openTaskDialog(null, function () { reload(); }); } }) : null
       ]),
       tabBar,
       panel
@@ -268,11 +245,10 @@
         tabBar.appendChild(el('button', {
           class: 'tx-tab' + (t[0] === tab ? ' tx-tab-on' : ''), role: 'tab', 'aria-selected': t[0] === tab ? 'true' : 'false',
           onclick: function () { switchTab(t[0]); }
-        }, [t[1], t[0] === 'prices' && pendingPrices ? el('span', { class: 'tx-count', text: String(pendingPrices) }) : null]));
+        }, [t[1]]));
       });
     }
     function switchTab(t) {
-      if (t === 'prices') { location.href = '/price-requests/'; return; }
       tab = t;
       try { localStorage.setItem('crm_tasks_tab', t); } catch (e) {}
       renderTabs();
@@ -280,15 +256,8 @@
       reload = t === 'mine' ? myTasksTab(panel)
              : t === 'completed' ? completedTab(panel)
              : t === 'team' ? teamTab(panel)
-             : t === 'all' ? allTasksTab(panel)
-             : priceRequestsTab(panel, function (n) { pendingPrices = n; renderTabs(); });
+             : allTasksTab(panel);
     }
-
-    // Pending price-request count for the tab badge.
-    api('GET', '/price-requests?status=PENDING').then(function (res) {
-      pendingPrices = (res.data && res.data.pendingCount) || 0;
-      renderTabs();
-    }).catch(function () {});
 
     setInterval(tickTimers, 1000);
     // Pick up newly assigned tasks without a manual refresh — but never
@@ -301,15 +270,13 @@
       var a = document.activeElement;
       if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
       if (document.querySelector('[data-tx-dialog]')) return;
-      if (tab === 'team' || (tab !== 'prices' && ticks % 3 === 0)) reload();
+      if (tab === 'team' || ticks % 3 === 0) reload();
     }, 20000);
 
     // A sound alert arrived (crm-global.js) — refresh what's on screen.
     window.addEventListener('crm-alert', function (e) {
       var types = ((e.detail && e.detail.events) || []).map(function (x) { return x.type; });
-      if (types.some(function (ty) { return /^PRICE_/.test(ty); })) {
-        api('GET', '/price-requests?status=PENDING').then(function (res) { pendingPrices = (res.data && res.data.pendingCount) || 0; renderTabs(); }).catch(function () {});
-      }
+      if (!types.some(function (ty) { return /^TASK_/.test(ty); })) return; // only task alerts change this page
       var a = document.activeElement;
       if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
       if (document.querySelector('[data-tx-dialog]')) return;
@@ -317,6 +284,7 @@
     });
     window.addEventListener('hashchange', function () {
       var h = location.hash.replace(/^#\/?/, '');
+      if (h === 'prices') { location.replace('/price-requests/'); return; }
       if (h !== tab && tabs.some(function (t) { return t[0] === h; })) switchTab(h);
     });
 
@@ -974,309 +942,6 @@
         el('div', {}, [el('p', { class: 'text-xs text-muted', text: 'Completion note' }), el('p', { class: 'text-sm whitespace-pre-wrap', text: t.completionNote || 'No note was added.' })]),
         t.customer ? el('p', { class: 'text-sm', text: 'Customer: ' + t.customer.companyName }) : null
       ]);
-    }
-
-    load();
-    return load;
-  }
-
-  // ── Price requests ───────────────────────────────────────────────────
-  var PR_HEADLINE = { PENDING: 'Waiting for admin approval', APPROVED: 'Approved', REJECTED: 'Rejected' };
-
-  /** "15% below list" / "5% above list" / "same as list" — or null when there's nothing to compare. */
-  function vsList(price, list) {
-    if (price === null || price === undefined || price === '' || !list) return null;
-    var pct = (Number(price) - Number(list)) / Number(list) * 100;
-    if (Math.abs(pct) < 0.05) return { text: 'same as list price', cls: 'text-xs text-muted' };
-    return pct < 0
-      ? { text: (Math.round(-pct * 10) / 10) + '% below list price', cls: 'tx-down' }
-      : { text: (Math.round(pct * 10) / 10) + '% above list price', cls: 'tx-up' };
-  }
-  function lineValue(price, qty) {
-    if (price === null || price === undefined || price === '' || !qty) return null;
-    return 'Total for ' + qty + ': ' + money(Number(price) * Number(qty));
-  }
-
-  function priceRequestsTab(p, onPendingCount) {
-    var status = isAdminTier() ? 'PENDING' : 'ALL';
-    var who = '';
-    var list = [], counts = { PENDING: 0, APPROVED: 0, REJECTED: 0 }, requesters = [], err = '', showForm = !isAdminTier(), loaded = false;
-    var blankForm = function () { return { productId: '', productLabel: '', productName: '', listPrice: null, customerId: '', customerLabel: '', quantity: '', requestedPrice: '', notes: '' }; };
-    var form = blankForm();
-    var drafts = {}; // requestId -> { price, note } while an admin types a response
-    var flash = '';
-
-    function load() {
-      if (!loaded) loading(p);
-      api('GET', '/price-requests?status=' + status + (who ? '&requestedById=' + encodeURIComponent(who) : '')).then(function (r) {
-        list = r.data.requests || [];
-        counts = r.data.counts || counts;
-        requesters = r.data.requesters || [];
-        loaded = true;
-        onPendingCount(r.data.pendingCount || 0);
-        render();
-      }).catch(function (e) { errorBox(p, e.message, load); });
-    }
-
-    function render() {
-      p.innerHTML = '';
-
-      // How it works — one line, so nobody has to guess who does what.
-      p.appendChild(el('p', { class: 'tx-help mb-3', text: canManage()
-        ? 'Engineers ask for a price here. Check the list price and the price they asked for, then approve with the final price or reject with a reason — they see your answer straight away.'
-        : 'Need a special price for a customer? Raise a request below. An admin approves it with the final price (or rejects it with a reason) and you’ll see the answer here.' }));
-
-      // Status tiles — they double as the filter.
-      var tiles = el('div', { class: 'tx-tiles mb-4' });
-      [['PENDING', isAdminTier() ? 'Waiting for your decision' : 'Waiting for admin', counts.PENDING],
-       ['APPROVED', 'Approved', counts.APPROVED], ['REJECTED', 'Rejected', counts.REJECTED],
-       ['ALL', 'All requests', counts.PENDING + counts.APPROVED + counts.REJECTED]].forEach(function (t) {
-        tiles.appendChild(el('button', { class: 'tx-tile' + (status === t[0] ? ' tx-tile-on' : ''), onclick: function () { status = t[0]; load(); } }, [
-          el('p', { class: 'text-xs text-muted', text: t[1] }), el('p', { class: 'tx-tile-n', text: String(t[2]) })
-        ]));
-      });
-      p.appendChild(tiles);
-
-      var bar = el('div', { class: 'flex items-center justify-between gap-3 flex-wrap mb-4' });
-      var left = el('div', { class: 'flex items-center gap-2 flex-wrap' });
-      if (isAdminTier() && requesters.length) {
-        var sel = el('select', { class: INPUT, style: 'width:auto;max-width:240px', 'aria-label': 'Requested by' },
-          [el('option', { value: '', text: 'All engineers' })].concat(requesters.map(function (u) { return el('option', { value: u.id, text: u.name }); })));
-        sel.value = who;
-        sel.addEventListener('change', function () { who = sel.value; load(); });
-        left.appendChild(sel);
-      }
-      left.appendChild(el('span', { class: 'text-sm text-muted', text: list.length + ' shown' }));
-      bar.appendChild(left);
-      bar.appendChild(el('button', { class: showForm ? 'btn-secondary' : 'btn-primary', text: showForm ? 'Hide form' : '+ Raise price request', onclick: function () { showForm = !showForm; render(); } }));
-      p.appendChild(bar);
-
-      if (flash) p.appendChild(el('div', { class: 'tx-banner tx-banner-APPROVED mb-3', text: flash }));
-      if (showForm) p.appendChild(requestForm());
-      if (err) p.appendChild(el('p', { class: 'text-sm text-red-600 mb-3', text: err }));
-
-      if (!list.length) {
-        p.appendChild(el('div', { class: 'card p-10 text-center text-muted', text:
-          status === 'PENDING' ? (isAdminTier() ? 'Nothing waiting for a decision.' : 'You have no requests waiting.') : 'No price requests here yet.' }));
-        return;
-      }
-      var wrap = el('div', { class: 'space-y-3' });
-      list.forEach(function (r) { wrap.appendChild(requestCard(r)); });
-      p.appendChild(wrap);
-    }
-
-    function priceCell(label, price, r, final) {
-      var cmp = vsList(price, r.listPrice);
-      var total = lineValue(price, r.quantity);
-      return el('div', { class: 'tx-cmp-cell' + (final ? ' tx-cmp-final' : '') }, [
-        el('p', { class: 'text-xs text-muted', text: label }),
-        el('p', { class: 'tx-big', text: money(price) }),
-        cmp && label !== 'List price' ? el('p', { class: cmp.cls, text: cmp.text }) : null,
-        total ? el('p', { class: 'text-xs text-muted', text: total }) : null
-      ]);
-    }
-
-    function requestCard(r) {
-      var mine = currentUser() && r.requestedBy.id === currentUser().id;
-      var card = el('div', { class: 'card p-4 space-y-3 tx-pr tx-pr-' + r.status });
-
-      // 1. What and for whom
-      card.appendChild(el('div', { class: 'flex items-start justify-between gap-3 flex-wrap' }, [
-        el('div', { class: 'min-w-0' }, [
-          el('p', { class: 'text-base font-semibold text-slate-900 dark:text-slate-100', text: r.productName + (r.itemCode && r.itemCode !== 'MANUAL' ? ' (' + r.itemCode + ')' : '') }),
-          el('p', { class: 'text-sm text-muted', text: [
-            r.customer ? 'For ' + r.customer.companyName : 'No customer given',
-            r.quantity !== null ? 'Qty ' + r.quantity : null
-          ].filter(Boolean).join(' · ') }),
-          el('p', { class: 'text-xs text-muted', text: 'Raised by ' + (mine ? 'you' : (r.requestedBy.name || '—')) + ' · ' + fmtDateTime(r.createdAt) })
-        ]),
-        el('span', { class: 'badge ' + PR_BADGE[r.status], text: PR_HEADLINE[r.status] })
-      ]));
-
-      // 2. The prices side by side
-      card.appendChild(el('div', { class: 'tx-cmp' }, [
-        priceCell('List price', r.listPrice, r, false),
-        priceCell(mine ? 'Price you asked for' : 'Price the engineer asked for', r.requestedPrice, r, false),
-        r.status === 'APPROVED'
-          ? priceCell('Approved price', r.approvedPrice, r, true)
-          : el('div', { class: 'tx-cmp-cell' }, [
-              el('p', { class: 'text-xs text-muted', text: 'Approved price' }),
-              el('p', { class: 'tx-big text-muted', text: r.status === 'REJECTED' ? 'Not approved' : 'Awaiting decision' })
-            ])
-      ]));
-
-      if (r.notes) {
-        card.appendChild(el('div', { class: 'tx-muted-box' }, [
-          el('p', { class: 'text-xs text-muted', text: 'Why the engineer is asking' }),
-          el('p', { class: 'text-sm whitespace-pre-wrap', text: r.notes })
-        ]));
-      }
-
-      // 3. The outcome
-      if (r.status !== 'PENDING') {
-        var by = ((r.respondedBy && r.respondedBy.name) || '—') + ' · ' + fmtDateTime(r.respondedAt);
-        card.appendChild(el('div', { class: 'tx-banner tx-banner-' + r.status }, [
-          el('p', { class: 'font-semibold', text: r.status === 'APPROVED' ? '✓ Approved at ' + money(r.approvedPrice) : '✕ Rejected' }),
-          r.responseNote ? el('p', { text: (r.status === 'REJECTED' ? 'Reason: ' : 'Note: ') + r.responseNote }) : null,
-          el('p', { class: 'text-xs', text: 'By ' + by })
-        ]));
-      } else if (!canManage()) {
-        card.appendChild(el('div', { class: 'tx-banner tx-banner-PENDING', text: '⏳ Waiting for an admin to approve or reject this request.' }));
-      }
-
-      // 4. Actions
-      if (r.status === 'PENDING' && canManage()) card.appendChild(decisionBox(r));
-      else if (r.status === 'PENDING' && mine) {
-        card.appendChild(el('div', { class: 'flex justify-end' }, [el('button', {
-          class: 'tx-link tx-danger', text: 'Withdraw request',
-          onclick: function () {
-            if (!confirm('Withdraw this price request?')) return;
-            api('DELETE', '/price-requests/' + r.id).then(load).catch(function (e) { err = e.message; render(); });
-          }
-        })]));
-      }
-      return card;
-    }
-
-    function decisionBox(r) {
-      var d = drafts[r.id] || (drafts[r.id] = { price: r.requestedPrice !== null ? String(r.requestedPrice) : (r.listPrice !== null ? String(r.listPrice) : ''), note: '' });
-      var hint = el('p', { class: 'text-xs text-muted mt-1' });
-      function updateHint() {
-        var cmp = vsList(d.price, r.listPrice), tot = lineValue(d.price, r.quantity);
-        hint.textContent = [cmp ? cmp.text : null, tot].filter(Boolean).join(' · ');
-        hint.className = (cmp ? cmp.cls : 'text-xs text-muted') + ' mt-1 block';
-      }
-      var price = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'Final price per unit (₹)', 'aria-label': 'Approved price' });
-      price.value = d.price;
-      price.addEventListener('input', function () { d.price = price.value; updateHint(); });
-      updateHint();
-      var note = el('input', { class: INPUT, placeholder: 'Message to the engineer — required if you reject', 'aria-label': 'Note to engineer' });
-      note.value = d.note; note.addEventListener('input', function () { d.note = note.value; });
-
-      return el('div', { class: 'tx-decide space-y-2' }, [
-        el('p', { class: 'text-sm font-semibold', text: 'Your decision' }),
-        el('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-2' }, [
-          el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Approved price (per unit)' }), el('div', { class: 'mt-1' }, [price]), hint]),
-          el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Note' }), el('div', { class: 'mt-1' }, [note])])
-        ]),
-        el('div', { class: 'flex gap-2 justify-end' }, [
-          el('button', { class: 'btn-secondary btn-sm', text: '✕ Reject', onclick: function () { respond(r, 'REJECTED'); } }),
-          el('button', { class: 'btn-primary btn-sm', text: '✓ Approve at this price', onclick: function () { respond(r, 'APPROVED'); } })
-        ])
-      ]);
-    }
-
-    function respond(r, st) {
-      var d = drafts[r.id] || {};
-      err = ''; flash = '';
-      if (st === 'APPROVED' && (d.price === '' || isNaN(Number(d.price)))) { err = 'Enter the approved price for “' + r.productName + '”.'; return render(); }
-      if (st === 'REJECTED' && !(d.note || '').trim()) { err = 'Write the reason in the note to reject “' + r.productName + '”.'; return render(); }
-      api('PATCH', '/price-requests/' + r.id + '/respond', { status: st, approvedPrice: st === 'APPROVED' ? Number(d.price) : null, responseNote: d.note || '' })
-        .then(function () {
-          delete drafts[r.id];
-          flash = (st === 'APPROVED' ? 'Approved “' + r.productName + '” at ' + money(Number(d.price)) : 'Rejected “' + r.productName + '”') + ' — ' + (r.requestedBy.name || 'the engineer') + ' can see it now.';
-          load();
-        })
-        .catch(function (e) { err = e.message; render(); });
-    }
-
-    function requestForm() {
-      var box = el('div', { class: 'card p-4 mb-4 space-y-3' });
-      box.appendChild(el('div', {}, [
-        el('p', { class: 'text-sm font-semibold', text: 'Ask admin for a price' }),
-        el('p', { class: 'tx-help', text: 'Only the product is required — the more you fill in, the faster admin can decide.' })
-      ]));
-      var grid = el('div', { class: 'tx-form' });
-      function field(label, control, span, help) {
-        return el('div', { class: 'block' + (span ? ' tx-span2' : '') }, [
-          el('span', { class: 'text-xs font-medium text-muted', text: label }),
-          el('div', { class: 'mt-1' }, [control]),
-          help ? el('p', { class: 'tx-help mt-1', text: help }) : null
-        ]);
-      }
-
-      // 1. Product: pick from catalog, or type a free-text item.
-      var prodCtl;
-      if (form.productId) {
-        prodCtl = el('div', { class: 'flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/50' }, [
-          el('span', { class: 'truncate', text: form.productLabel + (form.listPrice !== null ? ' · list price ' + money(form.listPrice) : '') }),
-          el('button', { class: 'tx-link', text: 'Change', onclick: function (e) { e.preventDefault(); form.productId = ''; form.productLabel = ''; form.listPrice = null; render(); } })
-        ]);
-      } else {
-        var pin = el('input', { class: INPUT, placeholder: 'Search products, or type the item name…' });
-        pin.value = form.productName;
-        var res = el('div', { class: 'mt-1 space-y-1' });
-        var t;
-        pin.addEventListener('input', function () {
-          form.productName = pin.value;
-          clearTimeout(t);
-          var q = pin.value.trim();
-          if (!q) { res.innerHTML = ''; return; }
-          t = setTimeout(function () {
-            api('GET', '/products/search?q=' + encodeURIComponent(q)).then(function (r2) {
-              res.innerHTML = '';
-              ((r2.data && r2.data.results) || []).slice(0, 8).forEach(function (pr) {
-                res.appendChild(el('button', {
-                  class: 'block w-full text-left px-3 py-1.5 text-sm rounded-lg hover:bg-slate-50',
-                  text: pr.productName + ' (' + pr.itemCode + ')' + (pr.standardPrice ? ' · ' + money(pr.standardPrice) : ''),
-                  onclick: function (e) {
-                    e.preventDefault();
-                    form.productId = pr.id; form.productLabel = pr.productName + ' (' + pr.itemCode + ')';
-                    form.listPrice = pr.standardPrice !== undefined && pr.standardPrice !== null ? Number(pr.standardPrice) : null;
-                    render();
-                  }
-                }));
-              });
-            }).catch(function () {});
-          }, 300);
-        });
-        prodCtl = el('div', {}, [pin, res]);
-      }
-      grid.appendChild(field('1. Product *', prodCtl, true, form.productId ? null : 'Pick from the list to show the list price automatically, or just type the item name.'));
-      grid.appendChild(field('2. Customer', customerPicker(form, render)));
-
-      var qty = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'e.g. 10' });
-      qty.value = form.quantity;
-      grid.appendChild(field('3. Quantity', qty));
-
-      var rp = el('input', { type: 'number', min: '0', step: 'any', class: INPUT, placeholder: 'Price per unit you want to offer (₹)' });
-      rp.value = form.requestedPrice;
-      var rpHint = el('p', { class: 'text-xs mt-1' });
-      function updateRpHint() {
-        var cmp = vsList(form.requestedPrice, form.listPrice), tot = lineValue(form.requestedPrice, form.quantity);
-        rpHint.textContent = [cmp ? cmp.text : null, tot].filter(Boolean).join(' · ');
-        rpHint.className = (cmp ? cmp.cls : 'text-xs text-muted') + ' mt-1 block';
-      }
-      rp.addEventListener('input', function () { form.requestedPrice = rp.value; updateRpHint(); });
-      qty.addEventListener('input', function () { form.quantity = qty.value; updateRpHint(); });
-      updateRpHint();
-      grid.appendChild(el('div', { class: 'block' }, [
-        el('span', { class: 'text-xs font-medium text-muted', text: '4. Price you want to offer' }), el('div', { class: 'mt-1' }, [rp]), rpHint
-      ]));
-
-      var notes = el('textarea', { class: INPUT, rows: '2', placeholder: 'e.g. competitor quoted ₹84, order of 200 units, repeat customer…' });
-      notes.value = form.notes; notes.addEventListener('input', function () { form.notes = notes.value; });
-      grid.appendChild(field('5. Why do you need this price?', notes, true));
-      box.appendChild(grid);
-
-      box.appendChild(el('div', { class: 'flex justify-end' }, [el('button', { class: 'btn-primary', text: 'Send to admin', onclick: submit })]));
-      return box;
-    }
-
-    function submit() {
-      err = ''; flash = '';
-      if (!form.productId && !form.productName.trim()) { err = 'Choose a product or type the item name.'; return render(); }
-      var body = {
-        productId: form.productId || '', productName: form.productId ? '' : form.productName.trim(),
-        customerId: form.customerId || '', quantity: form.quantity, requestedPrice: form.requestedPrice, notes: form.notes
-      };
-      api('POST', '/price-requests', body).then(function () {
-        flash = 'Request sent — an admin will approve or reject it. You’ll see the answer under “Waiting for admin”.';
-        form = blankForm();
-        showForm = false;
-        status = isAdminTier() ? 'PENDING' : 'ALL';
-        load();
-      }).catch(function (e) { err = e.message; render(); });
     }
 
     load();
