@@ -12,6 +12,10 @@ class StockLedger
         'Himachal Pradesh','Jammu & Kashmir','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya',
         'Mizoram','Nagaland','Odisha','Puducherry','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura',
         'Uttar Pradesh','Uttarakhand','West Bengal','Chandigarh','Ladakh','Andaman & Nicobar','Dadra & Nagar Haveli and Daman & Diu','Lakshadweep'];
+    // Local stock is kept per city / branch; these always appear in the lists.
+    public const LOCAL_CITIES = ['Mumbai', 'Hyderabad', 'Bangalore', 'Chennai', 'Coimbatore', 'Pune', 'Ahmedabad', 'Kolkata'];
+    private const CITY_ALIASES = ['bengaluru' => 'Bangalore', 'banglore' => 'Bangalore', 'bombay' => 'Mumbai', 'hydrabad' => 'Hyderabad',
+                                  'hyd' => 'Hyderabad', 'madras' => 'Chennai', 'cbe' => 'Coimbatore', 'kovai' => 'Coimbatore', 'calcutta' => 'Kolkata', 'blr' => 'Bangalore'];
     // Order lines are taken from these first (state stock last, largest first).
     private const DEDUCT_ORDER = ['HAND' => 0, 'LOCAL' => 1, 'STATE' => 2];
 
@@ -61,7 +65,47 @@ $tail"],
 
     public static function label(string $type, string $state = ''): string
     {
-        return $type === 'STATE' ? ($state . ' (state stock)') : (self::LOC_TYPES[$type] ?? $type);
+        if ($type === 'STATE') return $state . ' (state stock)';
+        if ($type === 'LOCAL' && $state !== '') return 'Local stock – ' . $state;
+        return self::LOC_TYPES[$type] ?? $type;
+    }
+
+    public static function city(string $c): string
+    {
+        $c = trim(preg_replace('/\s+/', ' ', $c));
+        if ($c === '') return '';
+        $k = strtolower($c);
+        if (isset(self::CITY_ALIASES[$k])) return self::CITY_ALIASES[$k];
+        foreach (self::LOCAL_CITIES as $known) if (strcasecmp($known, $c) === 0) return $known;
+        return mb_substr(ucwords(strtolower($c)), 0, 60);
+    }
+
+    private static function stateName(string $s): ?string
+    {
+        $s = trim(preg_replace('/\s*(state)?\s*(stock)?\s*$/i', '', trim($s)));
+        foreach (self::STATES as $st) if (strcasecmp($st, $s) === 0) return $st;
+        $alias = ['tn' => 'Tamil Nadu', 'tamilnadu' => 'Tamil Nadu', 'ka' => 'Karnataka', 'mh' => 'Maharashtra', 'ap' => 'Andhra Pradesh',
+                  'ts' => 'Telangana', 'kl' => 'Kerala', 'up' => 'Uttar Pradesh', 'wb' => 'West Bengal', 'gj' => 'Gujarat', 'orissa' => 'Odisha'];
+        return $alias[strtolower(str_replace(' ', '', $s))] ?? null;
+    }
+
+    /**
+     * Reads a place from free text — a sheet name or a Location cell:
+     * "Hand stock", "Local - Mumbai", "Mumbai", "Karnataka", "State: Kerala".
+     * Returns [type, state/city] or null when it can't tell.
+     */
+    public static function parsePlace(string $text): ?array
+    {
+        $t = trim($text);
+        if ($t === '') return null;
+        if (preg_match('/^(hand|in[\s-]*hand|our|office|godown|own)(\s*stock)?$/i', $t)) return ['HAND', ''];
+        if (preg_match('/^local(\s*stock)?\s*(?:[-–:,()\/]\s*)?(.*?)\)?$/i', $t, $m)) return ['LOCAL', self::city($m[2])];
+        if (preg_match('/^(?:other\s*)?state(?:\s*stock)?\s*[-–:,]\s*(.+)$/i', $t, $m) && ($st = self::stateName($m[1]))) return ['STATE', $st];
+        $c = strtolower(trim(preg_replace('/\s*(local)?\s*(stock)?\s*$/i', '', $t)));
+        if (isset(self::CITY_ALIASES[$c])) return ['LOCAL', self::CITY_ALIASES[$c]];
+        foreach (self::LOCAL_CITIES as $known) if (strcasecmp($known, $c) === 0) return ['LOCAL', $known];
+        if ($st = self::stateName($t)) return ['STATE', $st];
+        return null;
     }
 
     /** Normalises a location from user input; halts with 400 when invalid. */
@@ -70,7 +114,8 @@ $tail"],
         $type = strtoupper(trim((string) $type));
         if (!isset(self::LOC_TYPES[$type])) sendError('Choose where the stock is: Hand stock, Local stock or Other state stock.', 400);
         $state = trim((string) $state);
-        if ($type !== 'STATE') return [$type, ''];
+        if ($type === 'HAND') return [$type, ''];
+        if ($type === 'LOCAL') return [$type, self::city($state)];
         if ($state === '') sendError('Choose which state the stock is in.', 400);
         foreach (self::STATES as $st) if (strcasecmp($st, $state) === 0) return [$type, $st];
         return [$type, mb_substr($state, 0, 60)];
@@ -119,8 +164,9 @@ $tail"],
         $s->execute(array_values($stockIds));
         foreach ($s->fetchAll() as $r) {
             $o = &$out[$r['stockId']];
-            $o = $o ?? ['HAND' => 0.0, 'LOCAL' => 0.0, 'states' => []];
+            $o = $o ?? ['HAND' => 0.0, 'LOCAL' => 0.0, 'local' => [], 'states' => []];
             if ($r['locType'] === 'STATE') $o['states'][$r['state']] = (float) $r['quantity'];
+            elseif ($r['locType'] === 'LOCAL') { $o['local'][$r['state']] = (float) $r['quantity']; $o['LOCAL'] += (float) $r['quantity']; }
             else $o[$r['locType']] = (float) $r['quantity'];
             unset($o);
         }
@@ -217,6 +263,8 @@ $tail"],
     }
 }
 
+if (!function_exists('qtyfmt')) { function qtyfmt(float $q): string { return rtrim(rtrim(number_format($q, 2, '.', ''), '0'), '.'); } }
+
 class StockController
 {
     // Upload / template columns (A–O). The first 13 match the old template so old files still import.
@@ -244,8 +292,8 @@ class StockController
         elseif($status==='low'){$where[]='s.availableStock>0 AND s.minimumStock>0 AND s.availableStock<=s.minimumStock';}
         if($loc){
             [$lt,$ls]=array_pad(explode(':',$loc,2),2,'');
-            $where[]='EXISTS (SELECT 1 FROM `StockLevel` l WHERE l.stockId=s.id AND l.locType=? AND l.quantity<>0'.($lt==='STATE'&&$ls!==''?' AND l.state=?':'').')';
-            $params[]=strtoupper($lt); if($lt==='STATE'&&$ls!=='') $params[]=$ls;
+            $where[]='EXISTS (SELECT 1 FROM `StockLevel` l WHERE l.stockId=s.id AND l.locType=? AND l.quantity<>0'.($ls!==''?' AND l.state=?':'').')';
+            $params[]=strtoupper($lt); if($ls!=='') $params[]=$ls;
         }
         $w='WHERE '.implode(' AND ',$where);
 
@@ -272,6 +320,8 @@ class StockController
         $brands=db()->query("SELECT DISTINCT brand FROM `Stock` WHERE isActive=1 AND brand IS NOT NULL AND brand<>'' ORDER BY brand")->fetchAll(PDO::FETCH_COLUMN);
         $states=db()->query("SELECT l.state, SUM(l.quantity) q, COUNT(*) n FROM `StockLevel` l JOIN `Stock` s ON s.id=l.stockId AND s.isActive=1
                              WHERE l.locType='STATE' AND l.state<>'' GROUP BY l.state HAVING SUM(ABS(l.quantity))>0 ORDER BY l.state")->fetchAll();
+        $localRows=db()->query("SELECT l.state, SUM(l.quantity) q, COUNT(*) n FROM `StockLevel` l JOIN `Stock` s ON s.id=l.stockId AND s.isActive=1
+                             WHERE l.locType='LOCAL' GROUP BY l.state HAVING SUM(ABS(l.quantity))>0 ORDER BY l.state")->fetchAll();
         $tot=db()->query("SELECT l.locType, SUM(l.quantity) q FROM `StockLevel` l JOIN `Stock` s ON s.id=l.stockId AND s.isActive=1 GROUP BY l.locType")->fetchAll(PDO::FETCH_KEY_PAIR);
         $catBrands=[];
         try { $catBrands=db()->query("SELECT DISTINCT brand FROM `CustomerOrderItem` WHERE brand IS NOT NULL AND brand<>'' ORDER BY brand LIMIT 100")->fetchAll(PDO::FETCH_COLUMN); } catch(Throwable $e) {}
@@ -280,6 +330,8 @@ class StockController
             'suggestedBrands'=>array_values(array_unique(array_merge($brands,$catBrands))),
             'stateStock'=>array_map(fn($r)=>['state'=>$r['state'],'quantity'=>(float)$r['q'],'items'=>(int)$r['n']],$states),
             'totals'=>['HAND'=>(float)($tot['HAND']??0),'LOCAL'=>(float)($tot['LOCAL']??0),'STATE'=>(float)($tot['STATE']??0)],
+            'localStock'=>array_map(fn($r)=>['city'=>$r['state'],'quantity'=>(float)$r['q'],'items'=>(int)$r['n']],$localRows),
+            'localCities'=>array_values(array_unique(array_merge(StockLedger::LOCAL_CITIES,array_values(array_filter(array_column($localRows,'state')))))),
             'locTypes'=>array_map(fn($k,$v)=>['value'=>$k,'label'=>$v],array_keys(StockLedger::LOC_TYPES),StockLedger::LOC_TYPES),
             'states'=>StockLedger::STATES,
         ]);
@@ -319,46 +371,83 @@ class StockController
         sendSuccess(['total'=>$total,'inStock'=>$inStock,'outOfStock'=>$total-$inStock,'lowStock'=>$low,'reservedItems'=>count(StockLedger::reserved()),'stockValue'=>round($value,2),'itemGroups'=>array_values($groups)]);
     }
 
-    // GET /api/products/stock/template
+    // GET /api/products/stock/template — one sheet per place; the sheet name says where the stock is
     public function template(): void
     {
         authenticate();
         $wb=new StyledXlsxWriter();
-        $sh=$wb->addSheet('Stock');
-        $wb->setWidths($sh,[11,18,16,18,14,10,20,34,10,11,11,12,16,14,14]);
-        $wb->addRow($sh,self::COLS,'header',30);
-        $wb->addRow($sh,['Regular','Carbide Tooling','Inserts','Turning','Insert','INS','CNMG120408-MF','CNMG 120408-MF Turning Insert',150,250,310,'7-10 days','On confirmation','YG-1',50]);
-        $wb->addRow($sh,['Regular','Holders','Collet Chucks','ER Series','Holder','HLD','ER32-COLLET-12','ER32 Collet Chuck 12mm',65,1100,1380,'7-10 days','On confirmation','',10]);
-        $wb->freeze($sh,1);
+        $cols=array_merge(self::COLS,['Location (optional)']);
+        $widths=[11,18,16,18,14,10,20,34,10,11,11,12,16,14,14,20];
+        $sheets=[
+            'Hand stock'=>[['Regular','Carbide Tooling','Inserts','Turning','Insert','INS','CNMG120408-MF','CNMG 120408-MF Turning Insert',150,250,310,'7-10 days','On confirmation','YG-1',50,'']],
+            'Local - Mumbai'=>[['Regular','Holders','Collet Chucks','ER Series','Holder','HLD','ER32-COLLET-12','ER32 Collet Chuck 12mm',65,1100,1380,'7-10 days','On confirmation','',10,'']],
+            'Local - Hyderabad'=>[], 'Local - Bangalore'=>[],
+            'Karnataka'=>[['Regular','Carbide Tooling','Inserts','Turning','Insert','INS','CNMG120408-MF','CNMG 120408-MF Turning Insert',40,250,310,'','','YG-1','','']],
+        ];
+        foreach($sheets as $name=>$rows){
+            $sh=$wb->addSheet($name);
+            $wb->setWidths($sh,$widths);
+            $wb->addRow($sh,$cols,'header',30);
+            foreach($rows as $r) $wb->addRow($sh,$r);
+            $wb->freeze($sh,1);
+        }
         $hs=$wb->addSheet('How to fill');
-        $wb->setWidths($hs,[90]);
-        $wb->addRow($hs,['How to upload stock'],'header');
+        $wb->setWidths($hs,[100]);
+        $wb->addRow($hs,['How to upload stock — one sheet (page) per place'],'header');
         foreach([
-            '1. One row per item. ItemCode (column G) is required; it links the row to the item (new codes are added).',
-            '2. InStock (column I) is the quantity you have at ONE place. When you upload you choose that place in the CRM:',
-            '      • Hand stock — stock with us,  • Local stock — local brand / local dealer stock,  • Other state stock — then pick the state.',
-            '   The uploaded quantity REPLACES the old quantity at that place only; the other places are not touched.',
-            '3. Use one file per place: e.g. upload once for Hand stock, once for Karnataka state stock.',
-            '4. Brand (column N): leave blank to use the brand you pick in the upload box; fill it to set a brand per row.',
-            '5. Minimum Stock (column O, optional): when the total falls to this level the CRM reminds the admins (low stock).',
-            '6. Orders: when an order line is marked supplied, its quantity is taken out of stock automatically (Hand stock first, then Local, then state stock).',
-            '7. Delete the two sample rows before uploading. Excel (.xlsx) or CSV.',
+            '1. Every sheet is one place. The SHEET NAME says where its stock is:',
+            '      Hand stock  ·  Local - Mumbai  ·  Local - Hyderabad  ·  Local - Bangalore  ·  (any city: Local - Chennai)  ·  a state name: Karnataka, Kerala, Maharashtra…',
+            '   Add, copy or rename sheets as you need — e.g. copy "Local - Mumbai" and rename it "Local - Pune".',
+            '2. One row per item. ItemCode is required; InStock is the quantity at that place. The quantity REPLACES the old quantity at that place.',
+            '3. Location column (optional): fill it on a row to put that row somewhere else than the sheet name says (same names as above).',
+            '4. Brand: leave blank to use the brand picked in the upload box. Minimum Stock (optional): the CRM reminds admins when the total falls to it.',
+            '5. Sheets whose first rows have no ItemCode column (like this one) are skipped. Delete the sample rows before uploading.',
+            '6. In the upload box keep "Use sheet names" for this file, or pick one place to put every sheet there.',
         ] as $line) $wb->addRow($hs,[$line]);
-        $ls=$wb->addSheet('States');
-        $wb->setWidths($ls,[36]);
-        $wb->addRow($ls,['States (for Other state stock)'],'header');
-        foreach(StockLedger::STATES as $st) $wb->addRow($ls,[$st]);
+        $ls=$wb->addSheet('Places');
+        $wb->setWidths($ls,[28,34]);
+        $wb->addRow($ls,['Local stock (cities)','Other state stock (states)'],'header');
+        $cities=array_merge(['Hand stock (us)'],array_map(fn($c)=>'Local - '.$c,StockLedger::LOCAL_CITIES));
+        for($k=0;$k<max(count($cities),count(StockLedger::STATES));$k++) $wb->addRow($ls,[$cities[$k]??'',StockLedger::STATES[$k]??'']);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="stock-upload-template.xlsx"');
         echo $wb->output(); exit;
     }
 
-    // POST /api/products/stock/import — multipart: file, locType (HAND|LOCAL|STATE), state, brand
+    /** Finds the header row in the first rows of a sheet and maps columns by name; null when there's no ItemCode column. */
+    private static function headerMap(array $rows): ?array
+    {
+        $alias=[
+            'itemCode'=>['itemcode','item code','code','part no','part number','partno','item no','sku'],
+            'itemName'=>['itemname','item name','name','description','product','product name','item description'],
+            'qty'=>['instock','in stock','qty','quantity','stock','available','available stock','closing stock','balance'],
+            'itemType'=>['item type','type'], 'productMaster'=>['product master'], 'productFamily'=>['product family','family'],
+            'productSubfamily'=>['product subfamily','subfamily','sub family'], 'itemGroup'=>['item group','group'],
+            'categoryCode'=>['category','category code'], 'netPrice'=>['netprice','net price','price','rate'],
+            'xceedLp'=>['xceed-lp','xceed lp','list price','lp','mrp'], 'edd'=>['edd'], 'rad'=>['rad'], 'brand'=>['brand','make'],
+            'min'=>['minimum stock','min stock','minimum','min','reorder level'],
+            'location'=>['location (optional)','location','place','where','city','state','warehouse','branch'],
+        ];
+        foreach(array_slice($rows,0,6,true) as $ri=>$row){
+            $map=[];
+            foreach($row as $ci=>$h){
+                $h=strtolower(trim(preg_replace('/\s+/',' ',str_replace(['*','.'],'',(string)$h))));
+                if($h==='') continue;
+                foreach($alias as $k=>$names) if(!isset($map[$k])&&in_array($h,$names,true)){ $map[$k]=$ci; break; }
+            }
+            if(isset($map['itemCode'])) return ['row'=>$ri,'map'=>$map];
+        }
+        return null;
+    }
+
+    // POST /api/products/stock/import — multipart: file, locType (AUTO|HAND|LOCAL|STATE), state (state or city), brand
+    // AUTO: each sheet's name (or a row's Location cell) says where the stock is — for multi-page workbooks.
     public function import(): void
     {
         $auth=authenticate(); require_admin($auth);
         if(empty($_FILES['file'])) sendError('No file uploaded.',400);
-        [$locType,$state]=StockLedger::location($_POST['locType']??'', $_POST['state']??'');
+        $auto=strtoupper(trim((string)($_POST['locType']??'AUTO')))==='AUTO'||trim((string)($_POST['locType']??''))==='';
+        $fixed=$auto?null:StockLedger::location($_POST['locType']??'', $_POST['state']??'');
         $pickedBrand=mb_substr(trim((string)($_POST['brand']??'')),0,100);
         $tmpPath=$_FILES['file']['tmp_name'];
         $origName=$_FILES['file']['name']??'';
@@ -366,68 +455,110 @@ class StockController
         if(preg_match('/\.csv$/i',$origName)){
             $rows=[];
             if(($fh=fopen($tmpPath,'r'))!==false){ while(($row=fgetcsv($fh))!==false) $rows[]=$row; fclose($fh); }
+            $sheets=[['name'=>preg_replace('/\.csv$/i','',$origName),'rows'=>$rows]];
         } else {
-            try { $rows=XlsxReader::readFirstSheetRows($tmpPath); }
+            try { $sheets=XlsxReader::readAllSheets($tmpPath); }
             catch(\Exception $e){ sendError('Failed to parse file: '.$e->getMessage(),400); }
         }
-        if(count($rows)<2) sendError('The uploaded file has no data rows.',400);
-        $inserted=$updated=$skipped=$qtySet=0; $errors=[];
+        $inserted=$updated=$skipped=$qtySet=0; $errors=[]; $sheetReport=[]; $places=[];
         $note='Upload '.mb_substr($origName,0,80);
         $num=function($v){ $v=trim(str_replace([',','₹'],'',(string)$v)); return $v===''?null:(is_numeric($v)?(float)$v:null); };
+        $seen=[]; // itemCode => true, so an item listed on several sheets is counted once
 
-        foreach($rows as $i=>$row){
-            if($i===0) continue;
-            $itemCode=strtoupper(trim((string)($row[6]??'')));
-            $itemName=trim((string)($row[7]??''));
-            if(!$itemCode){$skipped++;continue;}
-            try{
-                $ig=trim((string)($row[4]??''));
-                $categoryId=null;
-                if($ig){
-                    $ms=db()->prepare('SELECT categoryId FROM `ItemGroupMapping` WHERE itemGroup=? LIMIT 1');
-                    $ms->execute([$ig]); $mp=$ms->fetch();
-                    $categoryId=$mp?$mp['categoryId']:null;
-                }
-                $brand=trim((string)($row[13]??''))?:$pickedBrand;
-                $data=['itemName'=>$itemName?:$itemCode,
-                    'itemType'=>trim((string)($row[0]??'Regular'))?:'Regular',
-                    'productMaster'=>trim((string)($row[1]??''))?:null,
-                    'productFamily'=>trim((string)($row[2]??''))?:null,
-                    'productSubfamily'=>trim((string)($row[3]??''))?:null,
-                    'itemGroup'=>$ig?:null,
-                    'categoryCode'=>strtoupper(trim((string)($row[5]??'')))?:null,
-                    'categoryId'=>$categoryId,
-                    'netPrice'=>$num($row[9]??'')??0,
-                    'xceedLp'=>$num($row[10]??'')??0,
-                    'edd'=>trim((string)($row[11]??''))?:null,
-                    'rad'=>trim((string)($row[12]??''))?:null,
-                    'lastUpdated'=>now_sql(),
-                ];
-                if($brand!=='') $data['brand']=mb_substr($brand,0,100);
-                $min=$num($row[14]??''); if($min!==null) $data['minimumStock']=$min;
-                $es=db()->prepare('SELECT id FROM `Stock` WHERE itemCode=? LIMIT 1');$es->execute([$itemCode]);$ex=$es->fetch();
-                if($ex){
-                    $sid=$ex['id'];
-                    $sets=[];$ps=[];foreach($data as $k=>$v){$sets[]="$k=?";$ps[]=$v;}
-                    $sets[]='isActive=1';
-                    $ps[]=$sid;db()->prepare('UPDATE `Stock` SET '.implode(',',$sets).' WHERE id=?')->execute($ps);
-                    $updated++;
-                } else {
-                    $sid=gen_id();
-                    $cols=array_merge(['id','itemCode','isActive','updatedAt'],array_keys($data));
-                    $vals=array_merge([$sid,$itemCode,1,now_sql()],array_values($data));
-                    db()->prepare('INSERT INTO `Stock` ('.implode(',',$cols).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute($vals);
-                    $inserted++;
-                }
-                $q=$num($row[8]??'');
-                if($q!==null){ StockLedger::setLevel($sid,$locType,$state,$q,'IMPORT',$auth['id'],null,$note); $qtySet++; }
-            }catch(\Throwable $e){$errors[]=['row'=>$i+1,'error'=>$e->getMessage()];}
+        foreach($sheets as $sheet){
+            $sname=trim($sheet['name']);
+            $hm=self::headerMap($sheet['rows']);
+            if(!$hm){ $sheetReport[]=['sheet'=>$sname,'status'=>'skipped','reason'=>'no ItemCode column']; continue; }
+            $sheetPlace=$fixed?:StockLedger::parsePlace($sname);
+            $map=$hm['map']; $rowsIn=0; $badPlace=0;
+            $get=fn($row,$k)=>isset($map[$k])?trim((string)($row[$map[$k]]??'')):'';
+            foreach($sheet['rows'] as $i=>$row){
+                if($i<=$hm['row']||!$row) continue;
+                $itemCode=strtoupper($get($row,'itemCode'));
+                if(!$itemCode){$skipped++;continue;}
+                $place=$sheetPlace;
+                if($auto&&($loc=$get($row,'location'))!==''){ $place=StockLedger::parsePlace($loc); if(!$place){ $errors[]=['row'=>$i+1,'sheet'=>$sname,'error'=>"Location \"$loc\" not recognised (use Hand stock, Local - <city> or a state)."]; continue; } }
+                if(!$place){ $badPlace++; continue; }
+                try{
+                    $ig=$get($row,'itemGroup');
+                    $categoryId=null;
+                    if($ig){ $ms=db()->prepare('SELECT categoryId FROM `ItemGroupMapping` WHERE itemGroup=? LIMIT 1'); $ms->execute([$ig]); $mp=$ms->fetch(); $categoryId=$mp?$mp['categoryId']:null; }
+                    $es=db()->prepare('SELECT id FROM `Stock` WHERE itemCode=? LIMIT 1');$es->execute([$itemCode]);$ex=$es->fetch();
+                    $data=['lastUpdated'=>now_sql()];
+                    $set=function($k,$v) use (&$data){ if($v!==null&&$v!=='') $data[$k]=$v; };
+                    $set('itemName',$get($row,'itemName')); $set('itemType',$get($row,'itemType'));
+                    $set('productMaster',$get($row,'productMaster')); $set('productFamily',$get($row,'productFamily'));
+                    $set('productSubfamily',$get($row,'productSubfamily')); $set('itemGroup',$ig?:null); $set('categoryId',$categoryId);
+                    $cc=strtoupper($get($row,'categoryCode')); $set('categoryCode',$cc);
+                    $set('netPrice',$num($get($row,'netPrice'))); $set('xceedLp',$num($get($row,'xceedLp')));
+                    $set('edd',$get($row,'edd')); $set('rad',$get($row,'rad'));
+                    $brand=$get($row,'brand')?:$pickedBrand; if($brand!=='') $data['brand']=mb_substr($brand,0,100);
+                    $set('minimumStock',$num($get($row,'min')));
+                    if($ex){
+                        $sid=$ex['id'];
+                        $sets=[];$ps=[];foreach($data as $k=>$v){$sets[]="$k=?";$ps[]=$v;}
+                        $sets[]='isActive=1';
+                        $ps[]=$sid;db()->prepare('UPDATE `Stock` SET '.implode(',',$sets).' WHERE id=?')->execute($ps);
+                        if(!isset($seen[$itemCode])) $updated++;
+                    } else {
+                        $sid=gen_id();
+                        $data+=['itemName'=>$itemCode,'itemType'=>'Regular'];
+                        $cols=array_merge(['id','itemCode','isActive','updatedAt'],array_keys($data));
+                        $vals=array_merge([$sid,$itemCode,1,now_sql()],array_values($data));
+                        db()->prepare('INSERT INTO `Stock` ('.implode(',',$cols).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute($vals);
+                        $inserted++;
+                    }
+                    $seen[$itemCode]=true;
+                    $q=$num($get($row,'qty'));
+                    if($q!==null){
+                        StockLedger::setLevel($sid,$place[0],$place[1],$q,'IMPORT',$auth['id'],null,$note.' · '.$sname);
+                        $qtySet++; $rowsIn++;
+                        $lab=StockLedger::label($place[0],$place[1]); $places[$lab]=($places[$lab]??0)+1;
+                    }
+                }catch(\Throwable $e){$errors[]=['row'=>$i+1,'sheet'=>$sname,'error'=>$e->getMessage()];}
+            }
+            $sheetReport[]=$badPlace&&!$rowsIn
+                ? ['sheet'=>$sname,'status'=>'skipped','reason'=>'sheet name is not a place — rename it like "Hand stock", "Local - Mumbai" or a state, or pick a place in the upload box']
+                : ['sheet'=>$sname,'status'=>'imported','place'=>$sheetPlace?StockLedger::label($sheetPlace[0],$sheetPlace[1]):'Location column','rows'=>$rowsIn];
         }
-        if($inserted===0&&$updated===0) sendError('No valid rows found. Check that ItemCode (column G) is populated.',400);
-        $where=StockLedger::label($locType,$state);
-        log_activity($auth['id'],'STOCK_BULK_IMPORT','Stock',null,['inserted'=>$inserted,'updated'=>$updated,'skipped'=>$skipped,'location'=>$where,'brand'=>$pickedBrand,'errorCount'=>count($errors)]);
+        if($inserted===0&&$updated===0){
+            $why=array_map(fn($r)=>$r['sheet'].': '.($r['reason']??'no rows'),array_filter($sheetReport,fn($r)=>$r['status']==='skipped'));
+            sendError('Nothing was imported. '.($why?implode(' · ',$why):'Check that ItemCode is filled in.'),400);
+        }
+        log_activity($auth['id'],'STOCK_BULK_IMPORT','Stock',null,['inserted'=>$inserted,'updated'=>$updated,'skipped'=>$skipped,'places'=>$places,'brand'=>$pickedBrand,'errorCount'=>count($errors)]);
+        $where=$places?implode(', ',array_map(fn($k,$v)=>"$k ($v)",array_keys($places),$places)):'—';
         $msg="Import complete: {$inserted} new, {$updated} updated — quantities set at {$where}".($pickedBrand!==''?" (brand {$pickedBrand})":'').'.'.($skipped?" {$skipped} row(s) skipped (no item code).":'');
-        sendSuccess(['inserted'=>$inserted,'updated'=>$updated,'skipped'=>$skipped,'quantitiesSet'=>$qtySet,'location'=>$where,'errors'=>$errors],$msg);
+        sendSuccess(['inserted'=>$inserted,'updated'=>$updated,'skipped'=>$skipped,'quantitiesSet'=>$qtySet,'location'=>$where,'sheets'=>$sheetReport,'errors'=>$errors],$msg);
+    }
+
+    // POST /api/products/stock/entry — add stock by hand: { itemCode, itemName?, brand?, locType, state, quantity, mode: add|set, note }
+    // Creates the item when the code is new.
+    public function entry(): void
+    {
+        $auth=authenticate(); require_admin($auth);
+        $b=request_body();
+        $code=strtoupper(trim((string)($b['itemCode']??'')));
+        if($code==='') sendError('Enter the item code.',400);
+        [$lt,$ls]=StockLedger::location($b['locType']??'',$b['state']??'');
+        if(!isset($b['quantity'])||!is_numeric($b['quantity'])) sendError('Enter the quantity.',400);
+        $s=db()->prepare('SELECT id FROM `Stock` WHERE itemCode=? LIMIT 1');$s->execute([$code]);$id=$s->fetchColumn();
+        $created=false;
+        if(!$id){
+            $name=trim((string)($b['itemName']??''));
+            if($name==='') sendError('New item code — enter the item name too.',400);
+            $id=gen_id();
+            db()->prepare('INSERT INTO `Stock` (id,itemCode,itemName,itemType,brand,itemGroup,minimumStock,netPrice,isActive,lastUpdated,updatedAt) VALUES (?,?,?,?,?,?,?,?,1,?,?)')
+               ->execute([$id,$code,mb_substr($name,0,255),'Regular',mb_substr(trim((string)($b['brand']??'')),0,100)?:null,trim((string)($b['itemGroup']??''))?:null,
+                          is_numeric($b['minimumStock']??null)?(float)$b['minimumStock']:0,is_numeric($b['netPrice']??null)?(float)$b['netPrice']:0,now_sql(),now_sql()]);
+            $created=true;
+        } elseif(trim((string)($b['brand']??''))!==''){
+            db()->prepare('UPDATE `Stock` SET brand=?, isActive=1 WHERE id=?')->execute([mb_substr(trim($b['brand']),0,100),$id]);
+        }
+        $q=(float)$b['quantity']; $note=trim((string)($b['note']??''))?:'Added by hand';
+        if(($b['mode']??'add')==='set') StockLedger::setLevel($id,$lt,$ls,$q,'ADJUST',$auth['id'],null,$note);
+        else StockLedger::addLevel($id,$lt,$ls,$q,'ADJUST',$auth['id'],null,$note);
+        log_activity($auth['id'],'STOCK_ADDED','Stock',$id,['location'=>StockLedger::label($lt,$ls),'quantity'=>$q,'new'=>$created]);
+        $this->sendOne($id,($created?'New item added — ':'Stock saved — ').qtyfmt($q).' at '.StockLedger::label($lt,$ls),$created?201:200);
     }
 
     // POST /api/products/stock
@@ -547,9 +678,9 @@ class StockController
         $r['netPrice']=(float)$r['netPrice'];
         $r['xceedLp']=(float)$r['xceedLp'];
         $r['minimumStock']=(float)$r['minimumStock'];
-        $lv=$lv??['HAND'=>0.0,'LOCAL'=>0.0,'states'=>[]];
-        ksort($lv['states']);
-        $r['handStock']=$lv['HAND']; $r['localStock']=$lv['LOCAL']; $r['stateStock']=$lv['states'];
+        $lv=$lv??['HAND'=>0.0,'LOCAL'=>0.0,'local'=>[],'states'=>[]];
+        ksort($lv['states']); ksort($lv['local']);
+        $r['handStock']=$lv['HAND']; $r['localStock']=$lv['LOCAL']; $r['localByCity']=(object)$lv['local']; $r['stateStock']=(object)$lv['states'];
         $r['reservedStock']=$reserved;                      // on open orders, not yet supplied
         $r['freeStock']=round($r['availableStock']-$reserved,2);
         $av=$r['availableStock'];$mn=$r['minimumStock'];

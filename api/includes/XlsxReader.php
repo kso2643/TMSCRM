@@ -15,6 +15,45 @@ class XlsxReader
         return (new self())->parse($filePath);
     }
 
+    /**
+     * Every worksheet in workbook order.
+     * @return array<int, array{name:string, rows:array}>
+     */
+    public static function readAllSheets(string $filePath): array
+    {
+        $r = new self();
+        $zip = new ZipArchive();
+        if ($zip->open($filePath) !== true) {
+            throw new \RuntimeException('Could not open the file as a valid .xlsx archive. Please save it as .xlsx or .csv and try again.');
+        }
+        $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
+        if ($sharedXml !== false) $r->sharedStrings = $r->parseSharedStrings($sharedXml);
+        $out = [];
+        $wb = @simplexml_load_string((string) $zip->getFromName('xl/workbook.xml'));
+        $rels = @simplexml_load_string((string) $zip->getFromName('xl/_rels/workbook.xml.rels'));
+        $targets = [];
+        if ($rels) foreach ($rels->Relationship as $rel) {
+            $t = ltrim((string) $rel['Target'], '/');
+            $targets[(string) $rel['Id']] = str_starts_with($t, 'xl/') ? $t : 'xl/' . $t;
+        }
+        $relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+        if ($wb && isset($wb->sheets->sheet)) {
+            foreach ($wb->sheets->sheet as $sh) {
+                $rid = (string) ($sh->attributes($relNs)['id'] ?? '');
+                $xml = isset($targets[$rid]) ? $zip->getFromName($targets[$rid]) : false;
+                if ($xml === false) continue;
+                $out[] = ['name' => (string) $sh['name'], 'rows' => $r->parseSheetRows($xml)];
+            }
+        }
+        if (!$out) {
+            $xml = $zip->getFromName('xl/worksheets/sheet1.xml');
+            if ($xml !== false) $out[] = ['name' => 'Sheet1', 'rows' => $r->parseSheetRows($xml)];
+        }
+        $zip->close();
+        if (!$out) throw new \RuntimeException('Could not find a worksheet inside the uploaded file.');
+        return $out;
+    }
+
     private function parse(string $filePath): array
     {
         $zip = new ZipArchive();

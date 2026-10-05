@@ -151,15 +151,35 @@
     return { close: close, box: box };
   }
   /** Location picker: place (Hand / Local / Other state) + state when needed. */
-  function locPicker(initType, initState) {
-    var type = el('select', { 'data-loc-type': '' }, Object.keys(LOC_LABEL).map(function (k) { return el('option', { value: k, text: LOC_LABEL[k] }); }));
-    type.value = initType || 'HAND';
+  /** Place picker: Hand stock / Local stock + city / Other state + state. withAuto adds "Use sheet names". */
+  function locPicker(initType, initState, withAuto) {
+    var opts = (withAuto ? [el('option', { value: 'AUTO', text: 'Use sheet names (one sheet per place)' })] : [])
+      .concat(Object.keys(LOC_LABEL).map(function (k) { return el('option', { value: k, text: LOC_LABEL[k] }); }));
+    var type = el('select', { 'data-loc-type': '' }, opts);
+    type.value = initType || (withAuto ? 'AUTO' : 'HAND');
     var state = el('select', { 'data-loc-state': '' }, [el('option', { value: '', text: 'Choose state…' })].concat(((meta && meta.states) || []).map(function (s) { return el('option', { value: s, text: s }); })));
-    if (initState) state.value = initState;
-    var stateF = field('State', state, true);
-    function sync() { stateF.style.display = type.value === 'STATE' ? '' : 'none'; }
-    type.addEventListener('change', sync); sync();
-    return { nodes: [field('Where is this stock?', type, true), stateF], get: function () { return { locType: type.value, state: type.value === 'STATE' ? state.value : '' }; } };
+    var cities = (meta && meta.localCities) || ['Mumbai', 'Hyderabad', 'Bangalore'];
+    var city = el('select', { 'data-loc-city': '' }, cities.map(function (c) { return el('option', { value: c, text: c }); }).concat([el('option', { value: '__other', text: 'Other city…' })]));
+    var cityOther = el('input', { 'data-loc-city-other': '', placeholder: 'City / branch name', style: 'margin-top:.35rem' });
+    if (initType === 'STATE' && initState) state.value = initState;
+    if (initType === 'LOCAL' && initState) { if (cities.indexOf(initState) === -1) { city.value = '__other'; cityOther.value = initState; } else city.value = initState; }
+    var stateF = field('State', state, true), cityF = field('City', el('div', {}, [city, cityOther]), true);
+    function sync() {
+      stateF.style.display = type.value === 'STATE' ? '' : 'none';
+      cityF.style.display = type.value === 'LOCAL' ? '' : 'none';
+      cityOther.style.display = city.value === '__other' ? '' : 'none';
+    }
+    type.addEventListener('change', sync); city.addEventListener('change', sync); sync();
+    return { nodes: [field('Where is this stock?', type, true), stateF, cityF], get: function () {
+      var t = type.value;
+      return { locType: t, state: t === 'STATE' ? state.value : t === 'LOCAL' ? (city.value === '__other' ? cityOther.value.trim() : city.value) : '' };
+    } };
+  }
+  function placeLabel(l) { return l.locType === 'STATE' ? (l.state || 'the state') : l.locType === 'LOCAL' ? 'Local – ' + (l.state || '?') : LOC_LABEL[l.locType]; }
+  function qtyAt(it, l) {
+    if (l.locType === 'HAND') return it.handStock;
+    if (l.locType === 'LOCAL') return (it.localByCity || {})[l.state] || 0;
+    return (it.stateStock || {})[l.state] || 0;
   }
 
   // ── upload ───────────────────────────────────────────────────────────
@@ -167,14 +187,14 @@
     var brands = (meta && meta.suggestedBrands) || [];
     var brand = el('input', { list: 'st-brands', id: 'st-up-brand', placeholder: 'e.g. YG-1, Sandvik, local brand…' });
     var dl = el('datalist', { id: 'st-brands' }, brands.map(function (b) { return el('option', { value: b }); }));
-    var loc = locPicker('HAND');
+    var loc = locPicker('AUTO', '', true);
     var file = el('input', { type: 'file', id: 'st-up-file', accept: '.xlsx,.csv' });
     var msg = el('div');
     var go = el('button', { class: 'st-btn pri', id: 'st-up-go', text: 'Upload' });
-    var d = dialog('Upload stock', 'Pick the brand and where this stock is. The quantity (InStock column) replaces the old quantity at that place only — other places are not changed.',
+    var d = dialog('Upload stock', 'Multi-page Excel: every sheet is read and the sheet name says where its stock is (Hand stock, Local - Mumbai, Karnataka…). Or pick one place for the whole file. The quantity replaces the old quantity at that place only.',
       el('div', {}, [
         el('div', { class: 'st-grid' }, [field('Brand (for rows with no Brand column)', el('div', {}, [brand, dl]))].concat(loc.nodes).concat([field('Excel / CSV file', file, true, true)])),
-        el('p', { class: 'hint', style: 'margin-top:.6rem' }, ['Use the ', el('a', { href: '#', style: 'text-decoration:underline', text: 'stock template', onclick: function (e) { e.preventDefault(); download('/products/stock/template', 'stock-upload-template.xlsx').catch(function (er) { toast(er.message, 'err'); }); } }), ' — one file per place (e.g. once for Hand stock, once for Karnataka).']),
+        el('p', { class: 'hint', style: 'margin-top:.6rem' }, ['Use the ', el('a', { href: '#', style: 'text-decoration:underline', text: 'stock template', onclick: function (e) { e.preventDefault(); download('/products/stock/template', 'stock-upload-template.xlsx').catch(function (er) { toast(er.message, 'err'); }); } }), ' — one sheet per place: Hand stock, Local - Mumbai, Local - Hyderabad, Local - Bangalore, a state… Add or rename sheets as you need.']),
         msg
       ]),
       [el('button', { class: 'st-btn', text: 'Close', onclick: function () { d.close(); } }), go]);
@@ -182,12 +202,20 @@
       clear(msg);
       var l = loc.get();
       if (l.locType === 'STATE' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Choose which state the stock is in.' }));
+      if (l.locType === 'LOCAL' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Enter the city for the local stock.' }));
       if (!file.files[0]) return msg.appendChild(el('div', { class: 'st-err', text: 'Choose the Excel or CSV file.' }));
       var fd = new FormData(); fd.append('file', file.files[0]); fd.append('locType', l.locType); fd.append('state', l.state); fd.append('brand', brand.value.trim());
       go.disabled = true; go.textContent = 'Uploading…';
       api('POST', '/products/stock/import', fd, true).then(function (j) {
         msg.appendChild(el('div', { class: 'st-ok', text: j.message }));
-        (j.data.errors || []).slice(0, 8).forEach(function (er) { msg.appendChild(el('div', { class: 'st-err', text: 'Row ' + er.row + ': ' + er.error })); });
+        var sh = j.data.sheets || [];
+        if (sh.length) msg.appendChild(el('table', { class: 'st-table st-mv st-sheets', style: 'margin-top:.6rem' }, [
+          el('thead', {}, [el('tr', {}, ['Sheet', 'Result'].map(function (h) { return el('th', { text: h }); }))]),
+          el('tbody', {}, sh.map(function (x) {
+            return el('tr', {}, [el('td', { text: x.sheet }), el('td', { class: 'l', style: x.status === 'skipped' ? 'color:#b45309' : '',
+              text: x.status === 'skipped' ? 'Skipped — ' + x.reason : x.rows + ' row' + (x.rows === 1 ? '' : 's') + ' → ' + x.place })]);
+          }))]));
+        (j.data.errors || []).slice(0, 8).forEach(function (er) { msg.appendChild(el('div', { class: 'st-err', text: (er.sheet ? er.sheet + ', ' : '') + 'row ' + er.row + ': ' + er.error })); });
         file.value = '';
         loadAll();
       }).catch(function (e) { msg.appendChild(el('div', { class: 'st-err', text: e.message })); })
@@ -205,22 +233,80 @@
     var now = el('p', { class: 'hint', style: 'margin:.6rem 0 0' });
     function showNow() {
       var l = loc.get();
-      var cur = l.locType === 'HAND' ? it.handStock : l.locType === 'LOCAL' ? it.localStock : (it.stateStock[l.state] || 0);
-      now.textContent = 'Now at ' + (l.locType === 'STATE' ? (l.state || 'the state') : LOC_LABEL[l.locType]) + ': ' + qty(cur);
+      now.textContent = 'Now at ' + placeLabel(l) + ': ' + qty(qtyAt(it, l));
     }
     var save = el('button', { class: 'st-btn pri', id: 'st-adj-save', text: 'Save' });
     var d = dialog('Adjust stock — ' + it.itemCode, it.itemName + (it.brand ? ' · ' + it.brand : ''),
       el('div', {}, [el('div', { class: 'st-grid' }, loc.nodes.concat([field('Change', mode, true), field('Quantity', q, true), field('Note', note, false, true)])), now, msg]),
       [el('button', { class: 'st-btn', text: 'Cancel', onclick: function () { d.close(); } }), save]);
-    d.box.querySelectorAll('select').forEach(function (s) { s.addEventListener('change', showNow); });
+    d.box.querySelectorAll('select,input').forEach(function (s) { s.addEventListener('change', showNow); });
     showNow();
     save.onclick = function () {
       clear(msg);
       var l = loc.get();
       if (l.locType === 'STATE' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Choose the state.' }));
+      if (l.locType === 'LOCAL' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Enter the city.' }));
       if (q.value === '') return msg.appendChild(el('div', { class: 'st-err', text: 'Enter the quantity.' }));
       save.disabled = true;
       api('POST', '/products/stock/' + it.id + '/adjust', { locType: l.locType, state: l.state, quantity: Number(q.value), mode: mode.value, note: note.value.trim() })
+        .then(function (j) { d.close(); toast(j.message); loadAll(); })
+        .catch(function (e) { save.disabled = false; msg.appendChild(el('div', { class: 'st-err', text: e.message })); });
+    };
+  }
+
+  // ── add stock by hand (existing item or a new one) ──────────────────
+  function addStockDialog() {
+    var code = el('input', { id: 'st-add-code', list: 'st-codes', placeholder: 'Type or pick the item code', autocomplete: 'off' });
+    var codes = el('datalist', { id: 'st-codes' });
+    var found = el('p', { class: 'hint', id: 'st-add-found', style: 'margin:.25rem 0 0' });
+    var name = el('input', { id: 'st-add-name', placeholder: 'Item name' });
+    var brand = el('input', { id: 'st-add-brand', list: 'st-brands3', placeholder: 'Brand' });
+    var bl = el('datalist', { id: 'st-brands3' }, ((meta && meta.suggestedBrands) || []).map(function (b) { return el('option', { value: b }); }));
+    var group = el('input', { id: 'st-add-group', placeholder: 'e.g. Insert, Drill' });
+    var min = el('input', { id: 'st-add-min', type: 'number', step: 'any', min: '0', placeholder: '0' });
+    var price = el('input', { id: 'st-add-price', type: 'number', step: 'any', min: '0', placeholder: '0' });
+    var newBox = el('div', { class: 'st-grid', style: 'display:none;margin-top:.7rem' }, [field('Item name', name, true), field('Brand', el('div', {}, [brand, bl])),
+      field('Item group', group), field('Minimum stock', min), field('Net price (₹)', price)]);
+    var loc = locPicker('HAND');
+    var mode = el('select', { id: 'st-add-mode' }, [el('option', { value: 'add', text: 'Add to what is there' }), el('option', { value: 'set', text: 'Set the quantity to' })]);
+    var q = el('input', { type: 'number', step: 'any', id: 'st-add-qty' });
+    var note = el('input', { id: 'st-add-note', placeholder: 'e.g. received from supplier, stock count' });
+    var msg = el('div'), match = null, t = null;
+    function lookup() {
+      var v = code.value.trim().toUpperCase();
+      match = null;
+      if (!v) { found.textContent = ''; newBox.style.display = 'none'; return; }
+      api('GET', '/products/stock?limit=20&search=' + encodeURIComponent(v)).then(function (j) {
+        var list = Array.isArray(j.data) ? j.data : (j.data.items || []);
+        clear(codes); list.forEach(function (x) { codes.appendChild(el('option', { value: x.itemCode, text: x.itemName })); });
+        match = list.filter(function (x) { return x.itemCode === v; })[0] || null;
+        if (match) {
+          var l = loc.get();
+          found.textContent = '✓ ' + match.itemName + (match.brand ? ' · ' + match.brand : '') + ' — total ' + qty(match.availableStock) + ', now at ' + placeLabel(l) + ': ' + qty(qtyAt(match, l));
+          newBox.style.display = 'none';
+        } else { found.textContent = 'New item code — fill in the item details below.'; newBox.style.display = ''; }
+      }).catch(function () {});
+    }
+    code.addEventListener('input', function () { clearTimeout(t); t = setTimeout(lookup, 300); });
+    code.addEventListener('change', lookup);
+    var save = el('button', { class: 'st-btn pri', id: 'st-add-save', text: 'Save stock' });
+    var d = dialog('Add stock', 'Add stock for one item at one place — an existing item, or a new item code.',
+      el('div', {}, [field('Item code', el('div', {}, [code, codes, found]), true, true), newBox,
+        el('div', { class: 'st-grid', style: 'margin-top:.7rem' }, loc.nodes.concat([field('Change', mode, true), field('Quantity', q, true), field('Note', note, false, true)])), msg]),
+      [el('button', { class: 'st-btn', text: 'Cancel', onclick: function () { d.close(); } }), save]);
+    d.box.querySelectorAll('[data-loc-type],[data-loc-state],[data-loc-city],[data-loc-city-other]').forEach(function (x) { x.addEventListener('change', function () { if (match) lookup(); }); });
+    setTimeout(function () { code.focus(); }, 30);
+    save.onclick = function () {
+      clear(msg);
+      var l = loc.get();
+      if (!code.value.trim()) return msg.appendChild(el('div', { class: 'st-err', text: 'Enter the item code.' }));
+      if (!match && !name.value.trim()) return msg.appendChild(el('div', { class: 'st-err', text: 'New item code — enter the item name too.' }));
+      if (l.locType === 'STATE' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Choose the state.' }));
+      if (l.locType === 'LOCAL' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Enter the city.' }));
+      if (q.value === '') return msg.appendChild(el('div', { class: 'st-err', text: 'Enter the quantity.' }));
+      save.disabled = true;
+      api('POST', '/products/stock/entry', { itemCode: code.value.trim(), itemName: name.value.trim(), brand: match ? '' : brand.value.trim(), itemGroup: group.value.trim(),
+        minimumStock: min.value, netPrice: price.value, locType: l.locType, state: l.state, quantity: Number(q.value), mode: mode.value, note: note.value.trim() })
         .then(function (j) { d.close(); toast(j.message); loadAll(); })
         .catch(function (e) { save.disabled = false; msg.appendChild(el('div', { class: 'st-err', text: e.message })); });
     };
@@ -292,6 +378,15 @@
     return Object.keys(seen).sort();
   }
 
+  function localCols() {
+    // a column for every city that holds local stock ('' = local stock with no city)
+    var seen = {};
+    ((meta && meta.localStock) || []).forEach(function (s) { seen[s.city] = true; });
+    items.forEach(function (it) { Object.keys(it.localByCity || {}).forEach(function (c) { seen[c] = true; }); });
+    var list = Object.keys(seen).sort(function (a, b) { return a === '' ? 1 : b === '' ? -1 : a < b ? -1 : 1; });
+    return list.length ? list : [''];
+  }
+
   function remindBar() {
     if (!alerts) return null;
     var s = alerts.summary || {};
@@ -311,7 +406,7 @@
     return el('div', { class: 'st-tiles' }, [
       el('div', { class: 'st-tile' }, [el('b', { text: String(s.total || 0) }), el('span', { text: 'Items' })]),
       el('div', { class: 'st-tile' }, [el('b', { text: qty(t.HAND) }), el('span', { text: 'Hand stock (qty)' })]),
-      el('div', { class: 'st-tile' }, [el('b', { text: qty(t.LOCAL) }), el('span', { text: 'Local stock (qty)' })]),
+      el('div', { class: 'st-tile' }, [el('b', { text: qty(t.LOCAL) }), el('span', { text: 'Local stock (qty, ' + ((meta && meta.localStock) || []).filter(function (x) { return x.city; }).length + ' cities)' })]),
       el('div', { class: 'st-tile' }, [el('b', { text: qty(t.STATE) }), el('span', { text: 'Other state stock (qty, ' + ((meta && meta.stateStock) || []).length + ' states)' })]),
       el('div', { class: 'st-tile warn' }, [el('b', { text: String(s.lowStock || 0) }), el('span', { text: 'Low stock' })]),
       el('div', { class: 'st-tile bad' }, [el('b', { text: String(s.outOfStock || 0) }), el('span', { text: 'Out of stock' })]),
@@ -324,8 +419,11 @@
     var t; search.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { f.search = search.value.trim(); loadItems(); }, 300); });
     var brand = el('select', { id: 'st-fbrand' }, [el('option', { value: '', text: 'All brands' })].concat(((meta && meta.brands) || []).map(function (b) { return el('option', { value: b, text: b }); })).concat([el('option', { value: '__none', text: 'No brand' })]));
     brand.value = f.brand; brand.onchange = function () { f.brand = brand.value; loadItems(); };
-    var loc = el('select', { id: 'st-floc' }, [el('option', { value: '', text: 'All places' }), el('option', { value: 'HAND', text: 'Hand stock' }), el('option', { value: 'LOCAL', text: 'Local stock' }), el('option', { value: 'STATE', text: 'Any other state' })]
-      .concat(((meta && meta.stateStock) || []).map(function (s) { return el('option', { value: 'STATE:' + s.state, text: s.state + ' (state)' }); })));
+    var held = {}; ((meta && meta.localStock) || []).forEach(function (x) { held[x.city] = x.quantity; });
+    var loc = el('select', { id: 'st-floc' }, [el('option', { value: '', text: 'All places' }), el('option', { value: 'HAND', text: 'Hand stock' }),
+      el('optgroup', { label: 'Local stock' }, [el('option', { value: 'LOCAL', text: 'Local stock — all cities' })].concat(((meta && meta.localCities) || []).map(function (c) {
+        return el('option', { value: 'LOCAL:' + c, text: 'Local – ' + c + (held[c] ? ' (' + qty(held[c]) + ')' : '') }); }))),
+      el('optgroup', { label: 'Other state stock' }, [el('option', { value: 'STATE', text: 'Any other state' })].concat(((meta && meta.stateStock) || []).map(function (s) { return el('option', { value: 'STATE:' + s.state, text: s.state + ' (' + qty(s.quantity) + ')' }); })))]);
     loc.value = f.loc; loc.onchange = function () { f.loc = loc.value; loadItems(); };
     var status = el('select', { id: 'st-fstatus' }, [['', 'Any status'], ['low', 'Low stock'], ['out', 'Out of stock']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
     status.value = f.status; status.onchange = function () { f.status = status.value; loadItems(); };
@@ -335,14 +433,16 @@
 
   function table() {
     if (!items.length) return el('div', { class: 'st-empty', text: f.search || f.brand || f.loc || f.status ? 'No items match these filters.' : 'No stock yet — upload the stock template to start.' });
-    var states = stateCols();
+    var states = stateCols(), locals = localCols();
     function num(v, cls) { v = Number(v) || 0; return el('td', { class: (cls || '') + (v < 0 ? ' neg' : v === 0 ? ' zero' : ''), text: qty(v) }); }
     var head1 = el('tr', {}, [el('th', { class: 'l item', rowspan: '2', text: 'Item' }), el('th', { class: 'l', rowspan: '2', text: 'Brand' }),
-      el('th', { class: 'grp loc', colspan: String(2 + states.length), text: 'Where the stock is' }),
+      el('th', { class: 'grp loc', rowspan: '2', text: 'Hand' }),
+      el('th', { class: 'grp loc', colspan: String(locals.length), text: 'Local stock' }),
+      states.length ? el('th', { class: 'grp loc', colspan: String(states.length), text: 'Other states' }) : null,
       el('th', { rowspan: '2', text: 'Total' }), el('th', { rowspan: '2', text: 'On order' }), el('th', { rowspan: '2', text: 'Free' }),
       el('th', { rowspan: '2', text: 'Min' }), el('th', { rowspan: '2', text: 'Status' }), el('th', { rowspan: '2', text: 'Net price' }),
       canEdit ? el('th', { rowspan: '2', text: '' }) : el('th', { rowspan: '2', text: '' })]);
-    var head2 = el('tr', {}, [el('th', { class: 'loc', text: 'Hand' }), el('th', { class: 'loc', text: 'Local' })].concat(states.map(function (s) { return el('th', { class: 'loc', text: s, title: s + ' state stock' }); })));
+    var head2 = el('tr', {}, locals.map(function (c) { return el('th', { class: 'loc', text: c || 'Local', title: 'Local stock' + (c ? ' – ' + c : '') }); }).concat(states.map(function (s) { return el('th', { class: 'loc', text: s, title: s + ' state stock' }); })));
     var rows = items.map(function (it) {
       var acts = el('div', { class: 'st-rowacts' }, [
         canEdit ? el('button', { class: 'st-btn sm ico', 'data-adjust': it.itemCode, title: 'Adjust quantity', 'aria-label': 'Adjust ' + it.itemCode, text: '±', onclick: function () { adjustDialog(it); } }) : null,
@@ -352,8 +452,8 @@
       return el('tr', { 'data-code': it.itemCode }, [
         el('td', { class: 'l item' }, [el('div', { style: 'font-weight:600', text: it.itemCode }), el('div', { class: 'sub', text: it.itemName + (it.itemGroup ? ' · ' + it.itemGroup : '') })]),
         el('td', { class: 'l' }, [el('span', { class: 'st-brand' + (it.brand ? '' : ' none'), text: it.brand || '—' })]),
-        num(it.handStock, 'loc'), num(it.localStock, 'loc')
-      ].concat(states.map(function (s) { return num(it.stateStock[s], 'loc'); })).concat([
+        num(it.handStock, 'loc')
+      ].concat(locals.map(function (c) { return num((it.localByCity || {})[c], 'loc'); })).concat(states.map(function (s) { return num((it.stateStock || {})[s], 'loc'); })).concat([
         num(it.availableStock, 'tot'),
         el('td', { class: it.reservedStock ? '' : 'zero', text: it.reservedStock ? qty(it.reservedStock) : '—' }),
         num(it.freeStock),
@@ -372,7 +472,7 @@
         el('div', {}, [el('h1', { text: 'Stock' }), el('p', { text: 'Brand-wise stock by place — hand, local and other states. Supplied orders are taken out automatically.' })]),
         el('div', { class: 'st-actions' }, [
           el('button', { class: 'st-btn', id: 'st-template', text: '⬇ Template', onclick: function () { download('/products/stock/template', 'stock-upload-template.xlsx').catch(function (e) { toast(e.message, 'err'); }); } }),
-          canEdit ? el('button', { class: 'st-btn', id: 'st-add', text: '+ Add item', onclick: function () { itemDialog(null); } }) : null,
+          canEdit ? el('button', { class: 'st-btn', id: 'st-add-stock', text: '+ Add stock', onclick: addStockDialog }) : null,
           canEdit ? el('button', { class: 'st-btn pri', id: 'st-upload', text: '⬆ Upload stock', onclick: uploadDialog }) : null
         ])
       ]),

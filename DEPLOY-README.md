@@ -1,3 +1,26 @@
+# Update — 5 Oct (b): stock — multi-page Excel, local stock by city, add stock by hand
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+
+- **Multi-page Excel upload:**
+  - Every sheet (page) in the workbook is read, and the **sheet name says where its stock is**: `Hand stock`, `Local - Mumbai`, `Local - Hyderabad`, `Local - Bangalore` (any city works, e.g. `Local - Pune`), or a state name (`Karnataka`, `Kerala`…). Spelling variants like "hydrabad", "Bengaluru" and "Bangalore local" are understood.
+  - An optional **Location** column on a row puts that row somewhere else than its sheet name.
+  - Columns are found by their header names (ItemCode / Item Code / Code, InStock / Qty / Quantity, Brand, Min Stock…), even when the header is not on the first row.
+  - Sheets without an ItemCode column (notes, instructions) are skipped. After upload you see a sheet-by-sheet result.
+  - The upload box defaults to **Use sheet names**. Or pick one place to put every sheet there.
+- **Template:** now has one sheet per place (Hand stock, Local - Mumbai, Local - Hyderabad, Local - Bangalore, Karnataka) plus "How to fill" and a "Places" list. Copy or rename sheets for other cities or states.
+- **Local stock by city:**
+  - The table has a **Local stock** group with a column per city that holds stock (and an **Other states** group).
+  - The place filter lists **Local – Mumbai / Hyderabad / Bangalore / Chennai / Coimbatore / Pune / Ahmedabad / Kolkata** and any other city in use, with quantities.
+- **+ Add stock** (replaces "+ Add item"):
+  - Type or pick an item code, choose the place (city or state) and the quantity, then **Add** to what is there or **Set** it.
+  - A new code asks for the item name, brand, group, minimum stock and price, and creates the item.
+- **Verification:**
+  - API: multi-sheet 16/16, stock 27/27.
+  - Browser: new 8/8, existing stock 16/16.
+
+---
+
 # Update — 5 Oct: price request negotiation, trials logo, stock by place, multi-day visits, reminders, permission, task timer, payslips
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. New files: `crm/leaves-app.js`, `crm/stock-app.js`, `crm/brand/` (TMS and APJ logos), `crm/payroll/payroll-fix.css`; the Leave and Stock pages (`crm/leaves/index.html`, `crm/stock/index.html`) are now hand-coded pages. New tables and columns are created automatically the first time each page is used.
