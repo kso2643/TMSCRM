@@ -190,27 +190,31 @@ class AlertFeedController
                 '/trials/#/t/' . rawurlencode($r['id']), $r['decidedAt']);
         }
 
-        // Leave
+        // Leave (make sure the permission-hours columns exist before selecting them)
+        try { new LeaveController(); } catch (Throwable $e) {}
+        $what = fn($r) => ($r['leaveType'] === 'PERMISSION' ? 'permission ' . ($r['fromTime'] ?? '') . '–' . ($r['toTime'] ?? '') . ' (' . rtrim(rtrim(number_format((float) ($r['hours'] ?? 0), 2), '0'), '.') . ' h)'
+                         : strtolower(LeaveController::LABELS[$r['leaveType']] ?? str_replace('_', ' ', $r['leaveType']) . ' leave'));
         if ($isManager) {
             foreach (self::rows(
-                "SELECT l.id, l.leaveType, l.fromDate, l.toDate, l.totalDays, l.createdAt, u.name AS byName FROM `Leave` l
+                "SELECT l.id, l.leaveType, l.fromDate, l.toDate, l.totalDays, l.fromTime, l.toTime, l.hours, l.createdAt, u.name AS byName FROM `Leave` l
                  LEFT JOIN `User` u ON u.id = l.userId
                  WHERE l.status='PENDING' AND l.createdAt>? AND l.userId<>? ORDER BY l.createdAt DESC LIMIT $per",
                 [$since, $me]) as $r) {
-                $add('leave-new-' . $r['id'], 'LEAVE_REQUESTED', 'New leave request',
-                    ($r['byName'] ?: 'Someone') . ' · ' . strtolower(str_replace('_', ' ', $r['leaveType'])) . ' leave, ' .
-                    self::days($r['totalDays']) . ' (' . self::dmy($r['fromDate']) . ($r['toDate'] && substr($r['toDate'], 0, 10) !== substr($r['fromDate'], 0, 10) ? ' – ' . self::dmy($r['toDate']) : '') . ')',
+                $add('leave-new-' . $r['id'], 'LEAVE_REQUESTED', $r['leaveType'] === 'PERMISSION' ? 'New permission request' : 'New leave request',
+                    ($r['byName'] ?: 'Someone') . ' · ' . $what($r) . ($r['leaveType'] === 'PERMISSION' ? '' : ', ' . self::days($r['totalDays'])) .
+                    ' (' . self::dmy($r['fromDate']) . ($r['toDate'] && substr($r['toDate'], 0, 10) !== substr($r['fromDate'], 0, 10) ? ' – ' . self::dmy($r['toDate']) : '') . ')',
                     '/leaves/', $r['createdAt']);
             }
         }
         foreach (self::rows(
-            "SELECT l.id, l.leaveType, l.status, l.fromDate, l.approvedAt, l.adminNote FROM `Leave` l
+            "SELECT l.id, l.leaveType, l.status, l.fromDate, l.fromTime, l.toTime, l.hours, l.approvedAt, l.adminNote FROM `Leave` l
              WHERE l.userId=? AND l.approvedAt>? AND l.status IN ('APPROVED','REJECTED') AND (l.approvedById IS NULL OR l.approvedById<>?)
              ORDER BY l.approvedAt DESC LIMIT $per",
             [$me, $since, $me]) as $r) {
             $ok = $r['status'] === 'APPROVED';
-            $add('leave-decided-' . $r['id'] . '-' . $r['approvedAt'], 'LEAVE_DECIDED', $ok ? 'Leave approved' : 'Leave rejected',
-                'Your ' . strtolower(str_replace('_', ' ', $r['leaveType'])) . ' leave from ' . self::dmy($r['fromDate']) . ($r['adminNote'] ? ' — ' . mb_substr($r['adminNote'], 0, 80) : ''),
+            $noun = $r['leaveType'] === 'PERMISSION' ? 'Permission' : 'Leave';
+            $add('leave-decided-' . $r['id'] . '-' . $r['approvedAt'], 'LEAVE_DECIDED', $noun . ($ok ? ' approved' : ' rejected'),
+                'Your ' . $what($r) . ' on ' . self::dmy($r['fromDate']) . ($r['adminNote'] ? ' — ' . mb_substr($r['adminNote'], 0, 80) : ''),
                 '/leaves/', $r['approvedAt']);
         }
 

@@ -290,6 +290,7 @@ class ExportController
     public function exportLeaves(): void
     {
         $auth = authenticate(); require_admin($auth);
+        try { new LeaveController(); } catch (Throwable $e) {}
         [$clauses, $params] = $this->dateRange('l.fromDate');
         $w = $clauses ? 'WHERE ' . implode(' AND ', $clauses) : '';
         $s = db()->prepare(
@@ -303,9 +304,11 @@ class ExportController
         $this->sendExport($rows, [
             ['label'=>'Employee',   'value'=>fn($r)=>$r['u_name']??''],
             ['label'=>'Department', 'value'=>fn($r)=>$r['department']??''],
-            ['label'=>'Type',       'value'=>fn($r)=>$r['leaveType']],
+            ['label'=>'Type',       'value'=>fn($r)=>LeaveController::LABELS[$r['leaveType']] ?? $r['leaveType']],
             ['label'=>'From',       'value'=>fn($r)=>$fmt($r['fromDate'])],
             ['label'=>'To',         'value'=>fn($r)=>$fmt($r['toDate'])],
+            ['label'=>'Time',       'value'=>fn($r)=>!empty($r['fromTime']) ? $r['fromTime'] . '–' . $r['toTime'] : ''],
+            ['label'=>'Hours',      'value'=>fn($r)=>$r['hours'] ?? ''],
             ['label'=>'Days',       'value'=>fn($r)=>$r['totalDays']],
             ['label'=>'Status',     'value'=>fn($r)=>$r['status']],
             ['label'=>'Reason',     'value'=>fn($r)=>$r['reason']??''],

@@ -463,6 +463,8 @@ try {
         $ctrl = new LeaveController(); $exp = new ExportController();
         match (true) {
             $method === 'GET'   && $c1 === 'export'  => $exp->exportLeaves(),
+            $method === 'GET'   && $c1 === 'summary' => $ctrl->summary(),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === '' => $ctrl->withdraw($c1),
             $method === 'GET'   && $c1 === ''        => $ctrl->index(),
             $method === 'POST'  && $c1 === ''        => $ctrl->create(),
             $method === 'PATCH' && $c2 === 'approve' => $ctrl->approve($c1),
