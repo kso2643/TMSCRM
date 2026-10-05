@@ -33,6 +33,12 @@ class TrialController
         ensure_schema(self::schema(), 'migration_trials.sql');
     }
 
+    private static function company($v, string $fallback = 'TMS'): string
+    {
+        $v = strtoupper(trim((string) $v));
+        return in_array($v, ['TMS', 'APJ'], true) ? $v : $fallback;
+    }
+
     /** Kept in sync with database/migration_trials.sql. */
     public static function schema(): array
     {
@@ -67,6 +73,8 @@ class TrialController
             'Trial' => [
                 'create'   => "CREATE TABLE IF NOT EXISTS `Trial` ($cols$fks\n$tail",
                 'fallback' => "CREATE TABLE IF NOT EXISTS `Trial` ($cols\n$tail",
+                // Which company runs the trial — decides the logo on the sheets (TMS / APJ).
+                'columns'  => ['company' => "VARCHAR(10) NOT NULL DEFAULT 'TMS'"],
             ],
         ];
     }
@@ -107,6 +115,7 @@ class TrialController
             'trialNo'        => $r['trialNo'],
             'customer'       => ['id' => $r['customerId'], 'name' => $r['linkedCompanyName'] ?: $r['customerName']],
             'component'      => $r['component'],
+            'company'        => $r['company'] ?? 'TMS',
             'requestedBy'    => ['id' => $r['requestedById'], 'name' => $r['requestedByName'], 'role' => $r['requestedByRole']],
             'status'         => $r['status'],
             'recommendations'=> $r['recommendations'] ? (json_decode($r['recommendations'], true) ?: []) : [],
@@ -240,9 +249,9 @@ class TrialController
             $json = self::sheetJson($eda, 'eda', 'existing situation data analysis');
             try {
                 db()->prepare(
-                    'INSERT INTO `Trial` (id,trialNo,customerId,customerName,component,requestedById,status,existingData,createdAt,updatedAt)
-                     VALUES (?,?,?,?,?,?,\'PENDING_APPROVAL\',?,?,?)'
-                )->execute([$id, $trialNo, $customerId, $custName, $component, $auth['id'], $json, now_sql(), now_sql()]);
+                    'INSERT INTO `Trial` (id,trialNo,customerId,customerName,component,company,requestedById,status,existingData,createdAt,updatedAt)
+                     VALUES (?,?,?,?,?,?,?,\'PENDING_APPROVAL\',?,?,?)'
+                )->execute([$id, $trialNo, $customerId, $custName, $component, self::company($b['company'] ?? ''), $auth['id'], $json, now_sql(), now_sql()]);
                 break;
             } catch (PDOException $e) {
                 if ($attempt === 2 || $e->getCode() !== '23000') throw $e; // retry only a trialNo collision
@@ -251,6 +260,20 @@ class TrialController
 
         log_activity($auth['id'], 'TRIAL_REQUESTED', 'Trial', $id, ['trialNo' => $trialNo, 'customer' => $custName]);
         $this->send($id, 'Trial request raised', 201);
+    }
+
+    // PATCH /api/trials/:id/company — body { company: TMS|APJ }; the logo on both sheets follows it.
+    public function setCompany(string $id): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row || !$this->canSee($auth, $row)) sendError('Trial not found.', 404);
+        if (!$this->canEdit($auth, $row)) sendError('Not authorized to edit this trial.', 403);
+        $b = request_body();
+        $co = strtoupper(trim((string) ($b['company'] ?? '')));
+        if (!in_array($co, ['TMS', 'APJ'], true)) sendError('Company must be TMS or APJ.', 400);
+        db()->prepare('UPDATE `Trial` SET company=?,updatedAt=? WHERE id=?')->execute([$co, now_sql(), $id]);
+        $this->send($id, 'Company set to ' . $co);
     }
 
     // PUT /api/trials/:id/existing — body { existingData, customerId? }
@@ -275,8 +298,8 @@ class TrialController
 
         $resubmit = $row['status'] === 'REJECTED';
         db()->prepare(
-            'UPDATE `Trial` SET existingData=?,customerId=?,customerName=?,component=?,status=?,updatedAt=? WHERE id=?'
-        )->execute([$json, $customerId, $custName, $component, $resubmit ? 'PENDING_APPROVAL' : $row['status'], now_sql(), $id]);
+            'UPDATE `Trial` SET existingData=?,customerId=?,customerName=?,component=?,company=?,status=?,updatedAt=? WHERE id=?'
+        )->execute([$json, $customerId, $custName, $component, self::company($b['company'] ?? '', $row['company'] ?? 'TMS'), $resubmit ? 'PENDING_APPROVAL' : $row['status'], now_sql(), $id]);
 
         log_activity($auth['id'], $resubmit ? 'TRIAL_RESUBMITTED' : 'TRIAL_EXISTING_UPDATED', 'Trial', $id, []);
         $this->send($id, $resubmit ? 'Trial request resubmitted' : 'Existing data saved');

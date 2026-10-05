@@ -378,6 +378,7 @@ try {
             $method === 'PUT'    && $c1 !== '' && $c2 === 'savings'    => $ctrl->updateSavings($c1),
             $method === 'PATCH'  && $c1 !== '' && $c2 === 'approve'    => $ctrl->approve($c1),
             $method === 'PATCH'  && $c1 !== '' && $c2 === 'reject'     => $ctrl->reject($c1),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === 'company'    => $ctrl->setCompany($c1),
             default => sendError("Route /api/trials/$c1/$c2 not found", 404),
         };
     }

@@ -24,6 +24,29 @@
   var API = 'https://api.apjtech.in';
   // A folder with index.html, like every other standalone page (/orders/, /tasks/).
   var SHEET_URL = '/trial-sheet/';
+  // Company running the trial: its logo and name go on both sheets (PDF / Excel too).
+  var BRANDS = {
+    TMS: { company: 'Tulips Machining Solutions', logo: '/brand/tms-logo.png' },
+    APJ: { company: 'APJ Technologies', logo: '/brand/apj-logo.png' }
+  };
+  var brandCache = {};
+  /** Resolves to { company, logo } with the logo as a data URL (the sheet's PDF / Excel need one). */
+  function brandFor(code) {
+    code = BRANDS[code] ? code : 'TMS';
+    if (!brandCache[code]) {
+      brandCache[code] = fetch(BRANDS[code].logo).then(function (r) { if (!r.ok) throw new Error(); return r.blob(); }).then(function (b) {
+        return new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = function () { res(null); }; fr.readAsDataURL(b); });
+      }).catch(function () { return null; }).then(function (logo) { return { code: code, company: BRANDS[code].company, logo: logo }; });
+    }
+    return brandCache[code];
+  }
+  function companySelect(value, onchange) {
+    var s = el('select', { class: INPUT + ' trl-company', 'aria-label': 'Company' }, [
+      el('option', { value: 'TMS', text: 'TMS — Tulips Machining Solutions' }), el('option', { value: 'APJ', text: 'APJ Technologies' })]);
+    s.value = BRANDS[value] ? value : 'TMS';
+    s.addEventListener('change', function () { onchange(s.value, s); });
+    return s;
+  }
   var CATEGORIES = [['CUTTER', 'Cutter'], ['INSERT', 'Insert'], ['KEY', 'Key'], ['DRILL', 'Drill'], ['TAP', 'Tap']];
   var STATUS = {
     PENDING_APPROVAL: { label: 'Waiting for approval', badge: 'badge-yellow' },
@@ -126,6 +149,10 @@
       '.dark .trl-rec{border-color:#334155}',
       '@media(min-width:900px){.trl-rec{grid-template-columns:150px 2fr 1fr 90px 2fr auto}}',
       '.trl-lab{display:block;font-size:.72rem;font-weight:500;color:#64748b;margin-bottom:.25rem}',
+      '.trl-newhead{display:grid;grid-template-columns:minmax(200px,280px) 1fr;gap:1rem;align-items:start}',
+      '@media (max-width:700px){.trl-newhead{grid-template-columns:1fr}}',
+      'select.trl-company{width:auto;min-width:0;padding-top:.35rem;padding-bottom:.35rem;font-size:.82rem}.trl-newhead select.trl-company{width:100%}',
+      '.trl-co{display:inline-block;margin-left:.35rem;padding:0 .35rem;border-radius:.3rem;font-size:.66rem;font-weight:700;background:#e0f2fe;color:#0369a1;vertical-align:middle}.trl-co.apj{background:#ffedd5;color:#c2410c}',
       '.trl-req{color:#dc2626}',
       '.trl-x{border:0;background:none;color:#94a3b8;font-size:1rem;cursor:pointer;padding:.4rem}.trl-x:hover{color:#dc2626}',
       '.trl-link{font-size:.8rem;font-weight:500;color:#1e3a5f;background:none;border:0;padding:0;cursor:pointer}',
@@ -180,7 +207,13 @@
       msg.target = 'tms-trial-sheet';
       return self.ready.then(function () { self.iframe.contentWindow.postMessage(msg, location.origin); });
     };
-    this.load = function (opts) { self.changed = false; return self.send({ type: 'load', report: opts.report || null, prefill: opts.prefill || null, readOnly: !!opts.readOnly }); };
+    this.load = function (opts) {
+      self.changed = false;
+      return brandFor(opts.company).then(function (b) {
+        return self.send({ type: 'load', report: opts.report || null, prefill: opts.prefill || null, readOnly: !!opts.readOnly, brand: b });
+      });
+    };
+    this.setBrand = function (code) { return brandFor(code).then(function (b) { return self.send({ type: 'brand', brand: b }); }); };
     this.patch = function (fields) { self.changed = true; return self.send({ type: 'patch', fields: fields }); };
     this.get = function () {
       var id = ++seq;
@@ -287,7 +320,7 @@
       trials.forEach(function (x) {
         var recs = x.recommendations || [];
         var tr = el('tr', { class: 'table-row trl-row', tabindex: '0' }, [
-          el('td', { class: 'px-3 py-3 font-medium trl-nowrap', text: x.trialNo }),
+          el('td', { class: 'px-3 py-3 font-medium trl-nowrap' }, [x.trialNo, el('span', { class: 'trl-co' + (x.company === 'APJ' ? ' apj' : ''), text: x.company || 'TMS' })]),
           el('td', { class: 'px-3 py-3', text: (x.customer && x.customer.name) || '—' }),
           el('td', { class: 'px-3 py-3', text: x.component || '—' }),
           el('td', { class: 'px-3 py-3 trl-nowrap', text: (x.requestedBy && x.requestedBy.name) || '—' }),
@@ -317,6 +350,7 @@
     var sheet = new Sheet('eda');
     current = { sheet: sheet };
     var cust = { id: '', name: '' };
+    var company = 'TMS';
     var err = el('div');
     var saving = false;
     var custBox = el('div');
@@ -328,9 +362,9 @@
         el('h1', { class: 'page-title', text: 'New trial request' }),
         el('p', { class: 'trl-help mt-1', text: 'Step 1 of 3 — fill in the customer’s existing situation below. Customer name and component name are required. The request then goes to an admin for approval.' })
       ]),
-      el('div', { class: 'card p-4' }, [
-        el('span', { class: 'trl-lab', text: 'Link to a CRM customer (optional — fills the customer name in the sheet)' }),
-        custBox
+      el('div', { class: 'card p-4 trl-newhead' }, [
+        el('div', {}, [el('span', { class: 'trl-lab', text: 'Company (logo on the sheets)' }), companySelect(company, function (v) { company = v; sheet.setBrand(v); })]),
+        el('div', {}, [el('span', { class: 'trl-lab', text: 'Link to a CRM customer (optional — fills the customer name in the sheet)' }), custBox])
       ]),
       sheet.node,
       err,
@@ -351,7 +385,7 @@
     renderCust();
 
     var u = currentUser();
-    sheet.load({ prefill: { engineer: (u && u.name) || '', reportNo: 'New trial request' } });
+    sheet.load({ prefill: { engineer: (u && u.name) || '', reportNo: 'New trial request' }, company: company });
 
     function showErr(msg) { err.innerHTML = ''; if (msg) err.appendChild(el('div', { class: 'trl-banner trl-err', text: msg })); }
 
@@ -363,7 +397,7 @@
         if (!R || !String(R.customer || '').trim()) throw new Error('Enter the customer name in the sheet (Enquiry & customer).');
         if (!String(R.component || '').trim()) throw new Error('Enter the component name in the sheet (Component & machine).');
         saving = true; submitBtn.classList.add('trl-disabled'); submitBtn.textContent = 'Submitting…';
-        return api('POST', '/trials', { customerId: cust.id || '', existingData: R });
+        return api('POST', '/trials', { customerId: cust.id || '', existingData: R, company: company });
       }).then(function (res) {
         if (!res) return;
         sheet.changed = false;
@@ -400,7 +434,15 @@
             el('h1', { class: 'page-title', text: t.trialNo + ' · ' + ((t.customer && t.customer.name) || 'Customer') }),
             el('p', { class: 'text-sm text-muted mt-1', text: [(t.component || ''), 'Requested by ' + ((t.requestedBy && t.requestedBy.name) || '—'), fmtDate(t.createdAt)].filter(Boolean).join(' · ') })
           ]),
-          el('span', { class: 'badge ' + STATUS[t.status].badge, text: STATUS[t.status].label })
+          el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
+            canEdit(t) ? companySelect(t.company, function (v, sel) {
+              sel.disabled = true;
+              api('PATCH', '/trials/' + encodeURIComponent(t.id) + '/company', { company: v }).then(function () {
+                t.company = v; if (current && current.sheet) current.sheet.setBrand(v);
+              }).catch(function (e) { sel.value = t.company || 'TMS'; alert(e.message); }).then(function () { sel.disabled = false; });
+            }) : el('span', { class: 'badge badge-gray', text: t.company || 'TMS' }),
+            el('span', { class: 'badge ' + STATUS[t.status].badge, text: STATUS[t.status].label })
+          ])
         ]),
         flashMsg ? el('div', { class: 'trl-banner trl-ok', text: flashMsg }) : null,
         steps(t, tab, savingsOpen),
@@ -443,7 +485,7 @@
       current = { sheet: sheet };
       var msg = el('div');
       var btn = el('button', { class: 'btn-primary', text: t.status === 'REJECTED' ? 'Save & resubmit for approval' : 'Save changes', onclick: save });
-      sheet.load({ report: t.existingData, readOnly: !editable });
+      sheet.load({ report: t.existingData, readOnly: !editable, company: t.company });
       var wrap = el('div', { class: 'space-y-3' }, [
         t.status === 'REJECTED' ? el('div', { class: 'trl-banner trl-err' }, [
           el('p', { class: 'font-semibold', text: 'Rejected by ' + ((t.decidedBy && t.decidedBy.name) || 'admin') + ' — ' + (t.approvalNote || '') }),
@@ -529,9 +571,9 @@
       var msg = el('div');
       var busy = false;
       if (t.savingsData) {
-        sheet.load({ report: t.savingsData, readOnly: !editable });
+        sheet.load({ report: t.savingsData, readOnly: !editable, company: t.company });
       } else {
-        sheet.load({ prefill: savingsPrefill(t), readOnly: !editable });
+        sheet.load({ prefill: savingsPrefill(t), readOnly: !editable, company: t.company });
       }
       var recs = t.recommendations || [];
       var head = el('div', { class: 'space-y-2' }, [
@@ -571,10 +613,10 @@
   function savingsPrefill(t) {
     var E = t.existingData || {};
     var ex = (E.tools && E.tools[0]) || {};
-    var tools = [{ label: 'Existing' + (ex.exSpec ? ' — ' + ex.exSpec : ''), insertGrade: ex.comp || '' }];
+    var tools = [{ label: 'Existing' + (ex.exSpec ? ' — ' + ex.exSpec : ''), insertGrade: ex.comp || '', toolDia: ex.dia || '' }];
     (t.recommendations || []).forEach(function (r) {
       if (tools.length >= 4) return;
-      tools.push({ label: labelOf(CATEGORIES, r.category) + ' — ' + r.spec, insertGrade: r.grade || '' });
+      tools.push({ label: labelOf(CATEGORIES, r.category) + ' — ' + r.spec, insertGrade: r.grade || '', toolDia: ex.dia || '' });
     });
     if (tools.length < 2) tools.push({ label: 'Recommended' });
     return {
@@ -585,6 +627,8 @@
       matGrade: E.matGrade || '',
       production: E.production || '',
       machineType: [E.machineMake, E.machineModel].filter(Boolean).join(' ') || '',
+      dia: E.dia || E.compDia || ex.dia || '',
+      distributor: (BRANDS[t.company] || BRANDS.TMS).company,
       tools: tools
     };
   }
