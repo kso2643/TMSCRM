@@ -1,3 +1,79 @@
+# Update — 5 Oct: price request negotiation, trials logo, stock by place, multi-day visits, reminders, permission, task timer, payslips
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. New files: `crm/leaves-app.js`, `crm/stock-app.js`, `crm/brand/` (TMS and APJ logos), `crm/payroll/payroll-fix.css`; the Leave and Stock pages (`crm/leaves/index.html`, `crm/stock/index.html`) are now hand-coded pages. New tables and columns are created automatically the first time each page is used.
+
+**Before you upload, check that the Payroll tables exist on the live database** (`Payroll`, `SalaryAdvance`, …). They come from the payroll migrations in `api/database/`; nothing in this update changes them.
+
+## 1. Price requests
+- **Required on every item:** target price, discount %, **lead time** (e.g. "2 weeks"; a plain number becomes "N days") and **expected delivery** date. The Excel template has the new columns.
+- **Admin answer:** the admin can give an approved lead time with the approved price and discount.
+- **Revised price:** after an answer, the engineer can press **↺ Ask revised price** with a new price, discount, lead time and a note (required). The item goes back to the admin as "Revised price request" and shows **Revised ×N** plus a **Negotiation history**.
+- **Quotations:** both the TMS and APJ forms have a **Price request no.** field. **Load approved prices** fills the customer and the approved items (price, discount, lead time). The number is saved with the quotation.
+
+## 2. Trials: cost savings report
+- **Company and logo:** each trial has a company (**TMS / APJ**), chosen when you raise it and changeable later. Both sheets show that company's logo and name, on screen and in the PDF and Excel downloads. The sheet now uses the official TMS logo instead of the old one.
+- **Diameter:** new **Tool diameter (mm)** row for every tool. The component and tool diameters are pre-filled from the existing data sheet.
+
+## 3. Stock (`/stock/`, new page)
+- **Where the stock is:** every item has a **brand** and stock by place: **Hand stock**, **Local stock**, and **one column per state** that holds stock. The table also shows **Total**, **On order** (open orders not yet supplied) and **Free** stock.
+- **Upload:**
+  - Pick the **brand** and the **place** (Hand / Local / Other state, then which state).
+  - The uploaded quantity **replaces** the quantity at that place only.
+  - The new template has Brand and Minimum Stock columns, a "How to fill" sheet and a list of states. Old template files still upload.
+- **Orders reduce stock:** when an order line is marked **supplied** (or the order is Delivered), its quantity comes out of stock: Hand stock first, then Local, then state stock. Undoing the supply or deleting the order puts it back where it came from.
+- **Reminders:**
+  - Low / out-of-stock items show in a banner on the page.
+  - Managers and admins get a **Stock** alert when an item falls to its minimum or runs out, plus a 9:30 morning summary.
+- **Changes and history:** **±** to adjust a place by hand, **🕘** for the full history (uploads, adjustments and orders, with who and when), and **✎** to edit an item.
+
+## 4. Appointments: several visit days
+- **Choosing days:** tick **Visit on multiple days** and tap days on the small calendar (up to 31).
+- **Each day** becomes its own appointment, marked **day N/M**.
+- **Reminders:** the engineer gets one assignment alert, then a reminder at 6 pm the evening before **each** day.
+- **Delete:** delete one day or all of them.
+
+## 5. Price requests: Remind admin
+- **⏰ Remind admin** on a waiting request sends the admins an alert. It can be pressed again after 2 hours.
+
+## 6. Leave (`/leaves/`, new page)
+- **Types:** Casual, Sick, **Personal**, Half day and **Permission (hourly)**.
+- **Permission:** you enter a time **from** and **to**; the hours are worked out for you, up to 8 hours.
+- **Rules:** a reason is required, and overlapping requests are blocked. Pending requests can be **withdrawn**.
+- **Admins:** see **All requests** and approve or reject (rejecting needs a reason). An Excel export includes the time and hours.
+- **Summary tiles:** days per type this year and permission hours this month.
+
+## 7. Tasks
+- **General timer:** time on work that isn't a queued task, with an optional note.
+  - Starting it pauses the running task; starting or resuming a task stops it, so time is never counted twice.
+  - **Team live** shows each person's general timer and today's general time.
+- **Admins:** **Own tasks** and **Assigned by me** tabs.
+
+## 8. Payroll
+- **Look:** the pages match the rest of the CRM. The old dark header is gone (the sidebar has navigation and Sign out), and tabs, cards and buttons use the CRM style, on phones and in dark mode.
+- **Payslips (PDF, TMS or APJ letterhead):**
+  - **📄** on a row downloads that payslip.
+  - **⬇ All payslips** downloads every employee's payslip for the month shown, one page each.
+  - **Payslip: with leave details:** earnings, deductions, net pay in words, attendance, and casual / sick / personal / half day / permission for the month and the year so far.
+  - **Payslip: general:** the plain salary slip.
+- **Payroll form:** shows the employee's approved leave for that month, with **Fill present days**.
+
+## Verification
+- **API:**
+  - price requests 41/41;
+  - leave 23/23;
+  - stock 27/27: upload per place, brand, filters, orders reduce and restore, alerts.
+- **Browser:**
+  - price requests 29/29;
+  - leave 18/18;
+  - trial logo + diameter 19/19;
+  - multi-day appointments 11/11;
+  - general timer + tabs 18/18;
+  - stock 16/16;
+  - payroll + payslips 15/15.
+- **All earlier suites pass:** tasks, global, trials, motion, dashboard, CPR, quotations, log meeting, docked sidebar.
+
+---
+
 # Fix — 4 Oct (c): dashboard "Unknown Customer"; price requests off the Tasks page
 
 **Upload:** `api/controllers/DashboardAnalyticsController.php` and `crm/` (`tasks-app.js`, the dashboard page files, `sw.js`), then press Ctrl+Shift+R once.
