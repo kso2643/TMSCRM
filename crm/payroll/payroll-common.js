@@ -61,11 +61,27 @@ window.PayrollCommon = (function () {
   // File downloads need the auth header, so they go through fetch + blob
   // rather than a plain <a href> link (mirrors the original page's .xlsx
   // export handling).
+  /* A download must really be the file: Excel / zip start with "PK", PDF with "%PDF".
+     If something was printed in front of it, cut it off; if the server sent an
+     error page instead, show that message rather than saving a broken file. */
+  function checkFile(b, name) {
+    var sig = /\.(xlsx|zip)$/i.test(name || '') ? [80, 75, 3, 4] : /\.pdf$/i.test(name || '') ? [37, 80, 68, 70] : null;
+    if (!sig || !b || !b.arrayBuffer) return Promise.resolve(b);
+    return b.arrayBuffer().then(function (buf) {
+      var u = new Uint8Array(buf), lim = Math.min(u.length - 4, 1 << 20);
+      for (var i = 0; i <= lim; i++) {
+        if (u[i] === sig[0] && u[i + 1] === sig[1] && u[i + 2] === sig[2] && u[i + 3] === sig[3]) return i === 0 ? b : new Blob([u.subarray(i)], { type: b.type });
+      }
+      var t = new TextDecoder().decode(u.subarray(0, 4000)), m = '';
+      try { m = JSON.parse(t).message || ''; } catch (e) { m = t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200); }
+      throw new Error('The server sent an error instead of the file' + (m ? ': ' + m : '.'));
+    });
+  }
   function downloadFile(path, filename) {
     fetch(API_BASE + path, { headers: { Authorization: "Bearer " + token } })
       .then((r) => {
         if (!r.ok) throw new Error("Download failed.");
-        return r.blob();
+        return r.blob().then((b) => checkFile(b, filename));
       })
       .then((blob) => {
         const url = URL.createObjectURL(blob);
@@ -75,7 +91,7 @@ window.PayrollCommon = (function () {
         a.click();
         URL.revokeObjectURL(url);
       })
-      .catch(() => toast("Download failed.", true));
+      .catch((e) => toast(e && e.message ? e.message : "Download failed.", true));
   }
 
   function toast(msg, isError) {

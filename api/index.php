@@ -28,6 +28,30 @@ declare(strict_types=1);
 require __DIR__ . '/config/config.php';
 require __DIR__ . '/config/database.php';
 
+// PHP warnings / notices must never be printed into a response: a single
+// warning in front of an Excel / PDF / zip download makes the file unreadable
+// ("file format or extension is not valid") and breaks JSON too. They still
+// go to the server error log.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+// Output is buffered, so headers can still be sent after stray output and
+// anything printed before a file's first byte (a warning, a blank line from
+// an edited file) is dropped from the download.
+ob_start(static function (string $buf, int $phase): string {
+    static $checked = false;
+    if ($checked) return $buf;
+    $checked = true;
+    foreach (headers_list() as $h) {
+        if (!preg_match('~^Content-Type:\s*(application/(vnd\.openxmlformats|pdf|zip|octet-stream))~i', $h)) continue;
+        foreach (["PK\x03\x04", '%PDF'] as $sig) {
+            $p = strpos($buf, $sig);
+            if ($p !== false && $p > 0) return substr($buf, $p);
+        }
+        break;
+    }
+    return $buf;
+}, 1 << 20);
+
 require __DIR__ . '/includes/Helpers.php';
 require __DIR__ . '/includes/Response.php';
 require __DIR__ . '/includes/JWT.php';

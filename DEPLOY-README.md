@@ -1,3 +1,22 @@
+# Fix — 5 Oct (e): "Excel cannot open the file … format or extension is not valid"
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+
+- **Cause:** the server printed a PHP warning or notice at the start of the download, or sent an error message that was saved as `.xlsx`. Excel can't open a file with text in front of it.
+- **Server fix (`api/index.php`):**
+  - Warnings are no longer printed into any response; they still go to the error log.
+  - All output is buffered, so anything printed before an Excel / PDF / zip file is cut off.
+  - This covers every download: stock template, brand-wise Excel, payslips, reports, company data.
+- **Page fix:** every download checks the file really starts like an Excel / zip / PDF file before saving it.
+  - If something is in front of it, that is removed.
+  - If the server sent an error instead, the page shows the message ("The server sent an error instead of the file: …") rather than saving a broken file.
+- **Verification:**
+  - A test with junk text injected before the template download gives a valid xlsx.
+  - An error response shows the message.
+  - Stock, payroll and price-request suites pass, and the template opens in LibreOffice.
+
+---
+
 # Update — 5 Oct (d): Stock — brand-wise list
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
