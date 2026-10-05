@@ -225,6 +225,45 @@
   // ══════════════════════════════════════════════════════════════════
   var dialogOpen = false;
 
+  /* Multiple visit days: a small month calendar — tap days to add / remove them. */
+  function multiDayPicker(startDate) {
+    var picked = {}; picked[toDateStr(startDate)] = true;
+    var view = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    var box = el('div', { class: 'ap-md' });
+    var listP = el('p', { class: 'ap-md-list' });
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    function sortedDays() { return Object.keys(picked).sort(); }
+    function render() {
+      box.innerHTML = '';
+      var head = el('div', { class: 'ap-md-head' }, [
+        el('button', { type: 'button', class: 'ap-md-nav', 'aria-label': 'Previous month', text: '\u2039', onclick: function () { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); render(); } }),
+        el('b', { text: MONTHS[view.getMonth()] + ' ' + view.getFullYear() }),
+        el('button', { type: 'button', class: 'ap-md-nav', 'aria-label': 'Next month', text: '\u203a', onclick: function () { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); render(); } })
+      ]);
+      var grid = el('div', { class: 'ap-md-grid' });
+      WEEKDAYS.forEach(function (w) { grid.appendChild(el('span', { class: 'ap-md-wd', text: w.charAt(0) })); });
+      var start = new Date(view.getFullYear(), view.getMonth(), 1 - view.getDay());
+      for (var i = 0; i < 42; i++) {
+        (function (d) {
+          var ds = toDateStr(d), past = d < today, out = d.getMonth() !== view.getMonth();
+          grid.appendChild(el('button', {
+            type: 'button', 'data-day': ds, disabled: past ? 'disabled' : null,
+            class: 'ap-md-d' + (picked[ds] ? ' on' : '') + (out ? ' out' : '') + (isSameDate(d, today) ? ' today' : ''),
+            text: String(d.getDate()),
+            onclick: function () { if (picked[ds]) { if (sortedDays().length > 1) delete picked[ds]; } else picked[ds] = true; render(); }
+          }));
+        })(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+      }
+      var days = sortedDays();
+      listP.textContent = days.length + (days.length === 1 ? ' day: ' : ' days: ') + days.map(function (x) {
+        return parseDateStr(x).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+      }).join(', ');
+      box.appendChild(head); box.appendChild(grid); box.appendChild(listP);
+    }
+    render();
+    return { el: box, days: sortedDays, setStart: function (d) { picked = {}; picked[toDateStr(d)] = true; view = new Date(d.getFullYear(), d.getMonth(), 1); render(); } };
+  }
+
   function openApptDialog(existing, prefillDate, onSaved) {
     if (dialogOpen) return;
     dialogOpen = true;
@@ -289,10 +328,27 @@
       onclick: function () { if (me) engSelect.value = me.id; }
     });
 
+    var singleDate;
     var titleInput = input({ placeholder: 'e.g. AMC service, installation, breakdown call\u2026', value: existing ? existing.title : '' });
     var dateInput = input({ type: 'date', value: existing ? existing.appointmentDate : toDateStr(prefillDate || new Date()) });
     var timeInput = input({ type: 'time', value: existing && existing.appointmentTime ? existing.appointmentTime : '' });
     var notesInput = el('textarea', { class: INPUT, rows: '3', placeholder: 'Anything the engineer should know before the visit\u2026', text: existing ? (existing.notes || '') : '' });
+
+    // New visit: one day or several days (each day becomes its own appointment).
+    var multi = false, md = null, dateBox = null, multiToggle = null;
+    if (!existing) {
+      md = multiDayPicker(dateInput.value ? parseDateStr(dateInput.value) : new Date());
+      multiToggle = el('label', { class: 'ap-md-toggle' }, [
+        el('input', { type: 'checkbox', id: 'ap-multi', onchange: function (e) {
+          multi = e.target.checked;
+          if (multi && dateInput.value) md.setStart(parseDateStr(dateInput.value));
+          singleDate.style.display = multi ? 'none' : '';
+          md.el.style.display = multi ? '' : 'none';
+        } }),
+        ' Visit on multiple days'
+      ]);
+      md.el.style.display = 'none';
+    }
 
     var statusRow = null;
     var statusSelect = null;
@@ -311,17 +367,18 @@
       var customer = picker.getValue();
       if (!customer) return fail('Please choose a customer.');
       if (!titleInput.value.trim()) return fail('Please enter a title for the visit.');
-      if (!dateInput.value) return fail('Please choose a date.');
+      if (!multi && !dateInput.value) return fail('Please choose a date.');
 
       var body = {
         customerId: customer.id,
         assignedToId: engSelect.value || undefined,
         title: titleInput.value.trim(),
-        appointmentDate: dateInput.value,
+        appointmentDate: multi ? md.days()[0] : dateInput.value,
         appointmentTime: timeInput.value || null,
         notes: notesInput.value.trim() || null
       };
       if (statusSelect) body.status = statusSelect.value;
+      if (multi) body.appointmentDates = md.days();
 
       saveBtn.disabled = true;
       var req = existing ? api('PUT', '/appointments/' + existing.id, body) : api('POST', '/appointments', body);
@@ -337,8 +394,9 @@
         class: 'text-red-600 dark:text-red-400 text-sm font-medium hover:underline',
         text: 'Delete', type: 'button',
         onclick: function () {
-          if (!window.confirm('Delete this appointment? This can\u2019t be undone.')) return;
-          api('DELETE', '/appointments/' + existing.id).then(function () {
+          var series = existing.seriesLen > 1 && window.confirm('This visit has ' + existing.seriesLen + ' days. Delete ALL ' + existing.seriesLen + ' days?\n\nOK = all days, Cancel = choose for this day only');
+          if (!series && !window.confirm('Delete this appointment? This can\u2019t be undone.')) return;
+          api('DELETE', '/appointments/' + existing.id + (series ? '?series=1' : '')).then(function () {
             close();
             if (onSaved) onSaved();
           }).catch(function (e) { fail(e.message); });
@@ -350,10 +408,14 @@
       field('Customer', picker.el, { required: true }),
       field('Assign engineer', el('div', {}, [engSelect, assignMeBtn]), { required: true }),
       field('Title', titleInput, { required: true }),
+      existing && existing.seriesLen > 1 ? el('p', { class: 'ap-md-note', text: 'Day ' + existing.seriesDay + ' of ' + existing.seriesLen + ' of a multi-day visit — changes here apply to this day only.' }) : null,
+      multiToggle,
+      md ? md.el : null,
       el('div', { class: 'grid grid-cols-2 gap-3' }, [
-        field('Date', dateInput, { required: true }),
+        singleDate = field('Date', dateInput, { required: true }),
         field('Time (optional)', timeInput)
       ]),
+      el('p', { class: 'ap-md-note', text: '\u23f0 The engineer gets a reminder at 6 pm the evening before each visit day.' }),
       statusRow,
       field('Notes', notesInput),
       errP
@@ -552,7 +614,8 @@
               onclick: function (e) { e.stopPropagation(); openApptDialog(a, null, loadAndRenderBody); }
             }, [
               el('b', { text: a.appointmentTime ? fmtTime12(a.appointmentTime) : '•' }),
-              el('span', { text: (cust || a.title) + (who.name ? ' · ' + who.name.split(' ')[0] : '') })
+              el('span', { text: (cust || a.title) + (who.name ? ' · ' + who.name.split(' ')[0] : '') }),
+              a.seriesLen > 1 ? el('i', { class: 'ap-series', text: a.seriesDay + '/' + a.seriesLen }) : null
             ]));
           });
           if (dayAppts.length > 3) cell.appendChild(el('span', { class: 'ap-more', text: '+' + (dayAppts.length - 3) + ' more' }));
@@ -592,6 +655,18 @@
         '.ap-st-COMPLETED{opacity:.7}.ap-st-COMPLETED span{text-decoration:line-through}',
         '.ap-st-CANCELLED{opacity:.45}.ap-st-CANCELLED span{text-decoration:line-through}',
         '.ap-more{font-size:.68rem;font-weight:600;color:#1e3a5f;padding-left:.35rem}.dark .ap-more{color:#93c5fd}',
+        '.ap-md-toggle{display:flex;align-items:center;gap:.45rem;font-size:.85rem;font-weight:500;cursor:pointer}',
+        '.ap-md{border:1px solid #e2e8f0;border-radius:.6rem;padding:.6rem}.dark .ap-md{border-color:#334155}',
+        '.ap-md-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;font-size:.85rem}',
+        '.ap-md-nav{width:1.8rem;height:1.8rem;border-radius:.4rem;border:1px solid #e2e8f0;background:none;font-size:1rem;cursor:pointer;color:inherit}.dark .ap-md-nav{border-color:#334155}',
+        '.ap-md-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}',
+        '.ap-md-wd{text-align:center;font-size:.68rem;font-weight:700;color:#94a3b8}',
+        '.ap-md-d{height:2rem;border:0;border-radius:.4rem;background:#f8fafc;font-size:.8rem;cursor:pointer;color:inherit}.dark .ap-md-d{background:#0f172a}',
+        '.ap-md-d:hover:not(:disabled){background:#e2e8f0}.ap-md-d.out{opacity:.5}.ap-md-d:disabled{opacity:.25;cursor:default}',
+        '.ap-md-d.today{box-shadow:inset 0 0 0 1.5px #1e3a5f}.ap-md-d.on{background:#1e3a5f;color:#fff;font-weight:700}.dark .ap-md-d.on{background:#2563eb}',
+        '.ap-md-list{margin:.5rem 0 0;font-size:.75rem;color:#475569}.dark .ap-md-list{color:#cbd5e1}',
+        '.ap-md-note{font-size:.72rem;color:#64748b;margin:0}',
+        '.ap-series{font-size:.6rem;font-weight:700;padding:0 .3rem;border-radius:.25rem;background:color-mix(in srgb,var(--c) 25%,#fff);white-space:nowrap}',
         '.ap-legend{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center;font-size:.78rem;color:#475569}',
         '.dark .ap-legend{color:#cbd5e1}',
         '.ap-sum{font-weight:600;color:#0f172a;margin-right:.4rem}.dark .ap-sum{color:#f1f5f9}',
@@ -626,7 +701,8 @@
           el('div', { class: 'flex-1 min-w-0' }, [
             el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
               el('p', { class: 'text-sm font-semibold text-slate-900 dark:text-slate-100', text: a.title }),
-              el('span', { class: 'text-[10px] px-1.5 py-0.5 rounded-full font-medium ' + (STATUS_BADGE[a.status] || STATUS_BADGE.SCHEDULED), text: a.status })
+              el('span', { class: 'text-[10px] px-1.5 py-0.5 rounded-full font-medium ' + (STATUS_BADGE[a.status] || STATUS_BADGE.SCHEDULED), text: a.status }),
+              a.seriesLen > 1 ? el('span', { class: 'text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600', text: 'Day ' + a.seriesDay + ' of ' + a.seriesLen }) : null
             ]),
             el('p', { class: 'text-xs text-muted mt-0.5', text: a.customer.companyName + (a.customer.contactPerson ? ' \u00b7 ' + a.customer.contactPerson : '') }),
             el('p', { class: 'text-xs text-slate-400 mt-0.5', text: 'Engineer: ' + (a.assignedTo ? a.assignedTo.name : '\u2014') }),

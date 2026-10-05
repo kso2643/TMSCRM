@@ -163,6 +163,11 @@
     return timeStr ? label + ' \u00b7 ' + timeStr : label;
   }
 
+  // Multi-day visit: "day 2 of 3" (assignment pings cover the whole visit).
+  function seriesTxt(a) {
+    if (!(a.seriesLen > 1)) return '';
+    return a.alertType === 'REMINDER_EVENING_BEFORE' ? ' \u00b7 day ' + a.seriesDay + ' of ' + a.seriesLen : ' \u00b7 ' + a.seriesLen + ' visit days';
+  }
   function renderAlert(a) {
     var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE';
     var card = el('div', { class: 'ar-card' + (isReminder ? ' ar-amber' : '') });
@@ -180,7 +185,7 @@
       }),
       el('p', {
         class: 'ar-s',
-        text: a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '')
+        text: a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '') + seriesTxt(a)
       }),
       el('p', { class: 'ar-w', text: fmtWhen(a.appointmentDate, a.appointmentTime) }),
       viewBtn
@@ -205,7 +210,7 @@
         shownIds[a.id] = true;
         var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE';
         var title = isReminder ? 'Appointment reminder' : 'New appointment assigned to you';
-        var body = a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '') + ' \u00b7 ' + fmtWhen(a.appointmentDate, a.appointmentTime);
+        var body = a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '') + seriesTxt(a) + ' \u00b7 ' + fmtWhen(a.appointmentDate, a.appointmentTime);
         // Same bottom-right stack as every other alert (crm-global.js), so it
         // never covers a page's header buttons or form fields.
         var shared = window.CRMAlerts && window.CRMAlerts.show && window.CRMAlerts.show({

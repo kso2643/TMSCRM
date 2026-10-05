@@ -5,8 +5,17 @@ class AppointmentController
     {
         // Creates the Appointment tables if migration_appointments.sql was never
         // run (or failed) on this database — see includes/SchemaGuard.php.
-        ensure_schema(schema_from_sql_file(BASE_PATH . '/database/migration_appointments.sql'), 'migration_appointments.sql');
+        $schema = schema_from_sql_file(BASE_PATH . '/database/migration_appointments.sql');
+        // A visit booked for several days is one row per day sharing a seriesId.
+        if (isset($schema['Appointment'])) $schema['Appointment']['columns'] = [
+            'seriesId'  => 'VARCHAR(30) NULL',
+            'seriesDay' => 'INT NULL',
+            'seriesLen' => 'INT NULL',
+        ];
+        ensure_schema($schema, 'migration_appointments.sql');
     }
+
+    private const MAX_SERIES_DAYS = 31;
 
     private const VALID_STATUSES = ['SCHEDULED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED'];
 
@@ -95,9 +104,15 @@ class AppointmentController
         $b = request_body();
         $customerId = trim((string)($b['customerId'] ?? ''));
         $title      = trim((string)($b['title'] ?? ''));
-        $date       = to_date_only($b['appointmentDate'] ?? null);
+        // One or more visit days: appointmentDates[] (multi-day) or appointmentDate.
+        $dates = [];
+        foreach ((array) ($b['appointmentDates'] ?? []) as $d) { $d = to_date_only($d); if ($d) $dates[$d] = true; }
+        if (!$dates && ($d = to_date_only($b['appointmentDate'] ?? null))) $dates[$d] = true;
+        $dates = array_keys($dates); sort($dates);
+        $date  = $dates[0] ?? null;
         if (!$customerId || !$title || !$date)
             sendError('Customer, title, and appointment date are required.', 400);
+        if (count($dates) > self::MAX_SERIES_DAYS) sendError('Pick at most ' . self::MAX_SERIES_DAYS . ' visit days at a time.', 400);
 
         $cs = db()->prepare('SELECT companyName FROM `Customer` WHERE id=? AND isActive=1 LIMIT 1');
         $cs->execute([$customerId]);
@@ -113,21 +128,34 @@ class AppointmentController
         $status = $b['status'] ?? 'SCHEDULED';
         if (!in_array($status, self::VALID_STATUSES)) sendError('Invalid status.', 400);
 
-        $id = gen_id();
-        db()->prepare(
+        $n = count($dates);
+        $seriesId = $n > 1 ? gen_id() : null;
+        $ids = [];
+        $ins = db()->prepare(
             'INSERT INTO `Appointment`
-             (id,customerId,userId,assignedToId,title,appointmentDate,appointmentTime,status,notes,createdAt,updatedAt)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
-        )->execute([
-            $id, $customerId, $auth['id'], $assignedToId, $title, $date,
-            $b['appointmentTime'] ?? null, $status, $b['notes'] ?? null,
-            now_sql(), now_sql(),
-        ]);
+             (id,customerId,userId,assignedToId,title,appointmentDate,appointmentTime,status,notes,seriesId,seriesDay,seriesLen,createdAt,updatedAt)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        );
+        db()->beginTransaction();
+        foreach ($dates as $i => $d) {
+            $ids[] = $id = gen_id();
+            $ins->execute([
+                $id, $customerId, $auth['id'], $assignedToId, $title, $d,
+                $b['appointmentTime'] ?? null, $status, $b['notes'] ?? null,
+                $seriesId, $seriesId ? $i + 1 : null, $seriesId ? $n : null,
+                now_sql(), now_sql(),
+            ]);
+        }
+        db()->commit();
 
-        $this->notifyAssignment($id, $assignedToId, $auth['id'], $customer['companyName']);
-        log_activity($auth['id'], 'APPOINTMENT_CREATED', 'Appointment', $id,
-            ['customer' => $customer['companyName'], 'date' => $date]);
-        $this->show($id, 201);
+        // One assignment ping for the visit; every day still gets its own evening-before reminder.
+        $this->notifyAssignment($ids[0], $assignedToId, $auth['id'], $customer['companyName']);
+        log_activity($auth['id'], 'APPOINTMENT_CREATED', 'Appointment', $ids[0],
+            ['customer' => $customer['companyName'], 'date' => $date, 'days' => $n > 1 ? $dates : null]);
+        if ($n === 1) $this->show($ids[0], 201);
+        $out = array_map(fn($x) => $this->shape($this->fetchRow($x)), $ids);
+        sendSuccess(['appointment' => $out[0], 'appointments' => $out, 'seriesId' => $seriesId],
+            "$n visit days booked — a reminder goes out the evening before each day.", 201);
     }
 
     // PUT /api/appointments/:id
@@ -192,6 +220,17 @@ class AppointmentController
         if (!$isAdmin && $existing['userId'] !== $auth['id'])
             sendError('Can only delete appointments you created.', 403);
 
+        // ?series=1 removes every day of a multi-day visit (that hasn't happened yet or not).
+        if (qp('series') && !empty($existing['seriesId'])) {
+            $s = db()->prepare('SELECT id FROM `Appointment` WHERE seriesId=?'); $s->execute([$existing['seriesId']]);
+            $ids = array_column($s->fetchAll(), 'id');
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            db()->prepare("DELETE FROM `AppointmentAlert` WHERE appointmentId IN ($in)")->execute($ids);
+            db()->prepare("DELETE FROM `Appointment` WHERE id IN ($in)")->execute($ids);
+            log_activity($auth['id'], 'APPOINTMENT_DELETED', 'Appointment', $id, ['series' => count($ids)]);
+            sendSuccess(['deleted' => count($ids)], count($ids) . ' visit days deleted.');
+        }
+        db()->prepare('DELETE FROM `AppointmentAlert` WHERE appointmentId=?')->execute([$id]);
         db()->prepare('DELETE FROM `Appointment` WHERE id=?')->execute([$id]);
         log_activity($auth['id'], 'APPOINTMENT_DELETED', 'Appointment', $id, null);
         sendSuccess([], 'Appointment deleted.');
@@ -213,7 +252,7 @@ class AppointmentController
         $this->generateReminders($auth['id']);
 
         $s = db()->prepare(
-            "SELECT al.*, a.title, a.appointmentDate, a.appointmentTime, c.companyName
+            "SELECT al.*, a.title, a.appointmentDate, a.appointmentTime, a.seriesDay, a.seriesLen, c.companyName
              FROM `AppointmentAlert` al
              JOIN `Appointment` a ON a.id=al.appointmentId
              LEFT JOIN `Customer` c ON c.id=a.customerId
