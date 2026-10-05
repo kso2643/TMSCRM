@@ -36,7 +36,7 @@
     TRIAL_REQUESTED: 'trials', TRIAL_DECIDED: 'trials', TRIAL_COMPLETED: 'trials',
     LEAVE_REQUESTED: 'leave', LEAVE_DECIDED: 'leave',
     PRICE_REQUEST_NEW: 'prices', PRICE_REQUEST_ANSWERED: 'prices', PRICE_REQUEST_REMINDER: 'prices',
-    STOCK_LOW: 'stock',
+    STOCK_LOW: 'stock', STOCK_CHECK: 'stock',
     BREAK_STARTED: 'breaks', STATIONARY: 'breaks', LOCATION_OFF: 'breaks'
   };
   var GROUP_STYLE = {

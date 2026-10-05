@@ -484,6 +484,7 @@
     PRICE_REQUEST_NEW:      { color: '#d97706', icon: '₹' },
     PRICE_REQUEST_REMINDER: { color: '#dc2626', icon: '⏰' },
     STOCK_LOW:              { color: '#ea580c', icon: '📦' },
+    STOCK_CHECK:            { color: '#0d9488', icon: '🗂' },
     PRICE_REQUEST_ANSWERED: { color: '#16a34a', icon: '₹' },
     TRIAL_REQUESTED:        { color: '#7c3aed', icon: '🧪' },
     TRIAL_DECIDED:          { color: '#7c3aed', icon: '🧪' },

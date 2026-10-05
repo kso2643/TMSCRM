@@ -1,3 +1,29 @@
+# Update — 5 Oct (c): Saturday stock check, Vc/RPM from tool diameter, company data file, Approvals removed
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+
+1. **Saturday stock check:**
+   - Every Saturday at **9:30** managers and admins get the alert "Saturday stock check — check all the stock".
+   - At **4 pm** they get a second alert if it hasn't been marked done.
+   - On Saturdays the Stock page shows a banner with **✓ Mark stock check done** (with an optional note), then who did it and when.
+2. **Trial savings — Vc / RPM from the diameter:** enter Cutting speed (Vc) or RPM and the other is calculated, RPM = Vc × 1000 ÷ (π × D).
+   - **Which diameter:** milling, drilling and other tools use each tool's **Tool diameter**; turning uses the **Component diameter**. If one is blank the other is used.
+   - **Updates:** changing a diameter recalculates straight away.
+   - **Excel download:** keeps the same formulas.
+3. **Company data in one file** (Reports → Company data, Super Admin):
+   - **Export company data (.zip):** every table (all pages) plus uploaded photos, voice notes, PO documents and attachments.
+   - **Import:** with that zip, every page gets the data. Missing tables and columns are created first, records are added or updated, and files are restored. Nothing that isn't in the file is deleted.
+   - **Older backups:** `.json` backups still import.
+   - **Big files:** a very large zip must fit the server's upload limit (`upload_max_filesize` / `post_max_size`).
+4. **Approvals** removed from the sidebar (below Payroll), on every page.
+
+**Verification:**
+- Browser 12/12: speed calculation, Saturday banner, Approvals gone, company data download.
+- Export / import test: a dropped table is recreated, a dropped column is added, a deleted upload is restored, and the old .json import still works.
+- Earlier suites pass.
+
+---
+
 # Update — 5 Oct (b): stock — multi-page Excel, local stock by city, add stock by hand
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

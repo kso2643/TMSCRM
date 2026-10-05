@@ -538,7 +538,7 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); }
           <div class="push"><button class="btn btn-sm" id="btn-cmp-add-tool" type="button">+ Add tool</button></div>
         </div>
         <div class="panel-body" style="padding-bottom:10px">
-          <p style="color:var(--steel);font-size:13.5px;margin-bottom:8px">Cutting speed and RPM are linked through the component diameter above &mdash; change either one and the other follows. Cost per component ( CPC ), per month, per year and the reduction are calculated from tool life, insert price and production.</p>
+          <p style="color:var(--steel);font-size:13.5px;margin-bottom:8px">Cutting speed (Vc) and RPM are calculated from the diameter &mdash; enter either one and the other follows (RPM = Vc &times; 1000 &divide; (&pi; &times; D)). Milling, drilling and other tools use each tool&rsquo;s <b>Tool diameter</b>; turning uses the <b>Component diameter</b>. If one is blank the other is used. Cost per component ( CPC ), per month, per year and the reduction are calculated from tool life, insert price and production.</p>
         </div>
         <div id="cmp-tool-tabs" role="tablist"></div>
         <div class="matrix-scroll" id="cmp-matrix-scroll"><table class="matrix" id="cmp-matrix" data-at="0"></table></div>
@@ -1486,8 +1486,17 @@ function migrateCmpReport(r) {
 /* Vc <-> RPM through the one shared "Component diameter" field (report-level) -
    same physics as the Existing/Trial blocks on the other report, but here a
    single diameter serves every tool column since it's the same workpiece. */
+/* Diameter used for Vc <-> RPM: turning cuts at the component diameter; milling,
+   drilling and the rest at the tool (cutter / drill) diameter. Either one is used
+   when the other is blank. */
+function cmpDiaFor(R, t) {
+  const comp = num(R.dia), tool = num(t.toolDia);
+  if (R.op === 'turning') return comp > 0 ? comp : (tool > 0 ? tool : null);
+  return tool > 0 ? tool : (comp > 0 ? comp : null);
+}
+function cmpUsesToolDia(R, t) { const comp = num(R.dia), tool = num(t.toolDia); return R.op === 'turning' ? !(comp > 0) && tool > 0 : tool > 0; }
 function recalcCmpTool(R, t) {
-  const D = num(R.dia);
+  const D = cmpDiaFor(R, t);
   const setCalc = (k, v) => { if (v === null || v === undefined || !isFinite(v)) { t[k] = ''; delete t.src[k]; } else { t[k] = String(v); t.src[k] = 'calc'; } };
   const clearCalc = k => { if (t.src[k] === 'calc' || t[k] === '') { t[k] = ''; delete t.src[k]; } };
   const vcU = t.src.vc === 'user' && t.vc !== ''; const rU = t.src.rpm === 'user' && t.rpm !== '';
@@ -2993,7 +3002,7 @@ async function buildCmpXlsxBlob(R) {
     if (pair[0] === 'Component diameter') { ws.getCell(r, 2).value = num(R.dia); ws.getCell(r, 2).numFmt = '0.0'; }
     r++;
   });
-  const diaAddr = '$B$' + (6 + M.info.findIndex(p => p[0] === 'Component diameter'));
+  const diaAddrComp = '$B$' + (6 + M.info.findIndex(p => p[0] === 'Component diameter'));
   r++;
   if (M.photos.length) {
     ws.getCell(r, 1).value = 'Workpiece photos'; ws.getCell(r, 1).font = F({ italic: true, color: { argb: 'FF71838F' } }); ws.getCell(r, 1).alignment = { vertical: 'middle' };
@@ -3028,7 +3037,7 @@ async function buildCmpXlsxBlob(R) {
   const feedLabel = cmpFeedLabel(R);
 
   addGroup('Tool');
-  addRow('Tool diameter (mm)', (cell, t) => { const v = num(t.toolDia); cell.value = v === null ? (t.toolDia || null) : v; cell.numFmt = '0.0#'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  const toolDiaRow = addRow('Tool diameter (mm)', (cell, t) => { const v = num(t.toolDia); cell.value = v === null ? (t.toolDia || null) : v; cell.numFmt = '0.0#'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
   addRow('Insert (grade)', (cell, t) => { cell.value = t.insertGrade || null; cell.font = F(); cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }; });
   addRow('Tool holder', (cell, t) => { cell.value = t.toolHolder || null; cell.font = F(); cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }; });
   if (R.op === 'milling') addRow('No. of pockets in cutter', (cell, t) => { cell.value = num(t.pockets); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
@@ -3042,6 +3051,7 @@ async function buildCmpXlsxBlob(R) {
     vcCell.border = xlBorder(); rpmCell.border = xlBorder(); vcCell.font = F(); rpmCell.font = F();
     vcCell.numFmt = '0.0'; rpmCell.numFmt = '0'; vcCell.alignment = { horizontal: 'center', vertical: 'middle' }; rpmCell.alignment = { horizontal: 'center', vertical: 'middle' };
     const rule = cmpSpeedRule(t); const vcNum = num(t.vc), rpmNum = num(t.rpm);
+    const diaAddr = cmpUsesToolDia(R, t) && toolDiaRow ? '$' + col + '$' + toolDiaRow.row : diaAddrComp;
     if (rule === 'vc<-rpm') {
       vcCell.value = { formula: 'IF(AND(ISNUMBER(' + col + rpmRow + '),ISNUMBER(' + diaAddr + ')),IF(' + diaAddr + '>0,ROUND(PI()*' + diaAddr + '*' + col + rpmRow + '/1000,1),""),"")', result: vcNum === null ? '' : vcNum };
       rpmCell.value = rpmNum; vcCell.fill = CALC_FILL;
@@ -3393,7 +3403,7 @@ function onCmpFormInput(e) {
   const R = S.R; R[f] = el.value;
   if (f === 'dia') { recalcCmpAll(R); renderCmpMatrix(); }
   else if (f === 'opCost' || f === 'changeMin' || f === 'production') { refreshCmpFacts(); }
-  else if (f === 'op') { renderCmpMatrix(); }
+  else if (f === 'op') { recalcCmpAll(R); renderCmpMatrix(); }
   else if (f === 'customer' || f === 'workpiece') { updateTitle(); }
   markDirty();
 }
@@ -3482,8 +3492,8 @@ function renderCmpMatrix() {
   h += row('Tool holder', (t, i) => cmpMatCell(R, t, i, 'toolHolder', { label: 'Tool holder' }));
   if (R.op === 'milling') h += row('No. of pockets in cutter', (t, i) => cmpMatCell(R, t, i, 'pockets', { label: 'No. of pockets in cutter', numeric: true, ph: 'e.g. 6' }));
   h += grp('Cutting condition');
-  h += row('Cutting speed, Vc (m/min)', (t, i) => cmpMatCell(R, t, i, 'vc', { label: 'Cutting speed', numeric: true, ph: needDia ? 'needs diameter' : '' }));
-  h += row('RPM', (t, i) => cmpMatCell(R, t, i, 'rpm', { label: 'RPM', numeric: true, ph: needDia ? 'needs diameter' : '' }));
+  h += row('Cutting speed, Vc (m/min)', (t, i) => cmpMatCell(R, t, i, 'vc', { label: 'Cutting speed', numeric: true, ph: cmpDiaFor(R, t) ? '' : 'needs diameter' }));
+  h += row('RPM', (t, i) => cmpMatCell(R, t, i, 'rpm', { label: 'RPM', numeric: true, ph: cmpDiaFor(R, t) ? '' : 'needs diameter' }));
   h += row(feedLabel, (t, i) => cmpMatCell(R, t, i, 'feed', { label: 'Feed rate', numeric: true }));
   h += row('Cutting depth, ap (mm)', (t, i) => cmpMatCell(R, t, i, 'ap', { label: 'Cutting depth' }));
   h += row('Coolant', (t, i) => cmpMatCell(R, t, i, 'coolant', { label: 'Coolant', kind: 'select', options: ['Yes', 'No'] }));
@@ -3549,13 +3559,15 @@ function commitCmpInput(el) {
     t.edges[+el.dataset.edge][el.dataset.k] = el.value; refreshCmpFacts(); markDirty(); return;
   }
   const k = el.dataset.k; t[k] = el.value;
-  if (k === 'vc' || k === 'rpm') {
-    t.src[k] = el.value.trim() === '' ? '' : 'user'; t.sd = k; recalcCmpTool(R, t);
+  if (k === 'vc' || k === 'rpm' || k === 'toolDia') {
+    if (k !== 'toolDia') { t.src[k] = el.value.trim() === '' ? '' : 'user'; t.sd = k; }
+    recalcCmpTool(R, t);
     ['vc', 'rpm'].forEach(kk => {
       const td = $('#cmp-matrix td[data-r="' + kk + '"].t' + ti); if (!td) return;
       const inp = td.querySelector('input'); const v = t[kk] === undefined ? '' : t[kk];
       if (inp && inp.value !== v && inp !== document.activeElement) inp.value = v;
       td.className = 'tc t' + ti + (t.src[kk] === 'calc' ? ' src-calc' : '');
+      if (inp) inp.placeholder = cmpDiaFor(R, t) ? '' : 'needs diameter';
     });
   } else if (k === 'numEdges' || k === 'price' || k === 'cycle' || k === 'pockets') { refreshCmpFacts(); }
   markDirty();

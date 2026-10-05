@@ -85,6 +85,9 @@
       '.st-remind{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:.75rem;padding:.65rem .9rem;margin-bottom:1rem;font-size:.86rem}',
       '.dark .st-remind{background:#431407;border-color:#7c2d12;color:#fed7aa}',
       '.st-remind b{font-weight:700}.st-remind button{background:none;border:0;color:inherit;text-decoration:underline;font-weight:600;cursor:pointer;font-size:.84rem}',
+      '.st-check{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem;background:#f0fdfa;border:1px solid #99f6e4;color:#115e59;border-radius:.75rem;padding:.65rem .9rem;margin-bottom:.75rem;font-size:.86rem}',
+      '.st-check input{border:1px solid #99f6e4;border-radius:.45rem;padding:.3rem .55rem;font-size:.82rem;min-width:220px;background:#fff;color:inherit}',
+      '.st-check.done{background:#f0fdf4;border-color:#bbf7d0;color:#166534}.dark .st-check{background:#042f2e;border-color:#115e59;color:#99f6e4}',
       '.st-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.65rem;margin-bottom:1rem}',
       '.st-tile{background:#fff;border:1px solid #e2e8f0;border-radius:.75rem;padding:.65rem .8rem}.dark .st-tile{background:#1e293b;border-color:#334155}',
       '.st-tile b{display:block;font-size:1.2rem}.st-tile span{font-size:.74rem;color:#64748b}',
@@ -132,7 +135,8 @@
     document.head.appendChild(st);
   }
 
-  var ROOT, meta = null, items = [], alerts = null, stats = null;
+  var ROOT, meta = null, items = [], alerts = null, stats = null, check = null;
+  var canCheck = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(me().role) !== -1;
   var f = { search: '', brand: '', loc: '', status: '', inStock: false };
 
   function field(label, input, req, wide) {
@@ -387,6 +391,25 @@
     return list.length ? list : [''];
   }
 
+  // Saturday: check all the stock, then mark it done (stops the 4 pm reminder).
+  function checkBar() {
+    if (!check || !check.isSaturday) return null;
+    var d = check.doneToday;
+    if (d) return el('div', { class: 'st-check done', id: 'st-check' }, [el('b', { text: '✓ Saturday stock check done' }),
+      el('span', { text: 'by ' + (d.name || '—') + ' at ' + when(d.createdAt) + (d.note ? ' — ' + d.note : '') })]);
+    var note = el('input', { id: 'st-check-note', placeholder: 'Note (optional), e.g. Mumbai count pending' });
+    var btn = canCheck ? el('button', { class: 'st-btn pri sm', id: 'st-check-done', text: '✓ Mark stock check done', onclick: function () {
+      btn.disabled = true;
+      api('POST', '/products/stock/check', { note: note.value.trim() }).then(function (j) { check = j.data; toast('Stock check marked done'); render(); })
+        .catch(function (e) { btn.disabled = false; toast(e.message, 'err'); });
+    } }) : null;
+    return el('div', { class: 'st-check', id: 'st-check' }, [
+      el('b', { text: '🗂 Saturday stock check' }),
+      el('span', { text: 'Check all the stock today — Hand stock, Local stock in every city and state stock. Correct quantities with ± or Upload, then mark it done.' }),
+      canCheck ? note : null, btn
+    ]);
+  }
+
   function remindBar() {
     if (!alerts) return null;
     var s = alerts.summary || {};
@@ -476,7 +499,7 @@
           canEdit ? el('button', { class: 'st-btn pri', id: 'st-upload', text: '⬆ Upload stock', onclick: uploadDialog }) : null
         ])
       ]),
-      remindBar(), tiles(), filters(),
+      checkBar(), remindBar(), tiles(), filters(),
       el('div', { class: 'st-card', id: 'st-list' }, [table()])
     ]));
   }
@@ -494,8 +517,8 @@
   }
   function loadAll() {
     return Promise.all([api('GET', '/products/stock/meta'), api('GET', '/products/stock/stats'), api('GET', '/products/stock/alerts').catch(function () { return { data: null }; }),
-      api('GET', '/products/stock' + itemsQuery())]).then(function (r) {
-      meta = r[0].data; stats = r[1].data; alerts = r[2].data;
+      api('GET', '/products/stock' + itemsQuery()), api('GET', '/products/stock/check').catch(function () { return { data: null }; })]).then(function (r) {
+      meta = r[0].data; stats = r[1].data; alerts = r[2].data; check = r[4].data;
       var d = r[3].data; items = Array.isArray(d) ? d : (d && (d.items || d.data)) || [];
       var keep = document.activeElement && document.activeElement.id === 'st-search';
       render();

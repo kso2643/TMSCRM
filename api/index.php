@@ -222,6 +222,8 @@ try {
             $method === 'GET'   && $c1 === 'stock' && $c2 === 'template' => $sc->template(),
             $method === 'GET'   && $c1 === 'stock' && $c2 === 'meta'     => $sc->meta(),
             $method === 'POST'  && $c1 === 'stock' && $c2 === 'entry'    => $sc->entry(),
+            $method === 'GET'   && $c1 === 'stock' && $c2 === 'check'    => $sc->checkStatus(),
+            $method === 'POST'  && $c1 === 'stock' && $c2 === 'check'    => $sc->checkDone(),
             $method === 'POST'  && $c1 === 'stock' && $c2 !== '' && $c3 === 'adjust'    => $sc->adjust($c2),
             $method === 'GET'   && $c1 === 'stock' && $c2 !== '' && $c3 === 'movements' => $sc->movements($c2),
             $method === 'POST'  && $c1 === 'stock' && $c2 === 'import'   => $sc->import(),

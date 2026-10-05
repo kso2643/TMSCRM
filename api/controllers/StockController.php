@@ -54,7 +54,16 @@ $tail"],
   KEY `StockMovement_stock_idx` (`stockId`, `createdAt`),
   KEY `StockMovement_order_idx` (`orderId`)
 $tail"],
-        ], 'Stock locations (StockLevel / StockMovement)');
+            'StockCheck' => ['create' => "CREATE TABLE IF NOT EXISTS `StockCheck` (
+  `id`        VARCHAR(30)  NOT NULL,
+  `checkDate` DATE         NOT NULL,
+  `userId`    VARCHAR(30)  NOT NULL,
+  `note`      VARCHAR(255)     NULL,
+  `createdAt` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `StockCheck_date_idx` (`checkDate`)
+$tail"],
+        ], 'Stock locations (StockLevel / StockMovement / StockCheck)');
         // One-off: quantities from before locations existed become Hand stock.
         try {
             $old = db()->query("SELECT s.id, s.availableStock FROM `Stock` s WHERE s.availableStock<>0
@@ -529,6 +538,29 @@ class StockController
         $where=$places?implode(', ',array_map(fn($k,$v)=>"$k ($v)",array_keys($places),$places)):'—';
         $msg="Import complete: {$inserted} new, {$updated} updated — quantities set at {$where}".($pickedBrand!==''?" (brand {$pickedBrand})":'').'.'.($skipped?" {$skipped} row(s) skipped (no item code).":'');
         sendSuccess(['inserted'=>$inserted,'updated'=>$updated,'skipped'=>$skipped,'quantitiesSet'=>$qtySet,'location'=>$where,'sheets'=>$sheetReport,'errors'=>$errors],$msg);
+    }
+
+    // GET /api/products/stock/check — Saturday stock check: is it due, who did it, the last checks
+    public function checkStatus(): void
+    {
+        authenticate();
+        $s=db()->query("SELECT c.checkDate, c.createdAt, c.note, u.name FROM `StockCheck` c LEFT JOIN `User` u ON u.id=c.userId ORDER BY c.createdAt DESC LIMIT 8");
+        $rows=$s->fetchAll();
+        $today=date('Y-m-d');
+        $done=array_values(array_filter($rows,fn($r)=>$r['checkDate']===$today));
+        sendSuccess(['isSaturday'=>date('N')==='6','today'=>$today,'doneToday'=>$done?$done[0]:null,'recent'=>$rows,
+                     'nextSaturday'=>date('Y-m-d',strtotime(date('N')==='6'?'today':'next saturday'))]);
+    }
+
+    // POST /api/products/stock/check — mark today's stock check as done { note }
+    public function checkDone(): void
+    {
+        $auth=authenticate(); require_manager($auth);
+        $b=request_body();
+        db()->prepare('INSERT INTO `StockCheck` (id,checkDate,userId,note,createdAt) VALUES (?,?,?,?,?)')
+            ->execute([gen_id(),date('Y-m-d'),$auth['id'],mb_substr(trim((string)($b['note']??'')),0,255)?:null,now_sql()]);
+        log_activity($auth['id'],'STOCK_CHECK_DONE','Stock',null,['date'=>date('Y-m-d')]);
+        $this->checkStatus();
     }
 
     // POST /api/products/stock/entry — add stock by hand: { itemCode, itemName?, brand?, locType, state, quantity, mode: add|set, note }

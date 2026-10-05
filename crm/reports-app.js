@@ -169,7 +169,7 @@
     var box = el('div', { class: 'card rp-backup p-5 space-y-3 mt-6' });
     var info = el('p', { class: 'text-sm text-muted', text: 'Loading database summary…' });
     var msg = el('div');
-    var file = el('input', { type: 'file', accept: '.json,application/json', class: 'hidden' });
+    var file = el('input', { type: 'file', accept: '.zip,.json,application/zip,application/json', class: 'hidden', id: 'rp-backup-file' });
 
     fetch(API + '/api/backup/summary', { headers: { Authorization: 'Bearer ' + (token() || '') } })
       .then(function (r) { return r.json(); })
@@ -178,22 +178,23 @@
         info.textContent = j.data.tables.length + ' tables · ' + j.data.totalRows.toLocaleString('en-IN') + ' records in the database';
       }).catch(function (e) { info.textContent = e.message; });
 
-    var exp = el('button', { class: 'btn-primary', type: 'button' }, [icon('Download', 'w-4 h-4'), ' Export full backup']);
+    var exp = el('button', { class: 'btn-primary', type: 'button' }, [icon('Download', 'w-4 h-4'), ' Export company data (.zip)']);
+    exp.id = 'rp-backup-export';
     exp.addEventListener('click', function () {
       exp.setAttribute('disabled', ''); msg.innerHTML = '';
-      msg.appendChild(el('p', { class: 'rp-msg', text: 'Preparing backup… this can take a minute for a large database.' }));
-      download('/backup/export', 'crm-backup-' + iso(new Date()) + '.json').then(function (name) {
-        msg.innerHTML = ''; msg.appendChild(el('p', { class: 'rp-msg rp-ok', text: 'Backup saved as ' + name + '. Keep it somewhere safe — it contains all CRM data.' }));
+      msg.appendChild(el('p', { class: 'rp-msg', text: 'Preparing the company data file (all records + uploaded photos and documents)… this can take a minute.' }));
+      download('/backup/export', 'crm-company-data-' + iso(new Date()) + '.zip').then(function (name) {
+        msg.innerHTML = ''; msg.appendChild(el('p', { class: 'rp-msg rp-ok', text: 'Saved as ' + name + '. Keep it somewhere safe — it contains all company data.' }));
       }).catch(function (e) { msg.innerHTML = ''; msg.appendChild(el('p', { class: 'rp-msg rp-err', text: e.message })); })
         .then(function () { exp.removeAttribute('disabled'); });
     });
 
-    var imp = el('button', { class: 'btn-secondary', type: 'button', onclick: function () { file.click(); } }, [icon('Upload', 'w-4 h-4'), ' Import backup…']);
+    var imp = el('button', { class: 'btn-secondary', type: 'button', onclick: function () { file.click(); } }, [icon('Upload', 'w-4 h-4'), ' Import company data…']);
     file.addEventListener('change', function () {
       var f = file.files[0];
       file.value = '';
       if (!f) return;
-      if (!confirm('Import "' + f.name + '"?\n\nRecords in the backup are added, and records with the same ID are updated to the backup’s values. Nothing that isn’t in the backup is deleted.\n\nTip: export a fresh backup first so you can go back.')) return;
+      if (!confirm('Import "' + f.name + '"?\n\nEvery page gets the data from this file: records are added, records with the same ID are updated to the file’s values, missing tables are created and uploaded photos / documents are restored. Nothing that isn’t in the file is deleted.\n\nTip: export the current data first so you can go back.')) return;
       var fd = new FormData(); fd.append('file', f);
       imp.setAttribute('disabled', ''); msg.innerHTML = '';
       msg.appendChild(el('p', { class: 'rp-msg', text: 'Importing ' + f.name + '…' }));
@@ -204,6 +205,9 @@
           if (!j.success) throw new Error(j.message);
           var d = j.data;
           msg.appendChild(el('p', { class: 'rp-msg rp-ok', text: 'Imported ' + d.totalRows.toLocaleString('en-IN') + ' records from the backup of ' + (d.backupDate ? new Date(d.backupDate).toLocaleString('en-IN') : 'unknown date') + '.' }));
+          if (d.restoredFiles) msg.appendChild(el('p', { class: 'rp-msg rp-ok', text: d.restoredFiles + ' uploaded files (photos, voice notes, documents) restored.' }));
+          if (d.createdTables && d.createdTables.length) msg.appendChild(el('p', { class: 'rp-msg', text: 'Tables created: ' + d.createdTables.join(', ') }));
+          if (d.addedColumns && d.addedColumns.length) msg.appendChild(el('p', { class: 'rp-msg', text: 'Columns added: ' + d.addedColumns.join(', ') }));
           if (d.skippedTables && d.skippedTables.length) msg.appendChild(el('p', { class: 'rp-msg', text: 'Skipped (not in this database): ' + d.skippedTables.join(', ') }));
           msg.appendChild(el('table', { class: 'rp-tbl mt-2' }, [el('tbody', {}, d.tables.map(function (t) {
             return el('tr', {}, [el('td', { text: t.table }), el('td', { text: t.rows + ' records' })]);
@@ -215,13 +219,13 @@
     box.appendChild(el('div', { class: 'flex items-start gap-3' }, [
       el('div', { class: 'rp-ic', style: '--c:#4338ca' }, [icon('Database')]),
       el('div', { class: 'flex-1' }, [
-        el('p', { class: 'rp-t', text: 'Full data backup' }),
-        el('p', { class: 'rp-d', text: 'Every table — customers, meetings, quotations, orders, tasks, trials, attendance, payroll and the rest — in one file. Super Admin only.' }),
+        el('p', { class: 'rp-t', text: 'Company data — export / import' }),
+        el('p', { class: 'rp-d', text: 'The whole company in one file: customers, meetings, quotations, orders, price requests, stock, tasks, trials, appointments, attendance, leave, payroll and every other page — plus uploaded photos, voice notes and documents. Import it here (on this or a new CRM) and every page shows the data. Super Admin only.' }),
         info
       ])
     ]));
     box.appendChild(el('div', { class: 'flex gap-2 flex-wrap' }, [exp, imp, file]));
-    box.appendChild(el('p', { class: 'rp-warn', text: 'The backup includes login data (password hashes). Uploaded files such as PO documents and photos are not inside the file — back up the api/uploads folder from your hosting file manager as well.' }));
+    box.appendChild(el('p', { class: 'rp-warn', text: 'The file includes login data (password hashes) — keep it private. Older .json backups can still be imported (data only, no files).' }));
     box.appendChild(msg);
     return box;
   }

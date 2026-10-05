@@ -269,6 +269,18 @@ class AlertFeedController
                             '/stock/?status=low', $morning);
                     }
                 }
+                // Saturday: check all the stock (9:30), and a second nudge at 4 pm if nobody marked it done.
+                if (date('N') === '6') {
+                    $sat = date('Y-m-d');
+                    $doneS = db()->prepare('SELECT COUNT(*) FROM `StockCheck` WHERE checkDate=?'); $doneS->execute([$sat]);
+                    $isDone = (int) $doneS->fetchColumn() > 0;
+                    foreach ([['09:30:00', 'stock-check-', 'Saturday stock check', 'Check all the stock today — hand stock, local stock (every city) and state stock — and update the Stock page. Press "Mark stock check done" when finished.'],
+                              ['16:00:00', 'stock-check-late-', 'Stock check not done yet', 'Today\'s Saturday stock check hasn\'t been marked done. Please check all the stock before closing.']] as $i => [$at, $idp, $title, $body]) {
+                        $when = "$sat $at";
+                        if ($i === 1 && $isDone) continue;
+                        if (date('Y-m-d H:i:s') >= $when && $when > $since) $add($idp . $sat, 'STOCK_CHECK', $title, $body, '/stock/', $when);
+                    }
+                }
             } catch (Throwable $e) { error_log('Stock alerts: ' . $e->getMessage()); }
         }
 

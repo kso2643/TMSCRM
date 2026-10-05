@@ -102,7 +102,6 @@
     { label: 'Users',         href: '/admin/users/',         icon: 'users',    roles: ADMIN_ROLES },
     { label: 'HR',            href: '/hr/',                  icon: 'idcard',   roles: ADMIN_ROLES },
     { label: 'Payroll',       href: '/payroll/',              icon: 'file',    roles: ADMIN_ROLES },
-    { label: 'Approvals',     href: '/admin/approvals/',     icon: 'check',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
     { label: 'Reports',       href: '/admin/reports/',       icon: 'chart',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
     { label: 'Activity logs', href: '/admin/activity/',      icon: 'activity', roles: ['SUPER_ADMIN','ADMIN','MANAGER'] }
   ];
