@@ -78,7 +78,7 @@
   // app and as the newer hand-coded page. A React link would open the old one
   // (and a refresh the new one), so on React pages any click on such a link is
   // turned into a normal page load.
-  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves)\/?$/;
+  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock)\/?$/;
   function hardLinks() {
     if (!window.__next_f) return; // only the compiled React pages need this
     document.addEventListener('click', function (e) {
@@ -483,6 +483,7 @@
     TASK_COMPLETED:         { color: '#16a34a', icon: '✅' },
     PRICE_REQUEST_NEW:      { color: '#d97706', icon: '₹' },
     PRICE_REQUEST_REMINDER: { color: '#dc2626', icon: '⏰' },
+    STOCK_LOW:              { color: '#ea580c', icon: '📦' },
     PRICE_REQUEST_ANSWERED: { color: '#16a34a', icon: '₹' },
     TRIAL_REQUESTED:        { color: '#7c3aed', icon: '🧪' },
     TRIAL_DECIDED:          { color: '#7c3aed', icon: '🧪' },

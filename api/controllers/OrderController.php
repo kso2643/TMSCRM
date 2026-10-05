@@ -535,6 +535,7 @@ class OrderController
         ]);
         $this->replaceItems($id, $items);
 
+        StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
         log_activity($auth['id'], 'ORDER_CREATED', 'CustomerOrder', $id, ['customer' => $customer['companyName'], 'orderType' => $orderType]);
         $this->show($id, 201);
     }
@@ -594,6 +595,7 @@ class OrderController
             $this->replaceItems($id, $items);
         }
 
+        StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
         log_activity($auth['id'], 'ORDER_UPDATED', 'CustomerOrder', $id, []);
         $this->show($id);
     }
@@ -657,6 +659,7 @@ class OrderController
         elseif ($status === 'PENDING' || $status === 'NOT_DELIVERED') $this->setAllItemsSupplied($id, false);
         if ($status === 'DELIVERED' || $status === 'PARTIALLY_DELIVERED') $this->autoMarkProcured($id);
 
+        StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
         log_activity($auth['id'], 'ORDER_DELIVERY_UPDATED', 'CustomerOrder', $id, ['status' => $status]);
         $this->show($id);
     }
@@ -720,6 +723,7 @@ class OrderController
         )->execute([$status, $reason, $deliveredDate, $now, $id]);
         if ($ticked > 0) $this->autoMarkProcured($id);
 
+        StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
         log_activity($auth['id'], 'ORDER_SUPPLY_UPDATED', 'CustomerOrder', $id, ['status' => $status, 'supplied' => $ticked, 'of' => $total]);
         $this->show($id);
     }
@@ -863,6 +867,7 @@ class OrderController
         $this->deleteFileIfAny($row);
         db()->prepare('DELETE FROM `CustomerOrder` WHERE id=?')->execute([$id]); // items cascade
 
+        StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
         log_activity($auth['id'], 'ORDER_DELETED', 'CustomerOrder', $id, ['customer' => $row['companyName']]);
         sendSuccess([], 'Order deleted');
     }
