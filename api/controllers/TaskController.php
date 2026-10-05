@@ -65,7 +65,104 @@ class TaskController
                 'create'   => "CREATE TABLE IF NOT EXISTS `AdminTask` ($cols$fks\n$tail",
                 'fallback' => "CREATE TABLE IF NOT EXISTS `AdminTask` ($cols\n$tail",
             ],
+            // General work timer — time worked that isn't on a queued task
+            // (one row per start → stop session; endedAt NULL while running).
+            'GeneralTimer' => [
+                'create' => "CREATE TABLE IF NOT EXISTS `GeneralTimer` (
+  `id`        VARCHAR(30)  NOT NULL,
+  `userId`    VARCHAR(30)  NOT NULL,
+  `note`      VARCHAR(255)     NULL,
+  `startedAt` DATETIME     NOT NULL,
+  `endedAt`   DATETIME         NULL,
+  `seconds`   INT          NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `GeneralTimer_user_started_idx` (`userId`, `startedAt`)
+$tail",
+            ],
         ];
+    }
+
+    /** Seconds of general-timer time per user since $since (running sessions count up to now). */
+    private static function generalSeconds(string $since, ?string $userId = null): array
+    {
+        $now = now_sql(); // PHP clock, same as the stored timestamps (the DB server's zone may differ)
+        $sql = "SELECT userId, SUM(CASE WHEN endedAt IS NULL THEN GREATEST(0, TIMESTAMPDIFF(SECOND, GREATEST(startedAt, ?), '$now'))
+                                        ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, GREATEST(startedAt, ?), endedAt)) END) AS secs
+                FROM `GeneralTimer` WHERE (endedAt IS NULL OR endedAt >= ?)" . ($userId ? ' AND userId=?' : '') . ' GROUP BY userId';
+        $s = db()->prepare($sql);
+        $s->execute($userId ? [$since, $since, $since, $userId] : [$since, $since, $since]);
+        $out = [];
+        foreach ($s->fetchAll() as $r) $out[$r['userId']] = (int) $r['secs'];
+        return $out;
+    }
+
+    private static function runningGeneral(string $userId)
+    {
+        $s = db()->prepare('SELECT * FROM `GeneralTimer` WHERE userId=? AND endedAt IS NULL ORDER BY startedAt DESC LIMIT 1');
+        $s->execute([$userId]);
+        return $s->fetch() ?: null;
+    }
+
+    /** Stops the user's running general timer (a task timer is starting). */
+    private static function stopGeneral(string $userId): void
+    {
+        $run = self::runningGeneral($userId);
+        if (!$run) return;
+        db()->prepare('UPDATE `GeneralTimer` SET endedAt=?, seconds=? WHERE id=?')
+            ->execute([now_sql(), max(0, time() - strtotime($run['startedAt'])), $run['id']]);
+    }
+
+    // GET /api/tasks/general — my general timer: running session, today / this week totals, recent sessions
+    public function general(): void
+    {
+        $auth = authenticate();
+        $uid = (is_admin_tier($auth['role']) && qp('userId')) ? qp('userId') : $auth['id'];
+        $today = date('Y-m-d 00:00:00');
+        $week = date('Y-m-d 00:00:00', strtotime('monday this week'));
+        $run = self::runningGeneral($uid);
+        $s = db()->prepare("SELECT id, note, startedAt, endedAt, seconds FROM `GeneralTimer` WHERE userId=? ORDER BY startedAt DESC LIMIT 15");
+        $s->execute([$uid]);
+        sendSuccess([
+            'running'      => $run ? ['id' => $run['id'], 'note' => $run['note'], 'startedAt' => $run['startedAt'],
+                                      'elapsedSeconds' => max(0, time() - strtotime($run['startedAt']))] : null,
+            'secondsToday' => self::generalSeconds($today, $uid)[$uid] ?? 0,
+            'secondsWeek'  => self::generalSeconds($week, $uid)[$uid] ?? 0,
+            'sessions'     => array_map(function ($r) {
+                $r['seconds'] = $r['endedAt'] ? (int) $r['seconds'] : max(0, time() - strtotime($r['startedAt']));
+                return $r;
+            }, $s->fetchAll()),
+        ]);
+    }
+
+    // POST /api/tasks/general/start — { note? }
+    public function generalStart(): void
+    {
+        $auth = authenticate();
+        if (self::runningGeneral($auth['id'])) sendError('Your general timer is already running.', 400);
+        $b = request_body();
+        $note = mb_substr(trim((string) ($b['note'] ?? '')), 0, 255) ?: null;
+        // One clock at a time: a running task timer is paused (resume it later from My tasks).
+        $act = $this->activeTask($auth['id']);
+        if ($act && $act['status'] === 'IN_PROGRESS') {
+            db()->prepare("UPDATE `AdminTask` SET status='PAUSED',workedSeconds=?,lastResumedAt=NULL,updatedAt=? WHERE id=?")
+                ->execute([(int) $act['workedSeconds'] + self::secondsSince($act['lastResumedAt']), now_sql(), $act['id']]);
+            log_activity($auth['id'], 'TASK_PAUSED', 'AdminTask', $act['id'], ['reason' => 'general timer started']);
+        }
+        db()->prepare('INSERT INTO `GeneralTimer` (id,userId,note,startedAt) VALUES (?,?,?,?)')->execute([gen_id(), $auth['id'], $note, now_sql()]);
+        log_activity($auth['id'], 'GENERAL_TIMER_STARTED', 'GeneralTimer', null, ['note' => $note]);
+        $this->general();
+    }
+
+    // POST /api/tasks/general/stop
+    public function generalStop(): void
+    {
+        $auth = authenticate();
+        $run = self::runningGeneral($auth['id']);
+        if (!$run) sendError('Your general timer is not running.', 400);
+        $secs = max(0, time() - strtotime($run['startedAt']));
+        db()->prepare('UPDATE `GeneralTimer` SET endedAt=?, seconds=? WHERE id=?')->execute([now_sql(), $secs, $run['id']]);
+        log_activity($auth['id'], 'GENERAL_TIMER_STOPPED', 'GeneralTimer', $run['id'], ['seconds' => $secs]);
+        $this->general();
     }
 
     private function fetchRow(string $id): ?array
@@ -226,21 +323,30 @@ class TaskController
         $d->execute([$today, $today]);
         foreach ($d->fetchAll() as $r) $done[$r['assignedToId']] = ['n' => (int) $r['n'], 'secs' => (int) $r['secs']];
 
+        // General timer (work not on a task): running session + today's total.
+        $genToday = self::generalSeconds($today . ' 00:00:00');
+        $genRun = [];
+        foreach (db()->query("SELECT userId, note, startedAt FROM `GeneralTimer` WHERE endedAt IS NULL")->fetchAll() as $r) {
+            $genRun[$r['userId']] = ['note' => $r['note'], 'startedAt' => $r['startedAt'], 'elapsedSeconds' => max(0, time() - strtotime($r['startedAt']))];
+        }
+
         $people = [];
         foreach ($users as $u) {
             $cur = $active[$u['id']] ?? null;
             $people[] = [
                 'user'               => $u,
                 'current'            => $cur,
-                'state'              => $cur ? ($cur['running'] ? 'RUNNING' : 'PAUSED') : (($queued[$u['id']] ?? 0) ? 'WAITING' : 'IDLE'),
+                'state'              => $cur && $cur['running'] ? 'RUNNING' : (isset($genRun[$u['id']]) ? 'GENERAL' : ($cur ? 'PAUSED' : (($queued[$u['id']] ?? 0) ? 'WAITING' : 'IDLE'))),
                 'queuedCount'        => $queued[$u['id']] ?? 0,
                 'completedToday'     => $done[$u['id']]['n'] ?? 0,
                 // Time on tasks finished today plus the current task's timer so far.
                 'secondsToday'       => ($done[$u['id']]['secs'] ?? 0) + ($cur ? $cur['elapsedSeconds'] : 0),
+                'general'            => $genRun[$u['id']] ?? null,
+                'generalSecondsToday'=> $genToday[$u['id']] ?? 0,
             ];
         }
         // Running first, then paused, waiting, idle; alphabetical within each.
-        $rank = ['RUNNING' => 0, 'PAUSED' => 1, 'WAITING' => 2, 'IDLE' => 3];
+        $rank = ['RUNNING' => 0, 'GENERAL' => 1, 'PAUSED' => 2, 'WAITING' => 3, 'IDLE' => 4];
         usort($people, fn($a, $b) => [$rank[$a['state']], $a['user']['name']] <=> [$rank[$b['state']], $b['user']['name']]);
 
         sendSuccess(['people' => $people]);
@@ -253,7 +359,8 @@ class TaskController
         $where = []; $params = [];
 
         $seeAll = is_admin_tier($auth['role']) && !qp('mine');
-        if (!$seeAll) { $where[] = 't.assignedToId=?'; $params[] = $auth['id']; }
+        if (qp('assignedByMe')) { $where[] = 't.assignedById=? AND t.assignedToId<>?'; $params[] = $auth['id']; $params[] = $auth['id']; }
+        elseif (!$seeAll) { $where[] = 't.assignedToId=?'; $params[] = $auth['id']; }
         elseif (qp('assignedToId')) { $where[] = 't.assignedToId=?'; $params[] = qp('assignedToId'); }
 
         $status = strtoupper((string) qp('status', 'OPEN'));
@@ -455,6 +562,7 @@ class TaskController
         $now = now_sql();
         db()->prepare("UPDATE `AdminTask` SET status='IN_PROGRESS',startedAt=?,lastResumedAt=?,queuePosition=0,updatedAt=? WHERE id=?")
             ->execute([$now, $now, $now, $row['id']]);
+        self::stopGeneral($row['assignedToId']);
     }
 
     // PATCH /api/tasks/:id/pause
@@ -484,6 +592,7 @@ class TaskController
 
         $now = now_sql();
         db()->prepare("UPDATE `AdminTask` SET status='IN_PROGRESS',lastResumedAt=?,updatedAt=? WHERE id=?")->execute([$now, $now, $id]);
+        self::stopGeneral($row['assignedToId']);
         log_activity($auth['id'], 'TASK_RESUMED', 'AdminTask', $id, []);
         $this->send($id, 'Task resumed');
     }

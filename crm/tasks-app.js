@@ -160,8 +160,8 @@
       '.tx-overdue{color:#dc2626;font-weight:600}',
       '.mt-5{margin-top:1.25rem}',
       // Team live
-      '.tx-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}',
-      '@media(min-width:768px){.tx-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}',
+      '.tx-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem}',
+      '@media(min-width:768px){.tx-tiles{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}}',
       '.tx-tile{text-align:left;cursor:pointer;border:1px solid #e2e8f0;background:#fff;border-radius:.75rem;padding:.75rem 1rem}',
       '.dark .tx-tile{background:#0f172a;border-color:#334155}',
       '.tx-tile-on{border-color:#1e3a5f;box-shadow:0 0 0 1px #1e3a5f}',
@@ -172,7 +172,10 @@
       '@media(min-width:768px){.tx-people{grid-template-columns:repeat(2,minmax(0,1fr))}}',
       '@media(min-width:1280px){.tx-people{grid-template-columns:repeat(3,minmax(0,1fr))}}',
       '.tx-person{cursor:pointer;border-left:4px solid #cbd5e1;padding:1rem;display:flex;flex-direction:column;gap:.6rem}',
-      '.tx-person-RUNNING{border-left-color:#22c55e}.tx-person-PAUSED{border-left-color:#f59e0b}',
+      '.tx-person-RUNNING{border-left-color:#22c55e}.tx-person-PAUSED{border-left-color:#f59e0b}.tx-person-GENERAL{border-left-color:#0ea5e9}',
+      '.tx-state-GENERAL{background:#e0f2fe;color:#075985}.tx-gen-box{background:#f0f9ff}.dark .tx-gen-box{background:#0c4a6e33}',
+      '.tx-general{border-top:3px solid #0ea5e9}.tx-general-log{max-height:180px;overflow:auto;border-top:1px solid #e2e8f0;padding-top:.25rem}.dark .tx-general-log{border-color:#334155}',
+      '.grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}',
       '.tx-person-WAITING{border-left-color:#3b82f6}.tx-person-IDLE{border-left-color:#cbd5e1}',
       '.tx-person-open{box-shadow:0 0 0 2px #1e3a5f}',
       '.dark .tx-person-open{box-shadow:0 0 0 2px #60a5fa}',
@@ -213,7 +216,9 @@
   // ── page ─────────────────────────────────────────────────────────────
   function mount(root) {
     injectCss();
-    var tabs = [['mine', 'My tasks']];
+    // Admins see their own queue and what they've handed out as separate tabs.
+    var tabs = [['mine', canManage() ? 'Own tasks' : 'My tasks']];
+    if (canManage()) tabs.push(['assigned', 'Assigned by me']);
     if (isAdminTier()) { tabs.push(['team', 'Team live']); tabs.push(['all', 'All tasks']); }
     tabs.push(['completed', 'Completed']);
 
@@ -256,6 +261,7 @@
       reload = t === 'mine' ? myTasksTab(panel)
              : t === 'completed' ? completedTab(panel)
              : t === 'team' ? teamTab(panel)
+             : t === 'assigned' ? assignedTab(panel)
              : allTasksTab(panel);
     }
 
@@ -316,9 +322,12 @@
   // ── My tasks ─────────────────────────────────────────────────────────
   function myTasksTab(p) {
     var open = [], done = [], err = '', busy = false, completing = false, note = '';
+    // Kept across re-renders so its note / state survive. Starting it pauses a running task, so reload the queue too.
+    var general = generalTimerCard(function () { load(true); });
 
-    function load() {
+    function load(skipGeneral) {
       if (!open.length && !done.length) loading(p);
+      if (skipGeneral !== true) general.reload(); // a task start / resume stops the general timer
       Promise.all([api('GET', '/tasks?mine=1'), api('GET', '/tasks?mine=1&status=COMPLETED&limit=10')]).then(function (r) {
         open = r[0].data.tasks || [];
         done = r[1].data.tasks || [];
@@ -403,6 +412,7 @@
           el('span', { class: 'tx-timer text-xs text-muted tx-nowrap', text: fmtDurationShort(t.elapsedSeconds) })
         ]));
       });
+      right.appendChild(general.node);
       right.appendChild(dCard);
 
       p.appendChild(el('div', { class: 'tx-grid' }, [left, right]));
@@ -457,8 +467,116 @@
     return load;
   }
 
+  // ── General timer ────────────────────────────────────────────────────
+  // For work that isn't a queued task (travel, calls, office work…).
+  // Server-side like the task timer; admins see it on Team live.
+  function generalTimerCard(onChange) {
+    var node = el('div', { class: 'card p-4 space-y-3 tx-general', id: 'tx-general' });
+    var data = null, busy = false, err = '', noteVal = '', showLog = false;
+    function load() {
+      api('GET', '/tasks/general').then(function (r) { data = r.data; render(); }).catch(function (e) { err = e.message; render(); });
+    }
+    function act(path, body) {
+      if (busy) return;
+      busy = true; err = ''; render();
+      api('POST', '/tasks/general/' + path, body || {}).then(function (r) { busy = false; data = r.data; noteVal = ''; render(); if (onChange) onChange(); })
+        .catch(function (e) { busy = false; err = e.message; render(); });
+    }
+    function render() {
+      node.innerHTML = '';
+      var run = data && data.running;
+      node.appendChild(el('div', { class: 'flex items-center justify-between gap-2' }, [
+        el('span', { class: 'flex items-center gap-2 text-sm font-semibold' }, [run ? el('span', { class: 'tx-dot tx-dot-run' }) : null, 'General timer']),
+        el('span', { class: 'text-xs text-muted', text: 'work not on a task · pauses your task timer' })
+      ]));
+      if (!data) { node.appendChild(el('p', { class: 'text-sm text-muted', text: err || 'Loading…' })); return; }
+      node.appendChild(el('div', { class: 'flex items-end justify-between gap-3 flex-wrap' }, [
+        el('div', {}, [
+          timerEl({ elapsedSeconds: run ? run.elapsedSeconds : 0, running: !!run }, 'tx-timer-mid'),
+          el('p', { class: 'text-xs text-muted mt-0.5', text: run ? (run.note ? '“' + run.note + '” · ' : '') + 'since ' + fmtDateTime(run.startedAt) : 'Not running' })
+        ]),
+        el('div', { class: 'text-right' }, [
+          el('p', { class: 'text-xs text-muted', text: 'Today' }),
+          timerEl({ elapsedSeconds: data.secondsToday, running: !!run }, 'text-sm font-semibold'),
+          el('p', { class: 'text-xs text-muted mt-1', text: 'This week ' + fmtDurationShort(data.secondsWeek) })
+        ])
+      ]));
+      if (err) node.appendChild(el('p', { class: 'text-xs text-red-600', text: err }));
+      var dis = busy ? ' tx-disabled' : '';
+      if (run) {
+        node.appendChild(el('button', { class: 'btn-secondary w-full' + dis, id: 'tx-general-stop', text: '■ Stop general timer', onclick: function () { act('stop'); } }));
+      } else {
+        var inp = el('input', { class: INPUT, id: 'tx-general-note', placeholder: 'What are you working on? (optional)', maxlength: '255' });
+        inp.value = noteVal;
+        inp.addEventListener('input', function () { noteVal = inp.value; });
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') act('start', { note: noteVal }); });
+        node.appendChild(inp);
+        node.appendChild(el('button', { class: 'btn-primary w-full' + dis, id: 'tx-general-start', text: '▶ Start general timer', onclick: function () { act('start', { note: noteVal }); } }));
+      }
+      var sessions = (data.sessions || []).filter(function (x) { return x.endedAt; });
+      if (sessions.length) {
+        node.appendChild(el('button', { class: 'tx-link text-xs', text: (showLog ? 'Hide' : 'Show') + ' recent sessions (' + sessions.length + ')', onclick: function () { showLog = !showLog; render(); } }));
+        if (showLog) node.appendChild(el('div', { class: 'tx-general-log' }, sessions.map(function (x) {
+          return el('div', { class: 'flex justify-between gap-2 text-xs py-1' }, [
+            el('span', { class: 'truncate', text: fmtDateTime(x.startedAt) + (x.note ? ' · ' + x.note : '') }),
+            el('span', { class: 'tx-timer tx-nowrap font-semibold', text: fmtDurationShort(x.seconds) })
+          ]);
+        })));
+      }
+    }
+    render();
+    load();
+    return { node: node, reload: load };
+  }
+
+  // ── Assigned by me (Super Admin / Admin) ─────────────────────────────
+  function assignedTab(p) {
+    var tasks = [], showDone = false, who = '';
+    function load() {
+      if (!tasks.length) loading(p);
+      api('GET', '/tasks?assignedByMe=1&status=' + (showDone ? 'ALL' : 'OPEN') + '&limit=300').then(function (r) { tasks = r.data.tasks || []; render(); })
+        .catch(function (e) { errorBox(p, e.message, load); });
+    }
+    function render() {
+      p.innerHTML = '';
+      var people = {};
+      tasks.forEach(function (t) { people[t.assignedTo.id] = t.assignedTo.name; });
+      var sel = el('select', { class: INPUT + ' tx-assigned-who', style: 'max-width:240px' }, [el('option', { value: '', text: 'Everyone' })].concat(
+        Object.keys(people).sort(function (a, b) { return people[a] < people[b] ? -1 : 1; }).map(function (id) { return el('option', { value: id, text: people[id] }); })));
+      sel.value = who; sel.addEventListener('change', function () { who = sel.value; render(); });
+      var chk = el('input', { type: 'checkbox', id: 'tx-assigned-done' }); chk.checked = showDone;
+      chk.addEventListener('change', function () { showDone = chk.checked; tasks = []; load(); });
+      var shown = tasks.filter(function (t) { return !who || t.assignedTo.id === who; });
+      var counts = { open: 0, running: 0, done: 0 };
+      shown.forEach(function (t) { if (t.status === 'COMPLETED') counts.done++; else counts.open++; if (t.status === 'IN_PROGRESS') counts.running++; });
+      p.appendChild(el('div', { class: 'flex items-center gap-3 flex-wrap mb-3' }, [
+        sel, el('label', { class: 'flex items-center gap-2 text-sm' }, [chk, 'Include completed']),
+        el('span', { class: 'text-xs text-muted ml-auto', text: counts.open + ' open · ' + counts.running + ' being worked on' + (showDone ? ' · ' + counts.done + ' completed' : '') })
+      ]));
+      if (!shown.length) { p.appendChild(el('div', { class: 'card p-10 text-center text-muted', text: 'You haven’t assigned any ' + (showDone ? '' : 'open ') + 'tasks.' })); return; }
+      var box = el('div', { class: 'card overflow-hidden', id: 'tx-assigned-list' });
+      shown.forEach(function (t) {
+        box.appendChild(el('div', { class: 'tx-row flex-wrap' }, [
+          el('span', { class: 'badge ' + STATUS_BADGE[t.status], text: STATUS_LABEL[t.status] || t.status }),
+          el('div', { class: 'flex-1 min-w-0' }, [
+            el('p', { class: 'text-sm font-medium truncate', text: t.title }),
+            el('p', { class: 'text-xs text-muted truncate', text: 'For ' + (t.assignedTo.name || '—') + (t.customer ? ' · ' + t.customer.companyName : '') +
+              (t.startedAt ? ' · started ' + fmtDateTime(t.startedAt) : '') + (t.completedAt ? ' · finished ' + fmtDateTime(t.completedAt) : '') })
+          ]),
+          dueEl(t),
+          el('span', { class: 'badge ' + PRIORITY_BADGE[t.priority], text: labelOf(PRIORITIES, t.priority) }),
+          t.status === 'QUEUED' ? el('span', { class: 'text-xs text-muted tx-nowrap', text: '—' }) : timerEl(t, 'text-sm font-semibold tx-nowrap'),
+          t.status !== 'COMPLETED' ? el('button', { class: 'tx-link text-xs', text: 'Edit', onclick: function () { openTaskDialog(t, load); } }) : null
+        ]));
+      });
+      p.appendChild(box);
+    }
+    load();
+    return load;
+  }
+
   // ── Team live (admin-tier) ───────────────────────────────────────────
-  var STATE_LABEL = { RUNNING: 'Working now', PAUSED: 'Paused', WAITING: 'Not started', IDLE: 'No tasks' };
+  var STATE_LABEL = { RUNNING: 'Working now', GENERAL: 'General timer', PAUSED: 'Paused', WAITING: 'Not started', IDLE: 'No tasks' };
   function teamTab(p) {
     var people = [], filter = 'ALL', openId = null, detail = {}, loaded = false;
 
@@ -483,7 +601,7 @@
     function render() {
       p.innerHTML = '';
       var tiles = el('div', { class: 'tx-tiles mb-4' });
-      [['ALL', 'Everyone', people.length], ['RUNNING', 'Working now', count('RUNNING')], ['PAUSED', 'Paused', count('PAUSED')],
+      [['ALL', 'Everyone', people.length], ['RUNNING', 'Working now', count('RUNNING')], ['GENERAL', 'On general timer', count('GENERAL')], ['PAUSED', 'Paused', count('PAUSED')],
        ['WAITING', 'Have tasks, not started', count('WAITING')]].forEach(function (t) {
         tiles.appendChild(el('button', {
           class: 'tx-tile' + (filter === t[0] ? ' tx-tile-on' : ''),
@@ -529,27 +647,38 @@
           el('p', { class: 'text-xs text-muted truncate', text: (u.role || '').replace('_', ' ').toLowerCase() + (u.department ? ' · ' + u.department : '') })
         ]),
         el('span', { class: 'tx-state tx-state-' + x.state }, [
-          x.state === 'RUNNING' ? el('span', { class: 'tx-dot tx-dot-run' }) : x.state === 'PAUSED' ? el('span', { class: 'tx-dot tx-dot-pause' }) : null,
+          x.state === 'RUNNING' || x.state === 'GENERAL' ? el('span', { class: 'tx-dot tx-dot-run' }) : x.state === 'PAUSED' ? el('span', { class: 'tx-dot tx-dot-pause' }) : null,
           STATE_LABEL[x.state]
         ])
       ]));
 
+      if (x.general) {
+        card.appendChild(el('div', { class: 'tx-muted-box tx-gen-box' }, [
+          el('p', { class: 'text-xs text-muted', text: 'General timer' + (x.general.note ? ' — “' + x.general.note + '”' : '') }),
+          el('div', { class: 'flex items-end justify-between gap-2 mt-1' }, [
+            timerEl({ elapsedSeconds: x.general.elapsedSeconds, running: true }, 'tx-timer-mid'),
+            el('span', { class: 'text-xs text-muted', text: 'since ' + fmtDateTime(x.general.startedAt) })
+          ])
+        ]));
+      }
       if (c) {
         card.appendChild(el('div', { class: 'tx-muted-box' }, [
-          el('p', { class: 'text-xs text-muted', text: x.state === 'RUNNING' ? 'Current task' : 'Paused task' }),
+          el('p', { class: 'text-xs text-muted', text: c.running ? 'Current task' : 'Paused task' }),
           el('p', { class: 'text-sm font-medium truncate', text: c.title }),
           el('div', { class: 'flex items-end justify-between gap-2 mt-1' }, [
             timerEl(c, 'tx-timer-mid'),
             el('span', { class: 'text-xs text-muted', text: 'since ' + fmtDateTime(c.startedAt) })
           ])
         ]));
-      } else {
+      } else if (!x.general) {
         card.appendChild(el('div', { class: 'tx-muted-box text-sm text-muted', text: x.queuedCount ? 'Has tasks waiting but hasn’t started one.' : 'Nothing assigned right now.' }));
       }
 
-      var todayTimer = timerEl({ elapsedSeconds: x.secondsToday, running: x.state === 'RUNNING' }, 'text-sm font-semibold');
-      card.appendChild(el('div', { class: 'grid grid-cols-3 gap-2 text-center' }, [
-        miniStat('Time today', todayTimer),
+      var todayTimer = timerEl({ elapsedSeconds: x.secondsToday, running: !!(c && c.running) }, 'text-sm font-semibold');
+      var genTimer = timerEl({ elapsedSeconds: x.generalSecondsToday || 0, running: !!x.general }, 'text-sm font-semibold');
+      card.appendChild(el('div', { class: 'grid grid-cols-4 gap-2 text-center' }, [
+        miniStat('Task time today', todayTimer),
+        miniStat('General today', genTimer),
         miniStat('Done today', el('span', { class: 'text-sm font-semibold', text: String(x.completedToday) })),
         miniStat('In queue', el('span', { class: 'text-sm font-semibold', text: String(x.queuedCount) }))
       ]));
