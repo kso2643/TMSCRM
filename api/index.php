@@ -348,6 +348,9 @@ try {
     elseif ($c0 === 'price-requests') {
         $ctrl = new PriceRequestController();
         match (true) {
+            $method === 'GET'   && $c1 === 'by-no' && $c2 !== ''       => $ctrl->byNumber($c2),
+            $method === 'POST'  && $c1 === 'batch' && $c3 === 'remind' => $ctrl->remind($c2),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'revise'      => $ctrl->revise($c1),
             $method === 'GET'   && $c1 === 'batches'                   => $ctrl->batches(),
             $method === 'GET'   && $c1 === 'template'                  => $ctrl->template(),
             $method === 'POST'  && $c1 === 'parse'                     => $ctrl->parse(),

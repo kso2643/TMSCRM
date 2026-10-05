@@ -482,6 +482,7 @@
     TASK_ASSIGNED:          { color: '#2563eb', icon: '📋' },
     TASK_COMPLETED:         { color: '#16a34a', icon: '✅' },
     PRICE_REQUEST_NEW:      { color: '#d97706', icon: '₹' },
+    PRICE_REQUEST_REMINDER: { color: '#dc2626', icon: '⏰' },
     PRICE_REQUEST_ANSWERED: { color: '#16a34a', icon: '₹' },
     TRIAL_REQUESTED:        { color: '#7c3aed', icon: '🧪' },
     TRIAL_DECIDED:          { color: '#7c3aed', icon: '🧪' },

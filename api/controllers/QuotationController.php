@@ -10,6 +10,10 @@ class QuotationController
             'sortOrder' => 'INT NOT NULL DEFAULT 0',
             'notes'     => 'TEXT NULL',
         ]]], 'QuotationItem sortOrder/notes columns');
+        // Price request the prices came from (PR-yymm-nnnn), typed on the quotation page.
+        ensure_schema(['Quotation' => ['create' => '', 'columns' => [
+            'priceRequestNo' => 'VARCHAR(20) NULL',
+        ]]], 'Quotation priceRequestNo column');
     }
 
     /** Recognised brands. First entry is the fallback/default for legacy rows. */
@@ -328,6 +332,9 @@ class QuotationController
             ]);
         }
 
+        if (array_key_exists('priceRequestNo', $b)) {
+            db()->prepare('UPDATE `Quotation` SET priceRequestNo=? WHERE id=?')->execute([mb_substr(strtoupper(trim((string) $b['priceRequestNo'])), 0, 20) ?: null, $id]);
+        }
         log_activity($auth['id'], 'QUOTATION_CREATED', 'Quotation', $id,
             ['quotationNumber'=>$quotationNumber,'customerId'=>$customerId,'totalAmount'=>$totalAmount]);
         $this->show($id);
@@ -399,6 +406,7 @@ class QuotationController
                 ]);
             }
         }
+        if (array_key_exists('priceRequestNo', $b)) { $sets[] = 'priceRequestNo=?'; $params[] = mb_substr(strtoupper(trim((string) $b['priceRequestNo'])), 0, 20) ?: null; }
         $params[] = $id;
         db()->prepare('UPDATE `Quotation` SET ' . implode(',', $sets) . ' WHERE id=?')->execute($params);
         $this->show($id);

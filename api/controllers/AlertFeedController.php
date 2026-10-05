@@ -117,7 +117,7 @@ class AlertFeedController
             // One alert per request (a multi-item request is one alert, not one per item).
             foreach (self::rows(
                 "SELECT COALESCE(r.batchId, r.id) AS gid, MIN(r.productName) AS productName, COUNT(*) AS n, MAX(r.createdAt) AS createdAt,
-                        MAX(u.name) AS byName, MAX(c.companyName) AS companyName, MAX(b.requestNo) AS requestNo
+                        MAX(u.name) AS byName, MAX(c.companyName) AS companyName, MAX(b.requestNo) AS requestNo, MAX(r.revisionCount) AS rev
                  FROM `PriceRequest` r
                  LEFT JOIN `User` u ON u.id = r.requestedById
                  LEFT JOIN `Customer` c ON c.id = r.customerId
@@ -126,9 +126,21 @@ class AlertFeedController
                  GROUP BY COALESCE(r.batchId, r.id) ORDER BY MAX(r.createdAt) DESC LIMIT $per",
                 [$since, $me]) as $r) {
                 $what = (int) $r['n'] > 1 ? $r['n'] . ' items' : $r['productName'];
-                $add('price-new-' . $r['gid'], 'PRICE_REQUEST_NEW', 'New price request' . ($r['requestNo'] ? ' ' . $r['requestNo'] : ''),
+                $add('price-new-' . $r['gid'] . '-' . $r['createdAt'], 'PRICE_REQUEST_NEW', ((int) $r['rev'] ? 'Revised price request' : 'New price request') . ($r['requestNo'] ? ' ' . $r['requestNo'] : ''),
                     ($r['byName'] ?: 'An engineer') . ' asks for a price on ' . $what . ($r['companyName'] ? ' for ' . $r['companyName'] : ''),
                     '/price-requests/', $r['createdAt']);
+            }
+            // Engineer pressed "Remind admin"
+            foreach (self::rows(
+                "SELECT b.id, b.requestNo, b.lastRemindedAt, b.remindCount, u.name AS byName, c.companyName,
+                        (SELECT COUNT(*) FROM `PriceRequest` r WHERE r.batchId=b.id AND r.status='PENDING') AS pending
+                 FROM `PriceRequestBatch` b LEFT JOIN `User` u ON u.id=b.requestedById LEFT JOIN `Customer` c ON c.id=b.customerId
+                 WHERE b.lastRemindedAt>? AND b.requestedById<>? ORDER BY b.lastRemindedAt DESC LIMIT $per",
+                [$since, $me]) as $r) {
+                if (!(int) $r['pending']) continue;
+                $add('price-remind-' . $r['id'] . '-' . $r['lastRemindedAt'], 'PRICE_REQUEST_REMINDER', 'Reminder: price request ' . $r['requestNo'],
+                    ($r['byName'] ?: 'An engineer') . ' is waiting for ' . $r['pending'] . ' price' . ((int) $r['pending'] === 1 ? '' : 's') . ($r['companyName'] ? ' for ' . $r['companyName'] : '') . ((int) $r['remindCount'] > 1 ? ' (reminder ' . $r['remindCount'] . ')' : ''),
+                    '/price-requests/#' . $r['id'], $r['lastRemindedAt']);
             }
         }
         foreach (self::rows(

@@ -69,6 +69,11 @@ class PriceRequestController
                     'discount'         => 'DECIMAL(6,2) NULL',
                     'approvedDiscount' => 'DECIMAL(6,2) NULL',
                     'sortOrder'        => 'INT NOT NULL DEFAULT 0',
+                    'leadTime'         => 'VARCHAR(60) NULL',
+                    'expectedDelivery' => 'DATE NULL',
+                    'approvedLeadTime' => 'VARCHAR(60) NULL',
+                    'revisionCount'    => 'INT NOT NULL DEFAULT 0',
+                    'history'          => 'TEXT NULL',
                 ],
             ],
             'PriceRequestBatch' => [
@@ -78,12 +83,16 @@ class PriceRequestController
   `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), UNIQUE KEY `PriceRequestBatch_requestNo_key` (`requestNo`), KEY `PriceRequestBatch_by_idx` (`requestedById`)
 $tail",
+                'columns' => [
+                    'lastRemindedAt' => 'DATETIME NULL',
+                    'remindCount'    => 'INT NOT NULL DEFAULT 0',
+                ],
             ],
         ];
     }
 
     private const SELECT = 'SELECT r.*, u.name AS requestedByName, u.role AS requestedByRole, a.name AS respondedByName,
-                                   c.companyName AS customerName, b.requestNo, b.notes AS batchNotes
+                                   c.companyName AS customerName, b.requestNo, b.notes AS batchNotes, b.lastRemindedAt, b.remindCount
                             FROM `PriceRequest` r
                             LEFT JOIN `User` u ON u.id = r.requestedById
                             LEFT JOIN `User` a ON a.id = r.respondedById
@@ -130,6 +139,11 @@ $tail",
             'unit'           => $r['unit'] ?? null,
             'discount'       => isset($r['discount']) ? self::money($r['discount']) : null,
             'approvedDiscount' => isset($r['approvedDiscount']) ? self::money($r['approvedDiscount']) : null,
+            'leadTime'       => $r['leadTime'] ?? null,
+            'expectedDelivery' => $r['expectedDelivery'] ?? null,
+            'approvedLeadTime' => $r['approvedLeadTime'] ?? null,
+            'revisionCount'  => (int) ($r['revisionCount'] ?? 0),
+            'history'        => !empty($r['history']) ? (json_decode($r['history'], true) ?: []) : [],
         ];
     }
 
@@ -341,17 +355,46 @@ $tail",
         if ($qty === null || $qty <= 0) $errs[] = "$label: quantity must be more than 0";
         $priceRaw = str_replace([',', '₹', 'Rs', 'rs', ' '], '', (string) ($it['requestedPrice'] ?? ''));
         $price = null;
-        if ($priceRaw !== '') { if (!is_numeric($priceRaw) || (float) $priceRaw < 0) $errs[] = "$label: price must be a number"; else $price = round((float) $priceRaw, 2); }
+        if ($priceRaw === '') $errs[] = "$label: target price is required";
+        elseif (!is_numeric($priceRaw) || (float) $priceRaw <= 0) $errs[] = "$label: price must be a number more than 0";
+        else $price = round((float) $priceRaw, 2);
         $discRaw = str_replace(['%', ' '], '', (string) ($it['discount'] ?? ''));
         $disc = null;
-        if ($discRaw !== '') { if (!is_numeric($discRaw) || (float) $discRaw < 0 || (float) $discRaw > 100) $errs[] = "$label: discount must be 0–100 %"; else $disc = round((float) $discRaw, 2); }
+        if ($discRaw === '') $errs[] = "$label: discount % is required (enter 0 for none)";
+        elseif (!is_numeric($discRaw) || (float) $discRaw < 0 || (float) $discRaw > 100) $errs[] = "$label: discount must be 0–100 %";
+        else $disc = round((float) $discRaw, 2);
+        $lead = trim((string) ($it['leadTime'] ?? ''));
+        if ($lead === '') $errs[] = "$label: lead time is required";
+        elseif (is_numeric($lead)) $lead .= ' days';
+        $edRaw = trim((string) ($it['expectedDelivery'] ?? ''));
+        $ed = null;
+        if ($edRaw === '') $errs[] = "$label: expected delivery date is required";
+        else {
+            $ed = self::parseDate($edRaw);
+            if (!$ed) $errs[] = "$label: expected delivery must be a date";
+        }
         return [[
             'productId' => $product['id'] ?? null, 'itemCode' => $code ?: null, 'productName' => mb_substr($name, 0, 255),
             'category' => mb_substr($category, 0, 120) ?: null, 'brand' => mb_substr($brand, 0, 120) ?: null, 'supplyType' => $type,
             'quantity' => $qty, 'unit' => mb_substr(trim((string) ($it['unit'] ?? '')) ?: ($product['unit'] ?? ''), 0, 20) ?: null,
             'listPrice' => isset($product['standardPrice']) && $product['standardPrice'] !== null ? (float) $product['standardPrice'] : null,
             'requestedPrice' => $price, 'discount' => $disc, 'notes' => trim((string) ($it['notes'] ?? '')) ?: null,
+            'leadTime' => $lead !== '' ? mb_substr($lead, 0, 60) : null, 'expectedDelivery' => $ed,
         ], $errs];
+    }
+
+    /** "2026-10-20", "20/10/2026", "20-10-26", Excel serial → Y-m-d, or null. */
+    private static function parseDate(string $v): ?string
+    {
+        $v = trim($v);
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $v, $m)) return checkdate((int) $m[2], (int) $m[3], (int) $m[1]) ? "$m[1]-$m[2]-$m[3]" : null;
+        if (is_numeric($v) && (float) $v > 30000 && (float) $v < 80000) return gmdate('Y-m-d', (int) round(((float) $v - 25569) * 86400));
+        if (preg_match('/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/', $v, $m)) {
+            $y = strlen($m[3]) === 2 ? 2000 + (int) $m[3] : (int) $m[3];
+            return checkdate((int) $m[2], (int) $m[1], $y) ? sprintf('%04d-%02d-%02d', $y, $m[2], $m[1]) : null;
+        }
+        $t = strtotime($v);
+        return $t ? date('Y-m-d', $t) : null;
     }
 
     // POST /api/price-requests/batch — { customerId, notes?, source?, items:[{productId?|itemCode?, productName, category, brand, supplyType, quantity, unit?, requestedPrice?, discount?, notes?}] }
@@ -383,11 +426,12 @@ $tail",
             $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, createdAt) VALUES (?,?,?,?,?,?,?)')
                 ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', now_sql()]);
             $ins = $pdo->prepare('INSERT INTO `PriceRequest` (id,requestedById,customerId,productId,itemCode,productName,quantity,listPrice,requestedPrice,notes,status,
-                                  batchId,category,brand,supplyType,unit,discount,sortOrder,createdAt,updatedAt)
-                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?)');
+                                  batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt)
+                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?)');
             foreach ($clean as $pos => $ci) {
                 $ins->execute([gen_id(), $auth['id'], $customerId, $ci['productId'], $ci['itemCode'], $ci['productName'], $ci['quantity'], $ci['listPrice'],
-                    $ci['requestedPrice'], $ci['notes'], $bid, $ci['category'], $ci['brand'], $ci['supplyType'], $ci['unit'], $ci['discount'], $pos + 1, now_sql(), now_sql()]);
+                    $ci['requestedPrice'], $ci['notes'], $bid, $ci['category'], $ci['brand'], $ci['supplyType'], $ci['unit'], $ci['discount'],
+                    $ci['leadTime'], $ci['expectedDelivery'], $pos + 1, now_sql(), now_sql()]);
             }
             $pdo->commit();
         } catch (Throwable $e) {
@@ -418,6 +462,7 @@ $tail",
                     'customer' => $r['customerId'] ? ['id' => $r['customerId'], 'companyName' => $r['customerName']] : null,
                     'requestedBy' => ['id' => $r['requestedById'], 'name' => $r['requestedByName']],
                     'notes' => $r['batchNotes'] ?? null, 'createdAt' => $r['createdAt'], 'items' => [],
+                    'lastRemindedAt' => $r['lastRemindedAt'] ?? null, 'remindCount' => (int) ($r['remindCount'] ?? 0),
                 ];
             }
             $out[$key]['items'][] = $this->shape($r);
@@ -488,11 +533,17 @@ $tail",
                 $d = str_replace('%', '', (string) ($e['approvedDiscount'] ?? ''));
                 if ($d !== '') { if (!is_numeric($d) || (float) $d < 0 || (float) $d > 100) { $errs[] = $item['productName'] . ': discount must be 0–100 %'; continue; } $disc = round((float) $d, 2); }
             } elseif (!$note) { $errs[] = $item['productName'] . ': give a reason for rejecting'; continue; }
-            $ok[] = [$status, $price, $disc, $note, $id];
+            $lt = trim((string) ($e['approvedLeadTime'] ?? '')) ?: ($status === 'APPROVED' ? ($item['leadTime'] ?? null) : null);
+            if ($lt !== null && is_numeric($lt)) $lt .= ' days';
+            $ok[] = [$status, $price, $disc, $note, $id, $lt ? mb_substr($lt, 0, 60) : null];
         }
         if ($errs) sendError(implode(' · ', array_slice($errs, 0, 8)), 400);
-        $u = db()->prepare('UPDATE `PriceRequest` SET status=?,approvedPrice=?,approvedDiscount=?,responseNote=?,respondedById=?,respondedAt=?,updatedAt=? WHERE id=?');
-        foreach ($ok as [$st, $pr, $di, $no, $id]) $u->execute([$st, $pr, $di, $no, $auth['id'], now_sql(), now_sql(), $id]);
+        $u = db()->prepare('UPDATE `PriceRequest` SET status=?,approvedPrice=?,approvedDiscount=?,approvedLeadTime=?,responseNote=?,respondedById=?,respondedAt=?,updatedAt=?,history=? WHERE id=?');
+        foreach ($ok as [$st, $pr, $di, $no, $id, $lt]) {
+            $h = $this->historyOf($id);
+            $h[] = ['type' => 'ANSWER', 'at' => now_sql(), 'by' => $auth['name'], 'status' => $st, 'price' => $pr, 'discount' => $di, 'leadTime' => $lt, 'note' => $no];
+            $u->execute([$st, $pr, $di, $lt, $no, $auth['id'], now_sql(), now_sql(), json_encode($h, JSON_UNESCAPED_UNICODE), $id]);
+        }
         log_activity($auth['id'], 'PRICE_REQUEST_ANSWERED', 'PriceRequestBatch', $bid, ['items' => count($ok)]);
         sendSuccess(['batch' => $this->batch($bid)], 'Saved ' . count($ok) . ' answer' . (count($ok) === 1 ? '' : 's'));
     }
@@ -513,7 +564,7 @@ $tail",
         sendSuccess([], 'Price request withdrawn');
     }
 
-    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Target Price (Rs)', 'Discount %', 'Note'];
+    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Target Price (Rs) *', 'Discount % *', 'Lead Time *', 'Expected Delivery (dd-mm-yyyy) *', 'Note'];
 
     // GET /api/price-requests/template
     public function template(): void
@@ -521,10 +572,11 @@ $tail",
         authenticate();
         $wb = new StyledXlsxWriter();
         $sh = $wb->addSheet('Price request items');
-        $wb->setWidths($sh, [16, 34, 18, 16, 18, 10, 8, 16, 11, 36]);
+        $wb->setWidths($sh, [16, 34, 18, 16, 18, 10, 8, 16, 11, 14, 18, 36]);
         $wb->addRow($sh, self::TEMPLATE_COLS, 'header', 32);
-        $wb->addRow($sh, ['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Inserts', 'YG-1', 'Regular', 100, 'PCS', 245, 10, 'Customer currently buys from competitor at Rs 230']);
-        $wb->addRow($sh, ['', 'Special step drill D8.5 x 120', 'Drills', 'YG-1', 'One time', 5, 'PCS', '', '', 'Drawing attached by mail']);
+        $d1 = date('d-m-Y', strtotime('+21 days')); $d2 = date('d-m-Y', strtotime('+35 days'));
+        $wb->addRow($sh, ['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Inserts', 'YG-1', 'Regular', 100, 'PCS', 245, 10, '2 weeks', $d1, 'Customer currently buys from competitor at Rs 230']);
+        $wb->addRow($sh, ['', 'Special step drill D8.5 x 120', 'Drills', 'YG-1', 'One time', 5, 'PCS', 2850, 0, '4 weeks', $d2, 'Drawing attached by mail']);
         $wb->freeze($sh, 1);
         $ls = $wb->addSheet('Lists');
         $cats = [];
@@ -532,7 +584,7 @@ $tail",
         $wb->setWidths($ls, [24, 20, 60]);
         $wb->addRow($ls, ['Category (any, these exist)', 'Regular / One time', 'How to fill'], 'header');
         $help = ['Delete the two sample rows, one row per item.', 'Item Code fills the product from your product list (optional).',
-                 'Product Name, Category, Brand, Regular / One time and Quantity are required.', 'Target Price = price per unit you want to offer; Discount % = discount you are asking for.',
+                 'Product Name, Category, Brand, Regular / One time, Quantity, Target Price, Discount %, Lead Time and Expected Delivery are required.', 'Target Price = price per unit you want to offer; Discount % = discount you are asking for (0 if none); Lead Time e.g. 2 weeks.',
                  'Upload the file on the Price requests page, choose the company, check the items, then Raise request.'];
         $n = max(count($cats), 2, count($help));
         for ($i = 0; $i < $n; $i++) $wb->addRow($ls, [$cats[$i] ?? '', ['Regular', 'One time'][$i] ?? '', $help[$i] ?? '']);
@@ -566,6 +618,7 @@ $tail",
         if ($hIdx === null) sendError('Could not find the heading row (Product Name, Brand …). Use the template from "Download template".', 400);
         $alias = ['itemCode' => '/item\s*code|^code|edp/i', 'productName' => '/product|description/i', 'category' => '/categor/i', 'brand' => '/brand|make/i',
                   'supplyType' => '/regular|one\s*time|single|type/i', 'quantity' => '/qty|quantity/i', 'unit' => '/^unit|uom/i',
+                  'leadTime' => '/lead/i', 'expectedDelivery' => '/expected|delivery\s*date|required\s*by|need\s*by/i',
                   'requestedPrice' => '/price|rate/i', 'discount' => '/disc/i', 'notes' => '/note|remark/i'];
         $map = [];
         foreach ($rows[$hIdx] as $ci => $h) {
@@ -590,5 +643,89 @@ $tail",
         if (!$items) sendError('No item rows found under the heading row.', 400);
         if (count($items) > self::MAX_ITEMS) sendError('At most ' . self::MAX_ITEMS . ' items per request (file has ' . count($items) . ').', 400);
         sendSuccess(['items' => $items, 'problems' => $problems], count($items) . ' item' . (count($items) === 1 ? '' : 's') . ' read from the file');
+    }
+
+    private function historyOf(string $id): array
+    {
+        $s = db()->prepare('SELECT history FROM `PriceRequest` WHERE id=?'); $s->execute([$id]);
+        $h = $s->fetchColumn();
+        return $h ? (json_decode($h, true) ?: []) : [];
+    }
+
+    // PATCH /api/price-requests/:id/revise — engineer asks for a revised price after an answer
+    // { requestedPrice, discount, leadTime?, expectedDelivery?, note }
+    public function revise(string $id): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Price request not found.', 404);
+        if ($row['requestedById'] !== $auth['id'] && !is_admin_tier($auth['role'])) sendError('Only the engineer who raised it can ask for a revised price.', 403);
+        if ($row['status'] === 'PENDING') sendError('This item is still waiting for an answer.', 400);
+        $b = request_body();
+        $price = str_replace([',', '₹', ' '], '', (string) ($b['requestedPrice'] ?? ''));
+        if ($price === '' || !is_numeric($price) || (float) $price <= 0) sendError('Enter the revised price you need.', 400);
+        $disc = str_replace(['%', ' '], '', (string) ($b['discount'] ?? ''));
+        if ($disc === '' || !is_numeric($disc) || (float) $disc < 0 || (float) $disc > 100) sendError('Enter the discount % (0–100).', 400);
+        $note = trim((string) ($b['note'] ?? ''));
+        if ($note === '') sendError('Say why a revised price is needed (e.g. competitor price, customer counter-offer).', 400);
+        $lead = trim((string) ($b['leadTime'] ?? '')) ?: $row['leadTime'];
+        if ($lead !== null && is_numeric($lead)) $lead .= ' days';
+        $ed = isset($b['expectedDelivery']) && trim((string) $b['expectedDelivery']) !== '' ? self::parseDate((string) $b['expectedDelivery']) : $row['expectedDelivery'];
+        $h = $row['history'] ? (json_decode($row['history'], true) ?: []) : [];
+        // First revision: put the original ask (and the answer, if it predates history) at the start.
+        $types = array_column($h, 'type');
+        if (!in_array('REQUEST', $types, true)) {
+            if (!in_array('ANSWER', $types, true) && $row['respondedAt']) {
+                array_unshift($h, ['type' => 'ANSWER', 'at' => $row['respondedAt'], 'by' => $row['respondedByName'], 'status' => $row['status'], 'price' => $row['approvedPrice'] === null ? null : (float) $row['approvedPrice'], 'discount' => $row['approvedDiscount'] === null ? null : (float) $row['approvedDiscount'], 'leadTime' => $row['approvedLeadTime'], 'note' => $row['responseNote']]);
+            }
+            array_unshift($h, ['type' => 'REQUEST', 'at' => $row['createdAt'], 'by' => $row['requestedByName'], 'price' => (float) $row['requestedPrice'], 'discount' => $row['discount'] === null ? null : (float) $row['discount'], 'leadTime' => $row['leadTime'], 'note' => $row['notes']]);
+        }
+        $h[] = ['type' => 'REVISION', 'at' => now_sql(), 'by' => $auth['name'], 'price' => round((float) $price, 2), 'discount' => round((float) $disc, 2), 'leadTime' => $lead, 'note' => $note];
+        db()->prepare('UPDATE `PriceRequest` SET status=\'PENDING\', requestedPrice=?, discount=?, leadTime=?, expectedDelivery=?, approvedPrice=NULL, approvedDiscount=NULL, approvedLeadTime=NULL,
+                       responseNote=NULL, respondedById=NULL, respondedAt=NULL, revisionCount=revisionCount+1, history=?, createdAt=?, updatedAt=? WHERE id=?')
+            ->execute([round((float) $price, 2), round((float) $disc, 2), $lead, $ed, json_encode($h, JSON_UNESCAPED_UNICODE), now_sql(), now_sql(), $id]);
+        log_activity($auth['id'], 'PRICE_REQUEST_REVISED', 'PriceRequest', $id, ['price' => (float) $price]);
+        sendSuccess(['request' => $this->shape($this->fetchRow($id))], 'Revised price request sent');
+    }
+
+    // POST /api/price-requests/batch/:id/remind — requester nudges the admins (at most every 2 hours)
+    public function remind(string $bid): void
+    {
+        $auth = authenticate();
+        $bt = $this->batch($bid);
+        if (!$bt) sendError('Price request not found.', 404);
+        if ($bt['requestedBy']['id'] !== $auth['id']) sendError('Only the engineer who raised it can send a reminder.', 403);
+        if (!$bt['counts']['PENDING']) sendError('Nothing in this request is waiting for an answer.', 400);
+        if ($bt['legacy']) sendError('This older request cannot send reminders — raise it again from the Price requests page.', 400);
+        $s = db()->prepare('SELECT lastRemindedAt FROM `PriceRequestBatch` WHERE id=?'); $s->execute([$bid]);
+        $last = $s->fetchColumn();
+        if ($last && strtotime($last) > time() - 2 * 3600) {
+            $mins = (int) ceil((strtotime($last) + 2 * 3600 - time()) / 60);
+            sendError('A reminder was sent at ' . date('h:i A', strtotime($last)) . '. You can remind again in ' . ($mins >= 60 ? floor($mins / 60) . ' h ' . ($mins % 60) . ' min' : $mins . ' min') . '.', 429);
+        }
+        db()->prepare('UPDATE `PriceRequestBatch` SET lastRemindedAt=?, remindCount=remindCount+1 WHERE id=?')->execute([now_sql(), $bid]);
+        log_activity($auth['id'], 'PRICE_REQUEST_REMINDER', 'PriceRequestBatch', $bid, ['requestNo' => $bt['requestNo']]);
+        sendSuccess(['batch' => $this->batch($bid)], 'Reminder sent to the admins');
+    }
+
+    // GET /api/price-requests/by-no/:requestNo — approved items for a quotation
+    public function byNumber(string $no): void
+    {
+        $auth = authenticate();
+        $no = strtoupper(trim(urldecode($no)));
+        $s = db()->prepare('SELECT id FROM `PriceRequestBatch` WHERE requestNo=?'); $s->execute([$no]);
+        $bid = $s->fetchColumn();
+        if (!$bid) sendError("Price request $no not found.", 404);
+        $bt = $this->batch($bid);
+        if (!is_admin_tier($auth['role']) && $bt['requestedBy']['id'] !== $auth['id']) sendError("Price request $no was raised by someone else.", 403);
+        $approved = array_values(array_filter($bt['items'], fn($i) => $i['status'] === 'APPROVED'));
+        if (!$approved) sendError("Price request $no has no approved items yet.", 400);
+        $c = null;
+        if ($bt['customer']) {
+            $q = db()->prepare('SELECT id, companyName, address, location, contactPerson FROM `Customer` WHERE id=?'); $q->execute([$bt['customer']['id']]);
+            $c = $q->fetch() ?: null;
+        }
+        sendSuccess(['requestNo' => $bt['requestNo'], 'customer' => $c, 'items' => $approved,
+                     'pending' => $bt['counts']['PENDING'], 'rejected' => $bt['counts']['REJECTED']]);
     }
 }

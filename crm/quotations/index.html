@@ -1793,6 +1793,41 @@ function debounce(fn, wait) {
   };
 }
 // Server quotation record -> the flat "local draft" shape the form/edit code already understands
+/* Price request number → approved items into the open quotation (TMS or APJ). */
+async function prLoadIntoQuotation(company) {
+  var g = company === 'APJ' ? window.apj_gid : window.tms_gid;
+  var setItems = company === 'APJ' ? window.apj_setItemsFromPR : window.tms_setItemsFromPR;
+  if (!g || !setItems) return;
+  var no = (g('pr-no').value || '').trim().toUpperCase();
+  if (!no) { alert('Enter the price request number, e.g. PR-2610-0007'); g('pr-no').focus(); return; }
+  g('pr-no').value = no;
+  try {
+    var res = await apiFetch('/price-requests/by-no/' + encodeURIComponent(no));
+    var d = res.data;
+    if (d.customer && !g('to-customerId').value) {
+      g('to-customerId').value = d.customer.id; g('to-name').value = d.customer.companyName || '';
+      if (d.customer.address && !g('to-addr1').value) g('to-addr1').value = d.customer.address;
+      if (d.customer.location && !g('to-addr2').value) g('to-addr2').value = d.customer.location;
+      if (d.customer.contactPerson && !g('meta-attn').value) g('meta-attn').value = d.customer.contactPerson;
+    } else if (d.customer && g('to-customerId').value && g('to-customerId').value !== d.customer.id) {
+      if (!confirm(no + ' was raised for ' + d.customer.companyName + ', but this quotation is for ' + (g('to-name').value || 'another customer') + '. Load the prices anyway?')) return;
+    }
+    if (!g('meta-enq').value) g('meta-enq').value = no;
+    var list = d.items.map(function (i) {
+      return { productCode: i.itemCode || '', spec: i.productName + (i.brand ? ' — ' + i.brand : ''), moq: String(i.quantity || ''),
+               unitPrice: String(i.approvedPrice != null ? i.approvedPrice : ''), discount: String(i.approvedDiscount != null ? i.approvedDiscount : 0),
+               delivery: i.approvedLeadTime || i.leadTime || '' };
+    });
+    var hasRealItems = Array.prototype.some.call(document.querySelectorAll('#app-' + company.toLowerCase() + ' #items-container .item-row input:first-of-type'), function (inp) { return inp.value.trim(); });
+    var replace = !hasRealItems || confirm('Replace the items already in this quotation with the ' + list.length + ' approved item(s) from ' + no + '?\n(Cancel adds them below.)');
+    setItems(list, replace);
+    alert('Loaded ' + list.length + ' approved item(s) from ' + no + '.' + (d.pending ? '\n' + d.pending + ' item(s) are still waiting for an answer and were not added.' : '') + (d.rejected ? '\n' + d.rejected + ' rejected item(s) were left out.' : ''));
+  } catch (e) {
+    alert(e.message || 'Could not load the price request.');
+  }
+}
+window.prLoadIntoQuotation = prLoadIntoQuotation;
+
 function quotationServerToLocal(q) {
   return {
     customer: q.toName || (q.customer && q.customer.companyName) || '',
@@ -1802,7 +1837,7 @@ function quotationServerToLocal(q) {
     date: (q.quotationDate || '').slice(0, 10),
     enquiryDate: (q.enquiryDate || '').slice(0, 10),
     attention: q.kindAttn || '', designation: q.toDesignation || '',
-    enquiryRef: q.enquiryRef || '', subject: q.subject || '',
+    enquiryRef: q.enquiryRef || '', subject: q.subject || '', prNo: q.priceRequestNo || '',
     terms: { tax: q.salesTax, payment: q.paymentTerms, validity: q.validity, delivery: q.deliveryCharges },
     sign: { company: q.signCompany, name: q.signName, designation: q.signDesignation },
     items: (q.items || []).map(function (i, idx) {
@@ -1921,6 +1956,11 @@ function quotationServerToLocal(q) {
                                 placeholder="Designation" /></label>
                         <label class="field">Enquiry Ref.<input type="text" id="meta-enq"
                                 placeholder="Enq. Ref. No." /></label>
+                    </div>
+                    <div class="form-row cols-1">
+                        <label class="field">Price request no. <small style="font-weight:400;color:#64748b">(optional — loads the approved prices)</small>
+                            <span style="display:flex;gap:8px"><input type="text" id="pr-no" placeholder="e.g. PR-2610-0007" style="flex:1" />
+                            <button type="button" class="btn" style="white-space:nowrap" onclick="prLoadIntoQuotation('TMS')">Load approved prices</button></span></label>
                     </div>
                     <div class="form-row cols-1">
                         <label class="field">Subject<input type="text" id="meta-subject"
@@ -2246,6 +2286,7 @@ function quotationServerToLocal(q) {
                 kindAttn: v("meta-attn"),
                 toDesignation: v("meta-desig"),
                 enquiryRef: v("meta-enq"),
+                priceRequestNo: v("pr-no"),
                 subject: v("meta-subject"),
                 salesTax: v("terms-tax"),
                 paymentTerms: v("terms-payment"),
@@ -2489,6 +2530,7 @@ function quotationServerToLocal(q) {
             gid("meta-desig").value = q.designation || "";
 
             gid("meta-enq").value = q.enquiryRef || "";
+            if (gid("pr-no")) gid("pr-no").value = q.prNo || q.priceRequestNo || "";
 
             gid("meta-subject").value = q.subject || "";
 
@@ -2660,6 +2702,14 @@ function calcTotalMOQ() {
             });
             renderItems();
         }
+        // Price request → quotation items (see prLoadIntoQuotation)
+        window.tms_setItemsFromPR = function (list, replace) {
+            if (replace) { items = []; itemId = 0; }
+            list.forEach(function (x) { items.push(Object.assign({ id: ++itemId, notes: "" }, x)); });
+            renderItems();
+            return { gid: gid };
+        };
+        window.tms_gid = gid;
         function tms_removeItem(id) {
             items = items.filter((i) => i.id !== id);
             renderItems();
@@ -3743,6 +3793,13 @@ curY += 10;
           </div>
           <div class="form-grid cols-1">
             <div class="field">
+              <span class="field-label">Price request no. <small style="font-weight:400;opacity:.7">(optional — loads the approved prices)</small></span>
+              <div style="display:flex;gap:8px"><input type="text" id="pr-no" placeholder="e.g. PR-2610-0007" style="flex:1" />
+              <button type="button" class="btn btn-outline-teal" style="white-space:nowrap" onclick="prLoadIntoQuotation('APJ')">Load approved prices</button></div>
+            </div>
+          </div>
+          <div class="form-grid cols-1">
+            <div class="field">
               <span class="field-label">Subject</span>
               <input type="text" id="meta-subject" value="Quotation for ZECHA Solid Carbide Special Drill &amp; Endmills" />
             </div>
@@ -4043,6 +4100,13 @@ function apj_addItem(productCode, spec, moq, unitPrice, discount, delivery) {
   items.push({ id, productCode: productCode || '', spec: spec || '', moq: moq || '', unitPrice: unitPrice || '', discount: discount || '', delivery: delivery || '', notes: '' });
   renderItems();
 }
+// Price request → quotation items (see prLoadIntoQuotation)
+window.apj_setItemsFromPR = function (list, replace) {
+  if (replace) { items = []; itemId = 0; }
+  list.forEach(function (x) { items.push(Object.assign({ id: ++itemId, notes: '' }, x)); });
+  renderItems();
+};
+window.apj_gid = gid;
 function apj_removeItem(id) {
   items = items.filter(i => i.id !== id);
   renderItems();
@@ -4239,6 +4303,7 @@ async function apj_saveQuotation() {
     kindAttn: v('meta-attn'),
     toDesignation: v('meta-desig'),
     enquiryRef: v('meta-enq'),
+    priceRequestNo: v('pr-no'),
     subject: v('meta-subject'),
     salesTax: v('terms-tax'),
     paymentTerms: v('terms-payment'),
@@ -4342,6 +4407,7 @@ async function apj_editQuotation(id) {
     gid('meta-attn').value = local.attention;
     gid('meta-desig').value = local.designation;
     gid('meta-enq').value = local.enquiryRef;
+    if (gid('pr-no')) gid('pr-no').value = local.prNo || '';
     gid('meta-subject').value = local.subject;
     gid('to-addr1').value = local.addr1;
     gid('to-addr2').value = local.addr2;
