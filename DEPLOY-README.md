@@ -1,3 +1,17 @@
+# Update — 5 Oct (d): Stock — brand-wise list
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+
+- **Brand-wise view:** the Stock page has two views, **All items** and **Brand-wise**. The page remembers your choice.
+- **One row per brand:** number of items, Hand stock, Local stock (total plus each city), Other states (total plus each state), Total, On order, Value, and Low / Out counts. Biggest brands come first and "No brand" is last.
+- **Click a brand:** its items open underneath with their quantities by place, minimum and status, plus **±** adjust and **🕘** history.
+- **Open in list:** shows that brand in the full item table.
+- **Search:** filter brands by name.
+- **⬇ Brand-wise Excel:** a summary sheet with one row per brand, plus one sheet per brand listing its items with a column for every place.
+- **Verification:** browser 10/10. Brand totals match the item totals, and hand + local + state = total. Earlier stock suites pass.
+
+---
+
 # Update — 5 Oct (c): Saturday stock check, Vc/RPM from tool diameter, company data file, Approvals removed
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

@@ -346,6 +346,80 @@ class StockController
         ]);
     }
 
+    // GET /api/products/stock/brands — brand-wise summary: items, quantity per place, total, value, low / out
+    public function brands(): void
+    {
+        authenticate();
+        $out=[];
+        $rows=db()->query("SELECT COALESCE(NULLIF(TRIM(brand),''),'') AS b, COUNT(*) items, SUM(availableStock) qty,
+                                  SUM(GREATEST(availableStock,0)*netPrice) value,
+                                  SUM(availableStock<=0) outN, SUM(availableStock>0 AND minimumStock>0 AND availableStock<=minimumStock) lowN
+                           FROM `Stock` WHERE isActive=1 GROUP BY b ORDER BY b=''")->fetchAll();
+        foreach($rows as $r) $out[$r['b']]=['brand'=>$r['b'],'items'=>(int)$r['items'],'total'=>(float)$r['qty'],'value'=>round((float)$r['value'],2),
+            'out'=>(int)$r['outN'],'low'=>(int)$r['lowN'],'hand'=>0.0,'local'=>[],'states'=>[],'localTotal'=>0.0,'stateTotal'=>0.0];
+        $lv=db()->query("SELECT COALESCE(NULLIF(TRIM(s.brand),''),'') AS b, l.locType, l.state, SUM(l.quantity) q
+                         FROM `StockLevel` l JOIN `Stock` s ON s.id=l.stockId AND s.isActive=1 GROUP BY b, l.locType, l.state")->fetchAll();
+        foreach($lv as $r){
+            if(!isset($out[$r['b']])) continue;
+            $o=&$out[$r['b']]; $q=(float)$r['q'];
+            if($r['locType']==='HAND') $o['hand']+=$q;
+            elseif($r['locType']==='LOCAL'){ $o['local'][$r['state']]=$q; $o['localTotal']+=$q; }
+            else { $o['states'][$r['state']]=$q; $o['stateTotal']+=$q; }
+            unset($o);
+        }
+        $res=StockLedger::reserved(); $onOrder=[];
+        if($res){
+            $ids=array_keys($res); $in=implode(',',array_fill(0,count($ids),'?'));
+            $st=db()->prepare("SELECT id, COALESCE(NULLIF(TRIM(brand),''),'') b FROM `Stock` WHERE id IN ($in)"); $st->execute($ids);
+            foreach($st->fetchAll() as $r) $onOrder[$r['b']]=($onOrder[$r['b']]??0)+$res[$r['id']];
+        }
+        foreach($out as $b=>&$o){ ksort($o['local']); ksort($o['states']); $o['onOrder']=(float)($onOrder[$b]??0); $o['local']=(object)$o['local']; $o['states']=(object)$o['states']; }
+        unset($o);
+        // biggest brands first, "no brand" last
+        $list=array_values($out);
+        usort($list,fn($a,$b)=>[$a['brand']==='',-$a['total']]<=>[$b['brand']==='',-$b['total']]);
+        sendSuccess(['brands'=>$list]);
+    }
+
+    // GET /api/products/stock/brands/export — the brand-wise list as Excel (summary + one sheet per brand)
+    public function brandsExport(): void
+    {
+        authenticate();
+        $wb=new StyledXlsxWriter();
+        $rows=db()->query("SELECT * FROM `Stock` WHERE isActive=1 ORDER BY COALESCE(NULLIF(TRIM(brand),''),'~'), itemGroup, itemName")->fetchAll();
+        $lv=StockLedger::levels(array_column($rows,'id'));
+        $places=[]; // column order: Hand, Local cities, states
+        foreach($lv as $l){ foreach(array_keys($l['local']) as $c) $places['L:'.$c]=true; foreach(array_keys($l['states']) as $c) $places['S:'.$c]=true; }
+        ksort($places);
+        $head=array_merge(['Item code','Item name','Item group','Hand stock'],array_map(fn($k)=>substr($k,0,2)==='L:'?'Local - '.(substr($k,2)?:'(no city)'):substr($k,2),array_keys($places)),['Total','Min','Net price','Value']);
+        $byBrand=[];
+        foreach($rows as $r) $byBrand[trim((string)$r['brand'])?:'No brand'][]=$r;
+        $sum=$wb->addSheet('Brand-wise');
+        $wb->setWidths($sum,[24,10,14,14,14,14,14,10,10]);
+        $wb->addRow($sum,['Brand','Items','Hand stock','Local stock','State stock','Total qty','Value (Rs)','Low','Out'],'header');
+        $line=function($r) use ($lv,$places){
+            $l=$lv[$r['id']]??['HAND'=>0,'local'=>[],'states'=>[]];
+            $cells=[$r['itemCode'],$r['itemName'],$r['itemGroup'],(float)$l['HAND']];
+            foreach(array_keys($places) as $k) $cells[]=(float)(substr($k,0,2)==='L:'?($l['local'][substr($k,2)]??0):($l['states'][substr($k,2)]??0));
+            return array_merge($cells,[(float)$r['availableStock'],(float)$r['minimumStock'],(float)$r['netPrice'],round(max(0,(float)$r['availableStock'])*(float)$r['netPrice'],2)]);
+        };
+        foreach($byBrand as $brand=>$items){
+            $h=$lo=$st=$tot=$val=$low=$out=0;
+            foreach($items as $r){ $l=$lv[$r['id']]??['HAND'=>0,'LOCAL'=>0,'states'=>[]]; $h+=$l['HAND']; $lo+=$l['LOCAL']; $st+=array_sum($l['states']);
+                $tot+=(float)$r['availableStock']; $val+=max(0,(float)$r['availableStock'])*(float)$r['netPrice'];
+                if((float)$r['availableStock']<=0) $out++; elseif((float)$r['minimumStock']>0&&(float)$r['availableStock']<=(float)$r['minimumStock']) $low++; }
+            $wb->addRow($sum,[$brand,count($items),$h,$lo,$st,$tot,round($val,2),$low,$out]);
+            $sh=$wb->addSheet(mb_substr(preg_replace('/[\[\]\*\?\/\\\\:]/','-',$brand),0,31));
+            $wb->setWidths($sh,array_merge([20,34,14,12],array_fill(0,count($places),13),[10,8,11,12]));
+            $wb->addRow($sh,$head,'header',28);
+            foreach($items as $r) $wb->addRow($sh,$line($r));
+            $wb->freeze($sh,1);
+        }
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="stock-brand-wise-'.date('Y-m-d').'.xlsx"');
+        echo $wb->output(); exit;
+    }
+
     // GET /api/products/stock/alerts
     public function alerts(): void
     {

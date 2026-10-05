@@ -221,6 +221,8 @@ try {
             $method === 'GET'   && $c1 === 'stock' && $c2 === 'stats'    => $sc->stats(),
             $method === 'GET'   && $c1 === 'stock' && $c2 === 'template' => $sc->template(),
             $method === 'GET'   && $c1 === 'stock' && $c2 === 'meta'     => $sc->meta(),
+            $method === 'GET'   && $c1 === 'stock' && $c2 === 'brands' && $c3 === ''       => $sc->brands(),
+            $method === 'GET'   && $c1 === 'stock' && $c2 === 'brands' && $c3 === 'export' => $sc->brandsExport(),
             $method === 'POST'  && $c1 === 'stock' && $c2 === 'entry'    => $sc->entry(),
             $method === 'GET'   && $c1 === 'stock' && $c2 === 'check'    => $sc->checkStatus(),
             $method === 'POST'  && $c1 === 'stock' && $c2 === 'check'    => $sc->checkDone(),

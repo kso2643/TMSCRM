@@ -88,6 +88,13 @@
       '.st-check{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem;background:#f0fdfa;border:1px solid #99f6e4;color:#115e59;border-radius:.75rem;padding:.65rem .9rem;margin-bottom:.75rem;font-size:.86rem}',
       '.st-check input{border:1px solid #99f6e4;border-radius:.45rem;padding:.3rem .55rem;font-size:.82rem;min-width:220px;background:#fff;color:inherit}',
       '.st-check.done{background:#f0fdf4;border-color:#bbf7d0;color:#166534}.dark .st-check{background:#042f2e;border-color:#115e59;color:#99f6e4}',
+      '.st-vtabs{display:flex;align-items:center;gap:.25rem;border-bottom:1px solid #e2e8f0;margin-bottom:.75rem}.dark .st-vtabs{border-color:#334155}',
+      '.st-vtab{padding:.55rem 1rem;font-size:.88rem;font-weight:600;color:#64748b;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer}',
+      '.st-vtab.on{color:#1e3a8a;border-bottom-color:#1e3a8a}.dark .st-vtab.on{color:#93c5fd;border-bottom-color:#93c5fd}',
+      '.st-brand-row{cursor:pointer}.st-brand-row td{vertical-align:middle}.st-brand-row.open td{background:#f8fafc}.dark .st-brand-row.open td{background:#0f172a}',
+      '.st-caret{display:inline-block;width:1rem;color:#64748b}.st-brands td.l .sub{white-space:normal;max-width:320px}',
+      '.st-brand-items>td{padding:.25rem .5rem .75rem 1.6rem!important;background:#f8fafc}.dark .st-brand-items>td{background:#0f172a}',
+      '.st-sub{background:#fff;border:1px solid #e2e8f0;border-radius:.5rem}.dark .st-sub{background:#1e293b;border-color:#334155}.st-sub th{position:static}',
       '.st-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.65rem;margin-bottom:1rem}',
       '.st-tile{background:#fff;border:1px solid #e2e8f0;border-radius:.75rem;padding:.65rem .8rem}.dark .st-tile{background:#1e293b;border-color:#334155}',
       '.st-tile b{display:block;font-size:1.2rem}.st-tile span{font-size:.74rem;color:#64748b}',
@@ -138,6 +145,8 @@
   var ROOT, meta = null, items = [], alerts = null, stats = null, check = null;
   var canCheck = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(me().role) !== -1;
   var f = { search: '', brand: '', loc: '', status: '', inStock: false };
+  var view = 'items', brands = null, openBrands = {}, brandItems = {}, brandSearch = '';
+  try { if (localStorage.getItem('crm_stock_view') === 'brands') view = 'brands'; } catch (e) {}
 
   function field(label, input, req, wide) {
     return el('div', { class: 'st-f' + (wide ? ' wide' : '') }, [el('label', {}, [label, req ? el('i', { text: ' *' }) : null]), input]);
@@ -499,9 +508,105 @@
           canEdit ? el('button', { class: 'st-btn pri', id: 'st-upload', text: '⬆ Upload stock', onclick: uploadDialog }) : null
         ])
       ]),
-      checkBar(), remindBar(), tiles(), filters(),
-      el('div', { class: 'st-card', id: 'st-list' }, [table()])
+      checkBar(), remindBar(), tiles(), viewTabs(),
+      view === 'brands' ? brandView() : el('div', {}, [filters(), el('div', { class: 'st-card', id: 'st-list' }, [table()])])
     ]));
+  }
+
+  // ── All items / Brand-wise switch ────────────────────────────────────
+  function viewTabs() {
+    function tab(key, label) {
+      return el('button', { class: 'st-vtab' + (view === key ? ' on' : ''), 'data-view': key, text: label, onclick: function () {
+        if (view === key) return;
+        view = key; try { localStorage.setItem('crm_stock_view', key); } catch (e) {}
+        if (key === 'brands' && !brands) loadBrands(); else render();
+      } });
+    }
+    return el('div', { class: 'st-vtabs' }, [tab('items', 'All items'), tab('brands', 'Brand-wise'),
+      view === 'brands' ? el('button', { class: 'st-btn sm', id: 'st-brand-xlsx', style: 'margin-left:auto', text: '⬇ Brand-wise Excel', onclick: function () {
+        download('/products/stock/brands/export', 'stock-brand-wise.xlsx').catch(function (e) { toast(e.message, 'err'); }); } }) : null]);
+  }
+
+  function loadBrands() {
+    return api('GET', '/products/stock/brands').then(function (j) { brands = j.data.brands || []; brandItems = {}; render(); })
+      .catch(function (e) { toast(e.message, 'err'); });
+  }
+
+  function placesText(map) {
+    var k = Object.keys(map || {}).filter(function (x) { return map[x]; });
+    return k.length ? k.map(function (x) { return (x || 'Local') + ' ' + qty(map[x]); }).join(' · ') : '';
+  }
+
+  function brandView() {
+    if (!brands) return el('div', { class: 'st-card' }, [el('div', { class: 'st-empty', text: 'Loading brands…' })]);
+    var search = el('input', { type: 'search', id: 'st-brand-search', placeholder: 'Search brand…', value: brandSearch });
+    search.addEventListener('input', function () { brandSearch = search.value; var b = document.getElementById('st-brand-body'); if (b) { clear(b); fillBrandRows(b); } });
+    var tbody = el('tbody', { id: 'st-brand-body' });
+    fillBrandRows(tbody);
+    var tot = brands.reduce(function (a, b) { a.items += b.items; a.total += b.total; a.value += b.value; return a; }, { items: 0, total: 0, value: 0 });
+    return el('div', {}, [
+      el('div', { class: 'st-filters' }, [search, el('span', { class: 'hint', style: 'margin:0', text: brands.length + ' brands · ' + tot.items + ' items · ' + qty(tot.total) + ' qty · ' + money(tot.value) })]),
+      el('div', { class: 'st-card' }, [el('div', { class: 'st-tw' }, [el('table', { class: 'st-table st-brands', id: 'st-brand-table' }, [
+        el('thead', {}, [el('tr', {}, [el('th', { class: 'l item', text: 'Brand' }), el('th', { text: 'Items' }), el('th', { class: 'loc', text: 'Hand' }),
+          el('th', { class: 'loc l', text: 'Local stock (by city)' }), el('th', { class: 'loc l', text: 'Other states' }), el('th', { text: 'Total' }),
+          el('th', { text: 'On order' }), el('th', { text: 'Value' }), el('th', { text: 'Low' }), el('th', { text: 'Out' }), el('th', { text: '' })])]),
+        tbody])])])
+    ]);
+  }
+
+  function fillBrandRows(tbody) {
+    var q = brandSearch.trim().toLowerCase();
+    var list = brands.filter(function (b) { return !q || (b.brand || 'no brand').toLowerCase().indexOf(q) !== -1; });
+    if (!list.length) { tbody.appendChild(el('tr', {}, [el('td', { colspan: '11', class: 'st-empty', text: 'No brands match.' })])); return; }
+    list.forEach(function (b) {
+      var key = b.brand || '__none', open = !!openBrands[key];
+      var tr = el('tr', { class: 'st-brand-row' + (open ? ' open' : ''), 'data-brand': key, onclick: function () { openBrands[key] = !open; if (!open && !brandItems[key]) loadBrandItems(key); var bd = document.getElementById('st-brand-body'); clear(bd); fillBrandRows(bd); } }, [
+        el('td', { class: 'l item' }, [el('span', { class: 'st-caret', text: open ? '▾' : '▸' }), el('span', { class: 'st-brand' + (b.brand ? '' : ' none'), text: b.brand || 'No brand' })]),
+        el('td', { text: String(b.items) }),
+        el('td', { class: 'loc' + (b.hand ? '' : ' zero'), text: qty(b.hand) }),
+        el('td', { class: 'loc l' }, [el('b', { text: qty(b.localTotal) }), placesText(b.local) ? el('div', { class: 'sub', text: placesText(b.local) }) : null]),
+        el('td', { class: 'loc l' }, [el('b', { text: qty(b.stateTotal) }), placesText(b.states) ? el('div', { class: 'sub', text: placesText(b.states) }) : null]),
+        el('td', { class: 'tot' + (b.total < 0 ? ' neg' : ''), text: qty(b.total) }),
+        el('td', { class: b.onOrder ? '' : 'zero', text: b.onOrder ? qty(b.onOrder) : '—' }),
+        el('td', { text: money(b.value) }),
+        el('td', {}, [b.low ? el('span', { class: 'st-badge LOW', text: String(b.low) }) : el('span', { class: 'zero', text: '—' })]),
+        el('td', {}, [b.out ? el('span', { class: 'st-badge OUT', text: String(b.out) }) : el('span', { class: 'zero', text: '—' })]),
+        el('td', {}, [el('button', { class: 'st-btn sm', text: 'Open in list', title: 'Show these items in All items', onclick: function (e) {
+          e.stopPropagation(); f.brand = b.brand || '__none'; view = 'items'; try { localStorage.setItem('crm_stock_view', 'items'); } catch (er) {} loadItems().then(render); } })])
+      ]);
+      tbody.appendChild(tr);
+      if (open) tbody.appendChild(el('tr', { class: 'st-brand-items' }, [el('td', { colspan: '11' }, [brandItemsTable(key)])]));
+    });
+  }
+
+  function loadBrandItems(key) {
+    api('GET', '/products/stock?limit=500&brand=' + encodeURIComponent(key)).then(function (j) {
+      brandItems[key] = Array.isArray(j.data) ? j.data : (j.data.items || []);
+      var bd = document.getElementById('st-brand-body'); if (bd) { clear(bd); fillBrandRows(bd); }
+    }).catch(function (e) { toast(e.message, 'err'); });
+  }
+
+  function brandItemsTable(key) {
+    var list = brandItems[key];
+    if (!list) return el('div', { class: 'hint', style: 'margin:.4rem', text: 'Loading items…' });
+    if (!list.length) return el('div', { class: 'hint', style: 'margin:.4rem', text: 'No items.' });
+    return el('table', { class: 'st-table st-sub' }, [
+      el('thead', {}, [el('tr', {}, ['Item', 'Hand', 'Local (by city)', 'Other states', 'Total', 'Min', 'Status', ''].map(function (h, i) { return el('th', { class: i === 0 || i === 2 || i === 3 ? 'l' : '', text: h }); }))]),
+      el('tbody', {}, list.map(function (it) {
+        return el('tr', { 'data-code': it.itemCode }, [
+          el('td', { class: 'l' }, [el('div', { style: 'font-weight:600', text: it.itemCode }), el('div', { class: 'sub', text: it.itemName })]),
+          el('td', { class: it.handStock ? (it.handStock < 0 ? 'neg' : '') : 'zero', text: qty(it.handStock) }),
+          el('td', { class: 'l', text: placesText(it.localByCity) || '—' }),
+          el('td', { class: 'l', text: placesText(it.stateStock) || '—' }),
+          el('td', { class: 'tot', text: qty(it.availableStock) }),
+          el('td', { class: it.minimumStock ? '' : 'zero', text: it.minimumStock ? qty(it.minimumStock) : '—' }),
+          el('td', {}, [el('span', { class: 'st-badge ' + it.stockStatus, text: it.stockStatus === 'OUT' ? 'Out' : it.stockStatus === 'LOW' ? 'Low' : 'OK' })]),
+          el('td', {}, [el('div', { class: 'st-rowacts' }, [
+            canEdit ? el('button', { class: 'st-btn sm ico', title: 'Adjust quantity', text: '±', onclick: function () { adjustDialog(it); } }) : null,
+            el('button', { class: 'st-btn sm ico', title: 'Stock history', text: '🕘', onclick: function () { historyDialog(it); } })])])
+        ]);
+      }))
+    ]);
   }
 
   function itemsQuery() {
@@ -520,6 +625,8 @@
       api('GET', '/products/stock' + itemsQuery()), api('GET', '/products/stock/check').catch(function () { return { data: null }; })]).then(function (r) {
       meta = r[0].data; stats = r[1].data; alerts = r[2].data; check = r[4].data;
       var d = r[3].data; items = Array.isArray(d) ? d : (d && (d.items || d.data)) || [];
+      brands = null; brandItems = {};
+      if (view === 'brands') { loadBrands(); return; }
       var keep = document.activeElement && document.activeElement.id === 'st-search';
       render();
       if (keep) { var s = document.getElementById('st-search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
