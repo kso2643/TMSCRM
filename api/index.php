@@ -485,6 +485,9 @@ try {
         match (true) {
             $method === 'GET'   && $c1 === 'stats'          => $ctrl->stats(),
             $method === 'GET'   && $c1 === 'export'         => $ctrl->export(),
+            $method === 'GET'   && $c1 === 'payslips'       => $ctrl->payslipsForMonth(),
+            $method === 'GET'   && $c1 === 'leave-summary'  => $ctrl->leaveSummaryEndpoint(),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'payslip' => $ctrl->payslip($c1),
             $method === 'GET'   && $c1 === ''               => $ctrl->index(),
             $method === 'POST'  && $c1 === ''               => $ctrl->create(),
             $method === 'GET'   && $c1 !== '' && $c2 === '' => $ctrl->show($c1),

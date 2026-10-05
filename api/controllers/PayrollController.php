@@ -299,6 +299,285 @@ class PayrollController
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Payslips
+    //   type=leave   — monthly payslip with attendance + leave / permission
+    //                  details for that month and the year so far
+    //   type=general — the plain salary slip (earnings, deductions, net)
+    //   company=TMS|APJ picks the letterhead.
+    // ═══════════════════════════════════════════════════════════════════
+    private const COMPANIES = [
+        'TMS' => ['name' => 'TULIPS MACHINING SOLUTIONS', 'logo' => 'tms-logo.png', 'logoRatio' => 291 / 164,
+                  'lines' => ['SF No 244, Palkarathottam, Opp. Sri Vignesh Nagar, Jeeva Nagar,', 'Cheran Managar, Villankurichi, Coimbatore - 641 035', 'GST No: 33BRHPA9794E1ZO']],
+        'APJ' => ['name' => 'APJ TECHNOLOGIES PRIVATE LIMITED', 'logo' => 'apj-logo.png', 'logoRatio' => 1,
+                  'lines' => ['No. 26/2, Kongu Maa Nagar, Villankurichi Road,', 'Coimbatore - 641 035', 'GST: 33ABECA9840L1Z']],
+    ];
+
+    /** Approved leave for one employee: per type for the month and the year to date. */
+    private function leaveSummary(string $userId, int $month, int $year): array
+    {
+        $types = ['CASUAL', 'SICK', 'PERSONAL', 'HALF_DAY', 'PERMISSION'];
+        $blank = fn() => array_fill_keys($types, ['days' => 0.0, 'hours' => 0.0, 'count' => 0]);
+        $out = ['month' => $blank(), 'year' => $blank(), 'items' => []];
+        try {
+            new LeaveController(); // makes sure the permission columns exist
+            $m0 = sprintf('%04d-%02d-01', $year, $month); $m1 = date('Y-m-t', strtotime($m0)); $y0 = "$year-01-01";
+            $s = db()->prepare("SELECT leaveType, fromDate, toDate, totalDays, hours, fromTime, toTime, reason FROM `Leave`
+                                WHERE userId=? AND status='APPROVED' AND DATE(toDate)>=? AND DATE(fromDate)<=? ORDER BY fromDate");
+            $s->execute([$userId, $y0, $m1]);
+            foreach ($s->fetchAll() as $r) {
+                $t = $r['leaveType']; if (!isset($out['month'][$t])) continue;
+                $from = substr($r['fromDate'], 0, 10); $to = substr($r['toDate'] ?: $r['fromDate'], 0, 10);
+                $days = fn($a, $b) => max(0, (int) round((strtotime(min($to, $b)) - strtotime(max($from, $a))) / 86400) + 1);
+                foreach (['year' => [$y0, $m1], 'month' => [$m0, $m1]] as $k => [$a, $b]) {
+                    if ($to < $a || $from > $b) continue;
+                    $o = &$out[$k][$t];
+                    $o['count']++;
+                    if ($t === 'PERMISSION') $o['hours'] += (float) $r['hours'];
+                    elseif ($t === 'HALF_DAY') $o['days'] += 0.5;
+                    else $o['days'] += $days($a, $b);
+                    unset($o);
+                }
+                if ($to >= $m0 && $from <= $m1) $out['items'][] = [
+                    'type' => $t, 'label' => LeaveController::LABELS[$t] ?? $t, 'from' => $from, 'to' => $to,
+                    'days' => $t === 'PERMISSION' ? 0 : ($t === 'HALF_DAY' ? 0.5 : $days($m0, $m1)),
+                    'hours' => $t === 'PERMISSION' ? (float) $r['hours'] : null,
+                    'time' => $t === 'PERMISSION' ? $r['fromTime'] . '–' . $r['toTime'] : null, 'reason' => $r['reason'],
+                ];
+            }
+        } catch (Throwable $e) { error_log('leaveSummary: ' . $e->getMessage()); }
+        foreach (['month', 'year'] as $k) {
+            $out[$k . 'LeaveDays'] = array_sum(array_map(fn($t) => $out[$k][$t]['days'], ['CASUAL', 'SICK', 'PERSONAL', 'HALF_DAY']));
+        }
+        return $out;
+    }
+
+    // GET /api/payroll/leave-summary?userId=&month=&year= — shown in the payroll form
+    public function leaveSummaryEndpoint(): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        $uid = qp('userId', ''); $m = (int) qp('month', date('n')); $y = (int) qp('year', date('Y'));
+        if (!$uid || $m < 1 || $m > 12) sendError('userId, month and year are required.', 400);
+        sendSuccess($this->leaveSummary($uid, $m, $y));
+    }
+
+    private static function rupeesInWords(float $amount): string
+    {
+        $ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+        $tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+        $two = fn($n) => $n < 20 ? $ones[$n] : trim($tens[intdiv($n, 10)] . ' ' . $ones[$n % 10]);
+        $three = fn($n) => trim(($n >= 100 ? $ones[intdiv($n, 100)] . ' Hundred ' : '') . $two($n % 100));
+        $n = (int) floor(abs($amount)); $paise = (int) round((abs($amount) - $n) * 100);
+        if ($n === 0) $w = 'Zero';
+        else {
+            $parts = [];
+            foreach ([[10000000, 'Crore'], [100000, 'Lakh'], [1000, 'Thousand']] as [$div, $name]) {
+                if ($n >= $div) { $parts[] = $three(intdiv($n, $div)) . ' ' . $name; $n %= $div; }
+            }
+            if ($n) $parts[] = $three($n);
+            $w = implode(' ', $parts);
+        }
+        return 'Rupees ' . $w . ($paise ? ' and ' . $two($paise) . ' Paise' : '') . ' Only';
+    }
+
+    /** Draws one payslip page. */
+    private function drawPayslip(SimplePdf $pdf, array $p, array $u, string $type, string $co): void
+    {
+        $C = self::COMPANIES[$co] ?? self::COMPANIES['TMS'];
+        $pdf->addPage();
+        $W = SimplePdf::A4_WIDTH; $m = 36; $cw = $W - 2 * $m; $y = $m;
+        $rs = fn($v) => 'Rs. ' . number_format((float) $v, 2);
+        $dash = fn($v) => ($v === null || $v === '') ? '—' : (string) $v;
+
+        // letterhead
+        $lh = 46; $lw = $lh * $C['logoRatio'];
+        if (!$pdf->addImage(__DIR__ . '/../assets/' . $C['logo'], $m, $y, $lw, $lh)) {
+            $pdf->setFont('Helvetica-Bold', 16); $pdf->setFillColor('#1E3A5F'); $pdf->text($co, $m, $y + 12);
+        }
+        $pdf->setFont('Helvetica-Bold', 13); $pdf->setFillColor('#1E3A5F');
+        $pdf->text($C['name'], $W - $m, $y + 2, ['align' => 'right']);
+        $pdf->setFont('Helvetica', 8); $pdf->setFillColor('#4B5563');
+        foreach ($C['lines'] as $i => $line) $pdf->text($line, $W - $m, $y + 20 + $i * 10, ['align' => 'right']);
+        $y += $lh + 14;
+
+        // title band
+        $pdf->rect($m, $y, $cw, 26, '#1E3A5F');
+        $pdf->setFont('Helvetica-Bold', 12); $pdf->setFillColor('#FFFFFF');
+        $title = 'PAYSLIP FOR ' . strtoupper(self::MONTH_NAMES[$p['month'] - 1]) . ' ' . $p['year'];
+        $pdf->text($title, $m + 10, $y + 7);
+        $pdf->setFont('Helvetica', 9);
+        $pdf->text($type === 'leave' ? 'With attendance & leave details' : 'General payslip', $W - $m - 10, $y + 9, ['align' => 'right']);
+        $y += 36;
+
+        // employee details (two columns)
+        $acct = $u['bankAccountNumber'] ? str_repeat('X', max(0, strlen($u['bankAccountNumber']) - 4)) . substr($u['bankAccountNumber'], -4) : null;
+        $left = [['Employee name', $u['name']], ['Employee code', $u['employeeCode']], ['Designation', $u['designation']], ['Department', $u['department']],
+                 ['Date of joining', $u['dateOfJoining'] ? date('d-m-Y', strtotime($u['dateOfJoining'])) : null], ['PAN', $u['panNumber']]];
+        $right = [['UAN', $u['uanNumber']], ['PF no.', $u['pfNumber']], ['ESI no.', $u['esiNumber']], ['Bank', $u['bankName']],
+                  ['Account no.', $acct], ['IFSC', $u['bankIFSC']]];
+        $half = $cw / 2;
+        $boxTop = $y; $y += 4;
+        foreach ($left as $i => $row) {
+            foreach ([[$row, $m], [$right[$i], $m + $half]] as [[$label, $val], $x]) {
+                $pdf->setFont('Helvetica', 8.5); $pdf->setFillColor('#6B7280'); $pdf->text($label, $x + 8, $y + 5);
+                $pdf->setFont('Helvetica-Bold', 9); $pdf->setFillColor('#111827'); $pdf->text($dash($val), $x + 100, $y + 5, ['width' => $half - 108]);
+            }
+            $y += 17;
+        }
+        $bh = $y - $boxTop + 4; $bc = '#E5E7EB';
+        $pdf->line($m, $boxTop, $m + $cw, $boxTop, $bc); $pdf->line($m, $boxTop + $bh, $m + $cw, $boxTop + $bh, $bc);
+        $pdf->line($m, $boxTop, $m, $boxTop + $bh, $bc); $pdf->line($m + $cw, $boxTop, $m + $cw, $boxTop + $bh, $bc);
+        $pdf->line($m + $half, $boxTop + 4, $m + $half, $boxTop + $bh - 4, $bc);
+        $y += 14;
+
+        // attendance
+        $wd = $p['workingDays']; $pd = $p['presentDays']; $lop = (float) $p['lopDays'];
+        $paid = $wd !== null ? max(0, $wd - $lop) : null;
+        $cells = [['Working days', $wd], ['Present days', $pd !== null ? rtrim(rtrim(number_format($pd, 1), '0'), '.') : null], ['LOP days', rtrim(rtrim(number_format($lop, 1), '0'), '.')], ['Paid days', $paid !== null ? rtrim(rtrim(number_format($paid, 1), '0'), '.') : null]];
+        $cwid = $cw / 4;
+        foreach ($cells as $i => [$label, $val]) {
+            $x = $m + $i * $cwid;
+            $pdf->rect($x + ($i ? 3 : 0), $y, $cwid - 3, 34, '#F3F6FA');
+            $pdf->setFont('Helvetica', 8); $pdf->setFillColor('#6B7280'); $pdf->text($label, $x + 10, $y + 6);
+            $pdf->setFont('Helvetica-Bold', 12); $pdf->setFillColor('#111827'); $pdf->text($dash($val), $x + 10, $y + 17);
+        }
+        $y += 46;
+
+        // leave details
+        if ($type === 'leave') {
+            $L = $this->leaveSummary($p['userId'], (int) $p['month'], (int) $p['year']);
+            $pdf->setFont('Helvetica-Bold', 10); $pdf->setFillColor('#1E3A5F'); $pdf->text('Leave & permission', $m, $y); $y += 15;
+            $cols = [$m, $m + 190, $m + 330];
+            $pdf->rect($m, $y, $cw, 18, '#E8EEF6');
+            $pdf->setFont('Helvetica-Bold', 8.5); $pdf->setFillColor('#1F2937');
+            $pdf->text('Type', $cols[0] + 8, $y + 5); $pdf->text('This month', $cols[1], $y + 5); $pdf->text('This year (Jan – ' . substr(self::MONTH_NAMES[$p['month'] - 1], 0, 3) . ')', $cols[2], $y + 5);
+            $y += 18;
+            $fmt = function ($t, $v) { if ($t === 'PERMISSION') return $v['count'] ? rtrim(rtrim(number_format($v['hours'], 2), '0'), '.') . ' h (' . $v['count'] . ')' : '—';
+                                        if ($t === 'HALF_DAY') return $v['count'] ? $v['count'] . ' (' . rtrim(rtrim(number_format($v['days'], 1), '0'), '.') . ' day)' : '—';
+                                        return $v['days'] ? rtrim(rtrim(number_format($v['days'], 1), '0'), '.') . ' day' . ($v['days'] == 1 ? '' : 's') : '—'; };
+            foreach (['CASUAL', 'SICK', 'PERSONAL', 'HALF_DAY', 'PERMISSION'] as $i => $t) {
+                if ($i % 2) $pdf->rect($m, $y, $cw, 16, '#FAFBFD');
+                $pdf->setFont('Helvetica', 9); $pdf->setFillColor('#111827');
+                $pdf->text(LeaveController::LABELS[$t], $cols[0] + 8, $y + 4);
+                $pdf->text($fmt($t, $L['month'][$t]), $cols[1], $y + 4);
+                $pdf->text($fmt($t, $L['year'][$t]), $cols[2], $y + 4);
+                $y += 16;
+            }
+            $pdf->line($m, $y, $m + $cw, $y, '#D1D5DB');
+            $pdf->setFont('Helvetica-Bold', 9);
+            $pdf->text('Total leave days', $cols[0] + 8, $y + 5);
+            $pdf->text(rtrim(rtrim(number_format($L['monthLeaveDays'], 1), '0'), '.') ?: '0', $cols[1], $y + 5);
+            $pdf->text(rtrim(rtrim(number_format($L['yearLeaveDays'], 1), '0'), '.') ?: '0', $cols[2], $y + 5);
+            $y += 20;
+            if ($L['items']) {
+                $pdf->setFont('Helvetica', 7.5); $pdf->setFillColor('#4B5563');
+                $list = implode('   ·   ', array_map(fn($it) => $it['label'] . ' ' . date('d M', strtotime($it['from'])) . ($it['to'] !== $it['from'] ? '–' . date('d M', strtotime($it['to'])) : '') . ($it['time'] ? ' ' . $it['time'] : ''), array_slice($L['items'], 0, 12)));
+                $pdf->text('Leave taken: ' . $list, $m, $y, ['width' => $cw, 'lineGap' => 2]);
+                $y += count($pdf->splitTextToSize('Leave taken: ' . $list, $cw)) * 9.5 + 4;
+            }
+            $y += 6;
+        }
+
+        // earnings | deductions
+        $earn = array_filter([['Basic salary', $p['basicSalary']], ['House rent allowance (HRA)', $p['hra']], ['Dearness allowance (DA)', $p['daAllowance'] ?? 0],
+            ['Conveyance allowance', $p['conveyanceAllowance']], ['Medical allowance', $p['medicalAllowance']], ['Special allowance', $p['specialAllowance']], ['Other allowance', $p['otherAllowance']]],
+            fn($r, $i) => $i === 0 || (float) $r[1] != 0, ARRAY_FILTER_USE_BOTH);
+        $ded = array_filter([['Provident fund (PF)', $p['pfDeduction']], ['ESI', $p['esiDeduction']], ['Professional tax', $p['professionalTax']], ['Income tax (TDS)', $p['tds']],
+            ['Loan recovery', $p['loanRecoveryDeduction'] ?? 0], ['Salary advance recovery', $p['advanceRecoveryDeduction'] ?? 0], ['Other deductions', $p['otherDeductions']]],
+            fn($r) => (float) $r[1] != 0);
+        $earn = array_values($earn); $ded = array_values($ded);
+        $rows = max(count($earn), count($ded), 1);
+        $pdf->rect($m, $y, $cw, 20, '#1E3A5F');
+        $pdf->setFont('Helvetica-Bold', 9); $pdf->setFillColor('#FFFFFF');
+        $pdf->text('EARNINGS', $m + 8, $y + 6); $pdf->text('AMOUNT', $m + $half - 8, $y + 6, ['align' => 'right']);
+        $pdf->text('DEDUCTIONS', $m + $half + 8, $y + 6); $pdf->text('AMOUNT', $m + $cw - 8, $y + 6, ['align' => 'right']);
+        $y += 20;
+        for ($i = 0; $i < $rows; $i++) {
+            if ($i % 2) $pdf->rect($m, $y, $cw, 17, '#FAFBFD');
+            $pdf->setFont('Helvetica', 9); $pdf->setFillColor('#111827');
+            if (isset($earn[$i])) { $pdf->text($earn[$i][0], $m + 8, $y + 4); $pdf->text($rs($earn[$i][1]), $m + $half - 8, $y + 4, ['align' => 'right']); }
+            if (isset($ded[$i])) { $pdf->text($ded[$i][0], $m + $half + 8, $y + 4); $pdf->text($rs($ded[$i][1]), $m + $cw - 8, $y + 4, ['align' => 'right']); }
+            elseif ($i === 0) { $pdf->setFillColor('#9CA3AF'); $pdf->text('No deductions', $m + $half + 8, $y + 4); }
+            $y += 17;
+        }
+        $pdf->line($m + $half, $y - 17 * $rows - 20, $m + $half, $y + 20, '#D1D5DB');
+        $pdf->rect($m, $y, $cw, 20, '#E8EEF6');
+        $pdf->setFont('Helvetica-Bold', 9.5); $pdf->setFillColor('#111827');
+        $pdf->text('Gross earnings', $m + 8, $y + 6); $pdf->text($rs($p['grossSalary']), $m + $half - 8, $y + 6, ['align' => 'right']);
+        $pdf->text('Total deductions', $m + $half + 8, $y + 6); $pdf->text($rs($p['totalDeductions']), $m + $cw - 8, $y + 6, ['align' => 'right']);
+        $y += 30;
+
+        // net pay
+        $pdf->rect($m, $y, $cw, 44, '#ECFDF5');
+        $pdf->setFont('Helvetica-Bold', 11); $pdf->setFillColor('#065F46');
+        $pdf->text('NET PAY', $m + 10, $y + 8);
+        $pdf->setFont('Helvetica-Bold', 15); $pdf->text($rs($p['netSalary']), $m + $cw - 10, $y + 6, ['align' => 'right']);
+        $pdf->setFont('Helvetica-Oblique', 8.5); $pdf->setFillColor('#047857');
+        $pdf->text(self::rupeesInWords((float) $p['netSalary']), $m + 10, $y + 27, ['width' => $cw - 20]);
+        $y += 56;
+
+        $pdf->setFont('Helvetica', 8.5); $pdf->setFillColor('#4B5563');
+        $status = $p['status'] === 'PAID' ? 'Paid' . ($p['paidOn'] ? ' on ' . date('d-m-Y', strtotime($p['paidOn'])) : '') : ucfirst(strtolower($p['status']));
+        $pdf->text('Status: ' . $status . ($p['remarks'] ? '   ·   Remarks: ' . $p['remarks'] : ''), $m, $y, ['width' => $cw]);
+        $pdf->setFont('Helvetica-Oblique', 7.5); $pdf->setFillColor('#9CA3AF');
+        $pdf->text('This is a computer-generated payslip and does not need a signature.  Generated ' . date('d-m-Y H:i'), $m, SimplePdf::A4_HEIGHT - 40, ['width' => $cw, 'align' => 'center']);
+    }
+
+    private function payslipData(string $id): ?array
+    {
+        $s = db()->prepare('SELECT * FROM `Payroll` WHERE id=?'); $s->execute([$id]);
+        $p = $s->fetch();
+        if (!$p) return null;
+        $u = db()->prepare('SELECT * FROM `User` WHERE id=?'); $u->execute([$p['userId']]);
+        return [$p, $u->fetch() ?: ['name' => '—']];
+    }
+
+    private static function userDefaults(array $u): array
+    {
+        foreach (['name','employeeCode','designation','department','dateOfJoining','panNumber','uanNumber','pfNumber','esiNumber','bankName','bankAccountNumber','bankIFSC'] as $k) $u[$k] = $u[$k] ?? null;
+        return $u;
+    }
+
+    // GET /api/payroll/:id/payslip?type=leave|general&company=TMS|APJ
+    public function payslip(string $id): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        $d = $this->payslipData($id);
+        if (!$d) sendError('Payroll record not found.', 404);
+        [$p, $u] = $d;
+        $type = qp('type', 'leave') === 'general' ? 'general' : 'leave';
+        $co = strtoupper(qp('company', 'TMS')) === 'APJ' ? 'APJ' : 'TMS';
+        $pdf = new SimplePdf();
+        $this->drawPayslip($pdf, $p, self::userDefaults($u), $type, $co);
+        log_activity($auth['id'], 'PAYSLIP_DOWNLOADED', 'Payroll', $id, ['type' => $type]);
+        $name = 'payslip-' . preg_replace('/[^A-Za-z0-9]+/', '-', $u['name'] ?? 'employee') . '-' . self::MONTH_NAMES[$p['month'] - 1] . '-' . $p['year'] . ($type === 'general' ? '-general' : '') . '.pdf';
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="' . $name . '"');
+        echo $pdf->output(); exit;
+    }
+
+    // GET /api/payroll/payslips?month=&year=&type=&company=&status= — every employee's payslip for the month in one PDF
+    public function payslipsForMonth(): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        $m = (int) qp('month', date('n')); $y = (int) qp('year', date('Y'));
+        $type = qp('type', 'leave') === 'general' ? 'general' : 'leave';
+        $co = strtoupper(qp('company', 'TMS')) === 'APJ' ? 'APJ' : 'TMS';
+        $sql = 'SELECT p.* FROM `Payroll` p LEFT JOIN `User` u ON u.id=p.userId WHERE p.month=? AND p.year=?';
+        $params = [$m, $y];
+        if (qp('status')) { $sql .= ' AND p.status=?'; $params[] = qp('status'); }
+        $s = db()->prepare($sql . ' ORDER BY u.name'); $s->execute($params);
+        $rows = $s->fetchAll();
+        if (!$rows) sendError('No payroll records for ' . self::MONTH_NAMES[$m - 1] . ' ' . $y . '.', 404);
+        $pdf = new SimplePdf();
+        $us = db()->prepare('SELECT * FROM `User` WHERE id=?');
+        foreach ($rows as $p) { $us->execute([$p['userId']]); $this->drawPayslip($pdf, $p, self::userDefaults($us->fetch() ?: ['name' => '—']), $type, $co); }
+        log_activity($auth['id'], 'PAYSLIPS_DOWNLOADED', 'Payroll', null, ['month' => $m, 'year' => $y, 'count' => count($rows), 'type' => $type]);
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="payslips-' . self::MONTH_NAMES[$m - 1] . '-' . $y . ($type === 'general' ? '-general' : '') . '.pdf"');
+        echo $pdf->output(); exit;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Salary Advances
     // ═══════════════════════════════════════════════════════════════════
 

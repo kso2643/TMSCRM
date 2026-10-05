@@ -1,0 +1,69 @@
+/* ══════════════════════════════════════════════════════════════════════
+   payroll-fix.css — makes the Payroll pages look like the rest of the CRM.
+   Linked last in every /payroll/* page.
+   - the CRM sidebar (docked by crm-global.js) already has navigation and
+     Sign out, so the old dark "Industrial CRM / Back to CRM" bar is hidden;
+   - the section tabs become a light tab bar like other CRM pages;
+   - CRM font, colours, cards and buttons; tables scroll sideways on phones;
+   - dark mode follows the CRM theme switch.
+   ════════════════════════════════════════════════════════════════════ */
+:root{
+  --ink:#0f172a; --primary:#1e3a8a; --primary-hover:#1e40af; --accent:#1e3a8a; --accent-soft:#dbeafe;
+  --bg:#f8fafc; --card:#ffffff; --border:#e2e8f0; --text:#0f172a; --muted:#64748b; --radius:12px;
+  --shadow:0 1px 2px rgba(15,23,42,.04);
+}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);}
+.app-header{display:none!important;}
+
+/* page heading + tabs */
+.payroll-nav{background:#fff;border-bottom:1px solid var(--border);padding:0 28px;gap:4px;position:sticky;top:0;z-index:20;}
+.payroll-nav a{color:#64748b;padding:14px 14px 12px;font-size:13.5px;border-bottom:2px solid transparent;}
+.payroll-nav a:hover{color:#334155;}
+.payroll-nav a.active{color:var(--primary);border-bottom-color:var(--primary);}
+.payroll-nav::before{content:"Payroll";align-self:center;font-weight:700;font-size:15px;color:var(--text);margin-right:18px;white-space:nowrap;}
+.container{max-width:1320px;padding:24px 28px 40px;}
+.page-title{font-size:21px;}
+
+/* cards, stats, tables */
+.stats-grid{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))!important;gap:12px;}
+.stat-card,.table-card,.card,.panel{border-radius:var(--radius);border-color:var(--border);box-shadow:var(--shadow);}
+.stat-label{font-size:11.5px;letter-spacing:.02em;}
+.table-card{overflow-x:auto;}
+.table-card table{min-width:760px;}
+thead th{background:#f8fafc;color:#64748b;}
+tbody tr:hover{background:#f8fafc;}
+.toolbar{gap:8px;}
+.toolbar select,.toolbar input[type=text]{border-radius:8px;}
+
+/* buttons */
+.btn{border-radius:8px;transition:background-color .15s,border-color .15s,color .15s;}
+.btn-primary{background:var(--primary);}
+.btn-primary:hover{background:var(--primary-hover);}
+.btn-ghost{background:#fff;border-color:#cbd5e1;color:#0f172a;}
+.btn-ghost:hover{background:#f1f5f9;}
+.icon-btn{border-radius:7px;}
+
+/* access check screen */
+#login-screen{background:var(--bg);}
+
+/* phones */
+@media (max-width:760px){
+  .payroll-nav{padding:0 12px;}
+  .payroll-nav::before{display:none;}
+  .container{padding:16px;}
+  .toolbar > *{flex:1 1 auto;}
+  .toolbar .spacer{display:none;}
+}
+
+/* dark mode (CRM theme switch adds .dark on <html>) */
+html.dark body{background:#0f172a;color:#e2e8f0;}
+html.dark{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#e2e8f0;--muted:#94a3b8;}
+html.dark .payroll-nav{background:#1e293b;}
+html.dark .payroll-nav a{color:#94a3b8;}
+html.dark .payroll-nav a.active{color:#93c5fd;border-bottom-color:#93c5fd;}
+html.dark .stat-card,html.dark .table-card,html.dark .card,html.dark .panel,html.dark .modal{background:#1e293b;color:#e2e8f0;}
+html.dark thead th{background:#0f172a;}
+html.dark tbody tr:hover{background:#0f172a;}
+html.dark .toolbar select,html.dark .toolbar input,html.dark .field input,html.dark .field select{background:#0f172a;color:#e2e8f0;border-color:#334155;}
+html.dark .btn-ghost{background:#1e293b;color:#e2e8f0;border-color:#334155;}
+html.dark .leave-info{background:#0c4a6e55;border-color:#075985;color:#bae6fd;}
