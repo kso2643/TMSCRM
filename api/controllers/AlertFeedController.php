@@ -190,6 +190,26 @@ class AlertFeedController
                 '/trials/#/t/' . rawurlencode($r['id']), $r['decidedAt']);
         }
 
+        // Trial PDFs sent to admin (existing data on raising, comparison on completion)
+        if ($isManager) {
+            foreach (self::rows(
+                "SELECT f.id, f.kind, f.createdAt, t.id AS tid, t.trialNo, t.customerName, u.name AS byName FROM `TrialFile` f
+                 JOIN `Trial` t ON t.id=f.trialId LEFT JOIN `User` u ON u.id=f.uploadedById
+                 WHERE f.createdAt>? AND f.uploadedById<>? ORDER BY f.createdAt DESC LIMIT $per", [$since, $me]) as $r) {
+                $add('trial-file-' . $r['id'], 'TRIAL_PDF', ($r['kind'] === 'CMP' ? 'Trial comparison PDF' : 'Existing data PDF') . ' received',
+                    $r['trialNo'] . ' · ' . ($r['customerName'] ?: '') . ' — from ' . ($r['byName'] ?: 'engineer') . ', open it on the trial',
+                    '/trials/#/t/' . rawurlencode($r['tid']), $r['createdAt']);
+            }
+        }
+        // DC approved for my trial
+        foreach (self::rows(
+            "SELECT t.id, t.trialNo, t.dcDate, t.dcApprovedAt FROM `Trial` t WHERE t.requestedById=? AND t.dcApprovedAt>? AND t.dcApprovedById<>? ORDER BY t.dcApprovedAt DESC LIMIT $per",
+            [$me, $since, $me]) as $r) {
+            $add('trial-dc-' . $r['id'] . '-' . $r['dcApprovedAt'], 'TRIAL_DECIDED', 'DC approved',
+                $r['trialNo'] . ' — trial on ' . date('d M Y', strtotime($r['dcDate'])) . '. Fill the comparison after the trial.',
+                '/trials/#/t/' . rawurlencode($r['id']) . '/savings', $r['dcApprovedAt']);
+        }
+
         // Leave (make sure the permission-hours columns exist before selecting them)
         try { new LeaveController(); } catch (Throwable $e) {}
         $what = fn($r) => ($r['leaveType'] === 'PERMISSION' ? 'permission ' . ($r['fromTime'] ?? '') . '–' . ($r['toTime'] ?? '') . ' (' . rtrim(rtrim(number_format((float) ($r['hours'] ?? 0), 2), '0'), '.') . ' h)'

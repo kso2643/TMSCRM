@@ -414,6 +414,10 @@ try {
             $method === 'PATCH'  && $c1 !== '' && $c2 === 'approve'    => $ctrl->approve($c1),
             $method === 'PATCH'  && $c1 !== '' && $c2 === 'reject'     => $ctrl->reject($c1),
             $method === 'PATCH'  && $c1 !== '' && $c2 === 'company'    => $ctrl->setCompany($c1),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === 'dc'         => $ctrl->approveDc($c1),
+            $method === 'GET'    && $c1 !== '' && $c2 === 'related'    => $ctrl->related($c1),
+            $method === 'POST'   && $c1 !== '' && $c2 === 'files' && $c3 === ''  => $ctrl->uploadFile($c1),
+            $method === 'GET'    && $c1 !== '' && $c2 === 'files' && $c3 !== ''  => $ctrl->downloadFile($c1, $c3),
             default => sendError("Route /api/trials/$c1/$c2 not found", 404),
         };
     }

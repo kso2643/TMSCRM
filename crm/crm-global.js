@@ -506,6 +506,7 @@
     TRIAL_REQUESTED:        { color: '#7c3aed', icon: '🧪' },
     TRIAL_DECIDED:          { color: '#7c3aed', icon: '🧪' },
     TRIAL_COMPLETED:        { color: '#16a34a', icon: '🧪' },
+    TRIAL_PDF:              { color: '#7c3aed', icon: '📄' },
     LEAVE_REQUESTED:        { color: '#db2777', icon: '🌴' },
     LEAVE_DECIDED:          { color: '#db2777', icon: '🌴' },
     BREAK_STARTED:          { color: '#a16207', icon: '☕' },

@@ -33,7 +33,7 @@
   ];
   var TYPE_GROUP = {
     TASK_ASSIGNED: 'tasks', TASK_COMPLETED: 'tasks',
-    TRIAL_REQUESTED: 'trials', TRIAL_DECIDED: 'trials', TRIAL_COMPLETED: 'trials',
+    TRIAL_REQUESTED: 'trials', TRIAL_DECIDED: 'trials', TRIAL_COMPLETED: 'trials', TRIAL_PDF: 'trials',
     LEAVE_REQUESTED: 'leave', LEAVE_DECIDED: 'leave',
     PRICE_REQUEST_NEW: 'prices', PRICE_REQUEST_ANSWERED: 'prices', PRICE_REQUEST_REMINDER: 'prices',
     STOCK_LOW: 'stock', STOCK_CHECK: 'stock',

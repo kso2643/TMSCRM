@@ -70,20 +70,35 @@ class TrialController
   CONSTRAINT `Trial_requestedById_fkey` FOREIGN KEY (`requestedById`) REFERENCES `User` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE";
         $tail = ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
         return [
+            'TrialFile' => [
+                'create' => "CREATE TABLE IF NOT EXISTS `TrialFile` (
+  `id` VARCHAR(30) NOT NULL, `trialId` VARCHAR(30) NOT NULL, `kind` VARCHAR(10) NOT NULL,
+  `fileName` VARCHAR(255) NOT NULL, `storedName` VARCHAR(120) NOT NULL, `size` INT NOT NULL DEFAULT 0,
+  `uploadedById` VARCHAR(30) NULL, `viewedAt` DATETIME NULL, `viewedById` VARCHAR(30) NULL,
+  `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`), KEY `TrialFile_trial_idx` (`trialId`)
+$tail",
+            ],
             'Trial' => [
                 'create'   => "CREATE TABLE IF NOT EXISTS `Trial` ($cols$fks\n$tail",
                 'fallback' => "CREATE TABLE IF NOT EXISTS `Trial` ($cols\n$tail",
                 // Which company runs the trial — decides the logo on the sheets (TMS / APJ).
-                'columns'  => ['company' => "VARCHAR(10) NOT NULL DEFAULT 'TMS'"],
+                'columns'  => ['company' => "VARCHAR(10) NOT NULL DEFAULT 'TMS'",
+                               // quotation reference given to every trial
+                               'quotationNo' => 'VARCHAR(40) NULL',
+                               // DC approval: tools sent on delivery challan for the allotted trial date
+                               'dcStatus' => 'VARCHAR(20) NULL', 'dcDate' => 'DATE NULL', 'dcNo' => 'VARCHAR(60) NULL', 'dcNote' => 'TEXT NULL',
+                               'dcApprovedById' => 'VARCHAR(30) NULL', 'dcApprovedAt' => 'DATETIME NULL'],
             ],
         ];
     }
 
-    private const SELECT = 'SELECT t.*, u.name AS requestedByName, u.role AS requestedByRole, d.name AS decidedByName,
+    private const SELECT = 'SELECT t.*, u.name AS requestedByName, u.role AS requestedByRole, d.name AS decidedByName, dc.name AS dcApprovedByName,
                                    c.companyName AS linkedCompanyName
                             FROM `Trial` t
                             LEFT JOIN `User` u ON u.id = t.requestedById
                             LEFT JOIN `User` d ON d.id = t.decidedById
+                            LEFT JOIN `User` dc ON dc.id = t.dcApprovedById
                             LEFT JOIN `Customer` c ON c.id = t.customerId';
 
     private function fetchRow(string $id): ?array
@@ -98,9 +113,10 @@ class TrialController
         return (ROLE_LEVELS[$auth['role']] ?? 0) >= ROLE_LEVELS['ADMIN'];
     }
 
+    // Every engineer can open every trial request (read-only unless it is theirs).
     private function canSee(array $auth, array $row): bool
     {
-        return is_admin_tier($auth['role']) || $row['requestedById'] === $auth['id'];
+        return true;
     }
 
     private function canEdit(array $auth, array $row): bool
@@ -116,6 +132,10 @@ class TrialController
             'customer'       => ['id' => $r['customerId'], 'name' => $r['linkedCompanyName'] ?: $r['customerName']],
             'component'      => $r['component'],
             'company'        => $r['company'] ?? 'TMS',
+            'quotationNo'    => $r['quotationNo'] ?? null,
+            'dc'             => !empty($r['dcStatus']) ? ['status' => $r['dcStatus'], 'date' => $r['dcDate'], 'no' => $r['dcNo'], 'note' => $r['dcNote'],
+                                                         'approvedAt' => $r['dcApprovedAt'], 'approvedBy' => $r['dcApprovedByName'] ?? null] : null,
+            'requestedById'  => $r['requestedById'],
             'requestedBy'    => ['id' => $r['requestedById'], 'name' => $r['requestedByName'], 'role' => $r['requestedByRole']],
             'status'         => $r['status'],
             'recommendations'=> $r['recommendations'] ? (json_decode($r['recommendations'], true) ?: []) : [],
@@ -131,6 +151,10 @@ class TrialController
             'updatedAt'      => $r['updatedAt'],
         ];
         if ($full) {
+            $fs = db()->prepare('SELECT f.id, f.kind, f.fileName, f.size, f.createdAt, f.viewedAt, u.name AS uploadedBy, v.name AS viewedBy
+                                 FROM `TrialFile` f LEFT JOIN `User` u ON u.id=f.uploadedById LEFT JOIN `User` v ON v.id=f.viewedById WHERE f.trialId=? ORDER BY f.createdAt DESC');
+            $fs->execute([$r['id']]);
+            $out['files'] = $fs->fetchAll();
             $out['existingData'] = $r['existingData'] ? json_decode($r['existingData'], true) : null;
             $out['savingsData'] = $r['savingsData'] ? json_decode($r['savingsData'], true) : null;
         }
@@ -192,11 +216,13 @@ class TrialController
     {
         $auth = authenticate();
         $scope = []; $sp = [];
-        if (!is_admin_tier($auth['role']) || qp('mine')) { $scope[] = 't.requestedById=?'; $sp[] = $auth['id']; }
+        // Engineers see their own by default; ?scope=all shows every engineer's requests.
+        if ((!is_admin_tier($auth['role']) && qp('scope') !== 'all') || qp('mine')) { $scope[] = 't.requestedById=?'; $sp[] = $auth['id']; }
+        if (qp('engineer')) { $scope[] = 't.requestedById=?'; $sp[] = qp('engineer'); }
         if (qp('search')) {
             $like = '%' . qp('search') . '%';
-            $scope[] = '(t.trialNo LIKE ? OR t.customerName LIKE ? OR c.companyName LIKE ? OR t.component LIKE ?)';
-            array_push($sp, $like, $like, $like, $like);
+            $scope[] = '(t.trialNo LIKE ? OR t.customerName LIKE ? OR c.companyName LIKE ? OR t.component LIKE ? OR t.recommendations LIKE ? OR t.quotationNo LIKE ? OR t.bestTool LIKE ?)';
+            array_push($sp, $like, $like, $like, $like, $like, $like, $like);
         }
         $where = $scope; $params = $sp;
         $status = strtoupper((string) qp('status', 'ALL'));
@@ -226,6 +252,9 @@ class TrialController
         $auth = authenticate();
         $row = $this->fetchRow($id);
         if (!$row || !$this->canSee($auth, $row)) sendError('Trial not found.', 404);
+        if (empty($row['quotationNo'])) {
+            try { db()->prepare('UPDATE `Trial` SET quotationNo=? WHERE id=? AND quotationNo IS NULL')->execute([$this->nextQuotationNo($row['company'] ?: 'TMS'), $id]); } catch (Throwable $e) {}
+        }
         $this->send($id);
     }
 
@@ -249,9 +278,9 @@ class TrialController
             $json = self::sheetJson($eda, 'eda', 'existing situation data analysis');
             try {
                 db()->prepare(
-                    'INSERT INTO `Trial` (id,trialNo,customerId,customerName,component,company,requestedById,status,existingData,createdAt,updatedAt)
-                     VALUES (?,?,?,?,?,?,?,\'PENDING_APPROVAL\',?,?,?)'
-                )->execute([$id, $trialNo, $customerId, $custName, $component, self::company($b['company'] ?? ''), $auth['id'], $json, now_sql(), now_sql()]);
+                    'INSERT INTO `Trial` (id,trialNo,customerId,customerName,component,company,quotationNo,requestedById,status,existingData,createdAt,updatedAt)
+                     VALUES (?,?,?,?,?,?,?,?,\'PENDING_APPROVAL\',?,?,?)'
+                )->execute([$id, $trialNo, $customerId, $custName, $component, self::company($b['company'] ?? ''), $this->nextQuotationNo(self::company($b['company'] ?? '')), $auth['id'], $json, now_sql(), now_sql()]);
                 break;
             } catch (PDOException $e) {
                 if ($attempt === 2 || $e->getCode() !== '23000') throw $e; // retry only a trialNo collision
@@ -377,6 +406,7 @@ class TrialController
         if (!$row || !$this->canSee($auth, $row)) sendError('Trial not found.', 404);
         if (!$this->canEdit($auth, $row)) sendError('Not authorized to edit this trial.', 403);
         if (!in_array($row['status'], ['APPROVED', 'COMPLETED'], true)) sendError('The savings report opens once the trial is approved.', 400);
+        if (empty($row['dcStatus']) && $row['status'] !== 'COMPLETED') sendError('The trial comparison opens after DC approval (admin gives the DC with the allotted trial date).', 400);
 
         $b = request_body();
         $cmp = $b['savingsData'] ?? null;
@@ -399,6 +429,92 @@ class TrialController
 
         log_activity($auth['id'], $complete && $row['status'] !== 'COMPLETED' ? 'TRIAL_COMPLETED' : 'TRIAL_SAVINGS_UPDATED', 'Trial', $id, []);
         $this->send($id, $complete ? 'Savings report submitted — trial completed' : 'Savings report saved');
+    }
+
+    /** e.g. TMS/TRQ/2026/0012 — numbered per company and year. */
+    private function nextQuotationNo(string $co): string
+    {
+        $prefix = $co . '/TRQ/' . date('Y') . '/';
+        $s = db()->prepare("SELECT MAX(CAST(SUBSTRING(quotationNo, ?) AS UNSIGNED)) FROM `Trial` WHERE quotationNo LIKE ?");
+        $s->execute([strlen($prefix) + 1, $prefix . '%']);
+        return $prefix . str_pad((string) (((int) $s->fetchColumn()) + 1), 4, '0', STR_PAD_LEFT);
+    }
+
+    // PATCH /api/trials/:id/dc — Admin / Super Admin approve the DC with the allotted trial date { dcDate, dcNo?, note? }
+    public function approveDc(string $id): void
+    {
+        $auth = authenticate();
+        if (!self::isManager($auth)) sendError('Only Admin / Super Admin can approve the DC.', 403);
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Trial not found.', 404);
+        if ($row['status'] !== 'APPROVED') sendError('The DC is approved after the trial is approved (and before it is completed).', 400);
+        $b = request_body();
+        $date = to_date_only($b['dcDate'] ?? null);
+        if (!$date) sendError('Choose the allotted trial date.', 400);
+        db()->prepare("UPDATE `Trial` SET dcStatus='APPROVED', dcDate=?, dcNo=?, dcNote=?, dcApprovedById=?, dcApprovedAt=?, updatedAt=? WHERE id=?")
+            ->execute([$date, mb_substr(trim((string) ($b['dcNo'] ?? '')), 0, 60) ?: null, trim((string) ($b['note'] ?? '')) ?: null, $auth['id'], now_sql(), now_sql(), $id]);
+        log_activity($auth['id'], 'TRIAL_DC_APPROVED', 'Trial', $id, ['date' => $date]);
+        $this->send($id, 'DC approved — trial on ' . date('d M Y', strtotime($date)));
+    }
+
+    // GET /api/trials/:id/related — earlier trials for the same customer, component or recommended tool
+    public function related(string $id): void
+    {
+        authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Trial not found.', 404);
+        $where = []; $p = [];
+        if ($row['customerId']) { $where[] = 't.customerId=?'; $p[] = $row['customerId']; }
+        if ($row['customerName']) { $where[] = 't.customerName=?'; $p[] = $row['customerName']; }
+        if ($row['component']) { $where[] = 't.component LIKE ?'; $p[] = '%' . $row['component'] . '%'; }
+        foreach (array_slice(json_decode((string) $row['recommendations'], true) ?: [], 0, 3) as $rec) {
+            if (!empty($rec['spec'])) { $where[] = 't.recommendations LIKE ?'; $p[] = '%' . $rec['spec'] . '%'; }
+        }
+        if (!$where) sendSuccess(['trials' => []]);
+        $s = db()->prepare(self::SELECT . ' WHERE t.id<>? AND (' . implode(' OR ', $where) . ') ORDER BY t.createdAt DESC LIMIT 25');
+        $s->execute(array_merge([$id], $p));
+        sendSuccess(['trials' => array_map(fn($r) => $this->shape($r, false), $s->fetchAll())]);
+    }
+
+    // POST /api/trials/:id/files — multipart file (PDF), kind EDA | CMP: the sheet PDFs, kept for admins
+    public function uploadFile(string $id): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Trial not found.', 404);
+        if (!$this->canEdit($auth, $row)) sendError('Not authorized.', 403);
+        $kind = strtoupper((string) ($_POST['kind'] ?? 'OTHER'));
+        if (!in_array($kind, ['EDA', 'CMP', 'OTHER'], true)) $kind = 'OTHER';
+        $f = $_FILES['file'] ?? null;
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('No file received.', 400);
+        if ($f['size'] > 20 * 1024 * 1024) sendError('The PDF is larger than 20 MB.', 400);
+        $head = (string) file_get_contents($f['tmp_name'], false, null, 0, 5);
+        if (strpos($head, '%PDF') !== 0) sendError('Only PDF files can be attached here.', 400);
+        $dir = UPLOADS_PATH . '/trials';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the file on the server.', 500);
+        $fid = gen_id(); $stored = $fid . '.pdf';
+        if (!move_uploaded_file($f['tmp_name'], "$dir/$stored") && !rename($f['tmp_name'], "$dir/$stored")) sendError('Could not save the file on the server.', 500);
+        $name = preg_replace('/[^\w.\- ()]+/u', '_', (string) ($f['name'] ?: ($kind . '.pdf')));
+        db()->prepare('INSERT INTO `TrialFile` (id,trialId,kind,fileName,storedName,size,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?,?)')
+            ->execute([$fid, $id, $kind, mb_substr($name, 0, 255), $stored, (int) $f['size'], $auth['id'], now_sql()]);
+        log_activity($auth['id'], 'TRIAL_FILE_SENT', 'Trial', $id, ['kind' => $kind]);
+        $this->send($id, ($kind === 'EDA' ? 'Existing data PDF' : ($kind === 'CMP' ? 'Comparison PDF' : 'PDF')) . ' sent to admin', 201);
+    }
+
+    // GET /api/trials/:id/files/:fid — download / open (marks it opened when an admin opens it)
+    public function downloadFile(string $id, string $fid): void
+    {
+        $auth = authenticate();
+        $s = db()->prepare('SELECT * FROM `TrialFile` WHERE id=? AND trialId=?'); $s->execute([$fid, $id]);
+        $f = $s->fetch();
+        if (!$f) sendError('File not found.', 404);
+        $path = UPLOADS_PATH . '/trials/' . basename($f['storedName']);
+        if (!is_file($path)) sendError('The file is missing on the server.', 404);
+        if (self::isManager($auth) && !$f['viewedAt']) db()->prepare('UPDATE `TrialFile` SET viewedAt=?, viewedById=? WHERE id=?')->execute([now_sql(), $auth['id'], $fid]);
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: ' . (qp('download') ? 'attachment' : 'inline') . '; filename="' . str_replace('"', '', $f['fileName']) . '"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path); exit;
     }
 
     // DELETE /api/trials/:id — requester while pending/rejected, or admin

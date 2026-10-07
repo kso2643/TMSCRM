@@ -4230,6 +4230,11 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
       // e.g. the CRM customer picked after the sheet opened
       Object.keys(d.fields).forEach(function (k) { S.R[k] = d.fields[k]; });
       if (KIND === 'cmp') loadCmpForm(); else loadForm();
+    } else if (d.type === 'pdf') {
+      // the CRM keeps a copy of the sheet PDF (sent to admin with the trial)
+      (S.R && S.R.kind === 'cmp' ? buildCmpPdfBlob(S.R) : buildPdfBlob(S.R))
+        .then(function (blob) { post({ type: 'pdf', requestId: d.requestId, blob: blob }); })
+        .catch(function (e) { post({ type: 'pdf', requestId: d.requestId, error: String((e && e.message) || e) }); });
     } else if (d.type === 'get') {
       if (S.R) S.R.updatedAt = new Date().toISOString();
       S.dirty = false;

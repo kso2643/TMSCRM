@@ -63,6 +63,24 @@
   function canManage() { return ['SUPER_ADMIN', 'ADMIN'].indexOf(role()) !== -1; }
   function isMine(t) { var u = currentUser(); return !!(u && t.requestedBy && t.requestedBy.id === u.id); }
   function canEdit(t) { return canManage() || isMine(t); }
+  /** Sends the sheet PDF to the server (kept on the trial, admins are alerted). Never blocks the main action. */
+  function sendSheetPdf(sheet, trialId, kind, name) {
+    return sheet.pdf().then(function (blob) {
+      var fd = new FormData(); fd.append('kind', kind); fd.append('file', blob, name);
+      return fetch(API + '/api/trials/' + encodeURIComponent(trialId) + '/files', { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || '') }, body: fd })
+        .then(function (r) { return r.json(); }).then(function (j) { if (!j.success) throw new Error(j.message); return j; });
+    });
+  }
+  function openTrialFile(t, f, download) {
+    var w = download ? null : window.open('', '_blank');
+    fetch(API + '/api/trials/' + encodeURIComponent(t.id) + '/files/' + encodeURIComponent(f.id) + (download ? '?download=1' : ''), { headers: { Authorization: 'Bearer ' + (token() || '') } })
+      .then(function (r) { if (!r.ok) throw new Error('Could not open the file'); return r.blob(); })
+      .then(function (b) {
+        var url = URL.createObjectURL(b);
+        if (w) w.location.href = url; else { var a = document.createElement('a'); a.href = url; a.download = f.fileName; document.body.appendChild(a); a.click(); a.remove(); }
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      }).catch(function (e) { if (w) w.close(); alert(e.message); });
+  }
 
   function api(method, path, body) {
     var opts = { method: method, headers: { Authorization: 'Bearer ' + (token() || '') } };
@@ -149,6 +167,11 @@
       '.dark .trl-rec{border-color:#334155}',
       '@media(min-width:900px){.trl-rec{grid-template-columns:150px 2fr 1fr 90px 2fr auto}}',
       '.trl-lab{display:block;font-size:.72rem;font-weight:500;color:#64748b;margin-bottom:.25rem}',
+      '.trl-scope{display:inline-flex;border:1px solid #e2e8f0;border-radius:.6rem;padding:2px}.trl-scope-b{border:0;background:none;padding:.35rem .8rem;border-radius:.45rem;font-size:.82rem;font-weight:600;color:#64748b;cursor:pointer}',
+      '.trl-scope-b.on{background:#1e3a8a;color:#fff}',
+      '.trl-meta{display:flex;flex-wrap:wrap;gap:.35rem 1.2rem;font-size:.84rem;color:#334155}.trl-meta b{color:#0f172a}.dark .trl-meta{color:#cbd5e1}.dark .trl-meta b{color:#f1f5f9}',
+      '.trl-docs{display:flex;flex-direction:column;gap:.35rem}.trl-doc{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;font-size:.84rem;padding:.45rem .6rem;border:1px solid #e2e8f0;border-radius:.5rem}',
+      '.trl-rel td{padding:.45rem .6rem;border-top:1px solid #f1f5f9;font-size:.82rem}.trl-rel{width:100%}.trl-rel tr{cursor:pointer}.trl-rel tr:hover td{background:#f8fafc}',
       '.trl-newhead{display:grid;grid-template-columns:minmax(200px,280px) 1fr;gap:1rem;align-items:start}',
       '@media (max-width:700px){.trl-newhead{grid-template-columns:1fr}}',
       'select.trl-company{width:auto;min-width:0;padding-top:.35rem;padding-bottom:.35rem;font-size:.82rem}.trl-newhead select.trl-company{width:100%}',
@@ -201,7 +224,7 @@
     this.onMessage = function (d) {
       if (d.type === 'ready') readyResolve();
       else if (d.type === 'change') self.changed = true;
-      else if (d.type === 'data' && pending[d.requestId]) { pending[d.requestId](d); delete pending[d.requestId]; }
+      else if ((d.type === 'data' || d.type === 'pdf') && pending[d.requestId]) { pending[d.requestId](d); delete pending[d.requestId]; }
     };
     this.send = function (msg) {
       msg.target = 'tms-trial-sheet';
@@ -221,6 +244,15 @@
         pending[id] = res;
         self.send({ type: 'get', requestId: id });
         setTimeout(function () { if (pending[id]) { delete pending[id]; rej(new Error('The sheet did not respond — please try again.')); } }, 8000);
+      });
+    };
+    /** The sheet as a PDF Blob (built inside the sheet, same file as its "PDF" button). */
+    this.pdf = function () {
+      var id = ++seq;
+      return new Promise(function (res, rej) {
+        pending[id] = function (d) { if (d.error || !d.blob) rej(new Error(d.error || 'No PDF')); else res(d.blob); };
+        self.send({ type: 'pdf', requestId: id });
+        setTimeout(function () { if (pending[id]) { delete pending[id]; rej(new Error('The PDF took too long.')); } }, 30000);
       });
     };
     this.destroy = function () { frames = frames.filter(function (f) { return f !== self; }); };
@@ -273,12 +305,17 @@
   }
 
   // ── list ─────────────────────────────────────────────────────────────
-  var listState = { status: isAdminTier() ? 'PENDING_APPROVAL' : 'ALL', search: '' };
+  var listState = { status: isAdminTier() ? 'PENDING_APPROVAL' : 'ALL', search: '', scope: 'mine' };
 
   function listView() {
     var body = el('div', {}, [el('div', { class: 'card p-10 text-center text-muted', text: 'Loading…' })]);
     var tiles = el('div', { class: 'trl-tiles' });
-    var search = el('input', { class: INPUT, type: 'search', placeholder: 'Search trial no., customer or component…', style: 'max-width:340px' });
+    var search = el('input', { class: INPUT, type: 'search', placeholder: 'Search trial no., customer, component, tool or quotation no…', style: 'max-width:380px' });
+    // Engineers: my trials or every engineer's trial requests (previous trials to learn from)
+    var scopeBar = isAdminTier() ? null : el('div', { class: 'trl-scope' }, [['mine', 'My trials'], ['all', 'All engineers’ trials']].map(function (x) {
+      return el('button', { class: 'trl-scope-b' + (listState.scope === x[0] ? ' on' : ''), 'data-scope': x[0], text: x[1], onclick: function () {
+        listState.scope = x[0]; Array.prototype.forEach.call(scopeBar.children, function (b) { b.classList.toggle('on', b.getAttribute('data-scope') === x[0]); }); load(); } });
+    }));
     search.value = listState.search;
     var t;
     search.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { listState.search = search.value.trim(); load(); }, 300); });
@@ -289,11 +326,11 @@
         el('button', { class: 'btn-primary', text: '+ New trial request', onclick: function () { go('/new'); } })
       ]),
       el('p', { class: 'trl-help', text: '1 · Raise a request with the existing situation data  →  2 · Admin approves with the recommended tool (cutter, insert, key, drill or tap)  →  3 · After the trial, fill the cost savings report to complete it.' }),
-      tiles, search, body
+      tiles, el('div', { class: 'flex items-center gap-3 flex-wrap' }, [search, scopeBar]), body
     ]));
 
     function load() {
-      var q = '/trials?status=' + listState.status + (listState.search ? '&search=' + encodeURIComponent(listState.search) : '');
+      var q = '/trials?status=' + listState.status + (listState.search ? '&search=' + encodeURIComponent(listState.search) : '') + (listState.scope === 'all' ? '&scope=all' : '');
       api('GET', q).then(function (r) { render(r.data.trials || [], r.data.counts || {}); })
         .catch(function (e) { body.innerHTML = ''; body.appendChild(errorCard(e.message, load)); });
     }
@@ -320,11 +357,13 @@
       trials.forEach(function (x) {
         var recs = x.recommendations || [];
         var tr = el('tr', { class: 'table-row trl-row', tabindex: '0' }, [
-          el('td', { class: 'px-3 py-3 font-medium trl-nowrap' }, [x.trialNo, el('span', { class: 'trl-co' + (x.company === 'APJ' ? ' apj' : ''), text: x.company || 'TMS' })]),
+          el('td', { class: 'px-3 py-3 font-medium trl-nowrap' }, [x.trialNo, el('span', { class: 'trl-co' + (x.company === 'APJ' ? ' apj' : ''), text: x.company || 'TMS' }),
+            x.quotationNo ? el('div', { class: 'text-xs text-muted', text: x.quotationNo }) : null]),
           el('td', { class: 'px-3 py-3', text: (x.customer && x.customer.name) || '—' }),
           el('td', { class: 'px-3 py-3', text: x.component || '—' }),
           el('td', { class: 'px-3 py-3 trl-nowrap', text: (x.requestedBy && x.requestedBy.name) || '—' }),
-          el('td', { class: 'px-3 py-3' }, [el('span', { class: 'badge ' + STATUS[x.status].badge, text: STATUS[x.status].label })]),
+          el('td', { class: 'px-3 py-3' }, [el('span', { class: 'badge ' + STATUS[x.status].badge, text: STATUS[x.status].label }),
+            x.status === 'APPROVED' ? el('div', { class: 'text-xs ' + (x.dc ? 'text-green-700' : 'text-amber-700'), text: x.dc ? 'DC ✓ trial ' + fmtDate(x.dc.date) : 'DC approval pending' }) : null]),
           el('td', { class: 'px-3 py-3 text-sm', text: recs.length ? recText(recs[0]) + (recs.length > 1 ? '  +' + (recs.length - 1) + ' more' : '') : '—' }),
           el('td', { class: 'px-3 py-3 trl-nowrap font-medium', text: x.savingsPerYear !== null ? money(x.savingsPerYear) + (x.savingsPct !== null ? ' (' + Math.round(x.savingsPct) + '%)' : '') : '—' }),
           el('td', { class: 'px-3 py-3 trl-nowrap text-muted', text: fmtDate(x.createdAt) })
@@ -400,6 +439,10 @@
         return api('POST', '/trials', { customerId: cust.id || '', existingData: R, company: company });
       }).then(function (res) {
         if (!res) return;
+        submitBtn.textContent = 'Sending PDF to admin…';
+        return sendSheetPdf(sheet, res.data.trial.id, 'EDA', 'Existing-data-' + res.data.trial.trialNo + '.pdf').then(function () { return res; }, function () { return res; });
+      }).then(function (res) {
+        if (!res) return;
         sheet.changed = false;
         flashMsg = 'Trial ' + res.data.trial.trialNo + ' raised — it is now waiting for admin approval.';
         go('/t/' + encodeURIComponent(res.data.trial.id) + '/existing');
@@ -424,15 +467,23 @@
       var tab = wantTab || (t.status === 'PENDING_APPROVAL' && canManage() ? 'approval'
         : t.status === 'PENDING_APPROVAL' || t.status === 'REJECTED' ? 'existing'
         : t.status === 'APPROVED' ? 'savings' : 'savings');
-      var savingsOpen = t.status === 'APPROVED' || t.status === 'COMPLETED';
-      if (tab === 'savings' && !savingsOpen) tab = 'existing';
+      var savingsOpen = t.status === 'COMPLETED' || (t.status === 'APPROVED' && !!t.dc);
+      if (!wantTab && t.status === 'APPROVED' && !t.dc) tab = 'dc';
+      if (tab === 'savings' && !savingsOpen) tab = t.status === 'APPROVED' ? 'dc' : 'existing';
+      if (tab === 'dc' && t.status !== 'APPROVED' && t.status !== 'COMPLETED') tab = 'existing';
 
       holder.appendChild(el('div', { class: 'space-y-4' }, [
         backLink(),
         el('div', { class: 'flex items-start justify-between gap-3 flex-wrap' }, [
           el('div', {}, [
             el('h1', { class: 'page-title', text: t.trialNo + ' · ' + ((t.customer && t.customer.name) || 'Customer') }),
-            el('p', { class: 'text-sm text-muted mt-1', text: [(t.component || ''), 'Requested by ' + ((t.requestedBy && t.requestedBy.name) || '—'), fmtDate(t.createdAt)].filter(Boolean).join(' · ') })
+            el('p', { class: 'text-sm text-muted mt-1', text: [(t.component || ''), 'Requested by ' + ((t.requestedBy && t.requestedBy.name) || '—'), fmtDate(t.createdAt)].filter(Boolean).join(' · ') }),
+            el('div', { class: 'trl-meta mt-2', id: 'trl-meta' }, [
+              el('span', {}, ['Quotation no. ', el('b', { text: t.quotationNo || '—' })]),
+              el('span', {}, ['Customer ', el('b', { text: (t.customer && t.customer.name) || '—' })]),
+              el('span', {}, ['Company ', el('b', { text: (BRANDS[t.company] || BRANDS.TMS).company })]),
+              t.dc ? el('span', {}, ['DC ', el('b', { text: (t.dc.no ? t.dc.no + ' · ' : '') + 'trial on ' + fmtDate(t.dc.date) })]) : null
+            ])
           ]),
           el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
             canEdit(t) ? companySelect(t.company, function (v, sel) {
@@ -446,7 +497,9 @@
         ]),
         flashMsg ? el('div', { class: 'trl-banner trl-ok', text: flashMsg }) : null,
         steps(t, tab, savingsOpen),
-        tabBody(t, tab)
+        tabBody(t, tab),
+        docsPanel(t),
+        relatedPanel(t)
       ]));
       flashMsg = '';
     }
@@ -454,7 +507,7 @@
     function steps(t, tab, savingsOpen) {
       var s1 = t.status === 'REJECTED' ? 'trl-bad' : 'trl-done';
       var s2 = t.status === 'PENDING_APPROVAL' ? 'trl-now' : t.status === 'REJECTED' ? 'trl-bad' : 'trl-done';
-      var s3 = t.status === 'COMPLETED' ? 'trl-done' : t.status === 'APPROVED' ? 'trl-now' : '';
+      var s3 = t.status === 'COMPLETED' ? 'trl-done' : (t.status === 'APPROVED' && t.dc) ? 'trl-now' : '';
       function step(key, n, title, sub, cls, locked) {
         return el('button', {
           class: 'trl-step ' + cls + (tab === key ? ' trl-step-on' : '') + (locked ? ' trl-step-locked' : ''),
@@ -467,14 +520,18 @@
         step('approval', 2, 'Approval & recommendation',
           t.status === 'PENDING_APPROVAL' ? (canManage() ? 'Your decision needed' : 'Waiting for admin')
             : t.status === 'REJECTED' ? 'Rejected ' + fmtDate(t.decidedAt) : 'Approved ' + fmtDate(t.decidedAt), s2, false),
-        step('savings', 3, 'Cost savings report',
-          t.status === 'COMPLETED' ? 'Completed ' + fmtDate(t.completedAt) : savingsOpen ? (t.hasSavings ? 'Draft saved' : 'Fill after the trial') : 'Locked until approved', s3, !savingsOpen)
+        step('dc', 3, 'DC approval',
+          t.dc ? 'Trial on ' + fmtDate(t.dc.date) : t.status === 'APPROVED' ? (canManage() ? 'Give the DC & trial date' : 'Waiting for admin') : 'After approval',
+          t.dc ? 'trl-done' : (t.status === 'APPROVED' ? 'trl-now' : ''), !(t.status === 'APPROVED' || t.status === 'COMPLETED')),
+        step('savings', 4, 'Trial comparison',
+          t.status === 'COMPLETED' ? 'Completed ' + fmtDate(t.completedAt) : savingsOpen ? (t.hasSavings ? 'Draft saved' : 'Fill after the trial') : 'Locked until DC approval', s3, !savingsOpen)
       ]);
     }
 
     function tabBody(t, tab) {
       if (tab === 'approval') return approvalTab(t);
       if (tab === 'savings') return savingsTab(t);
+      if (tab === 'dc') return dcTab(t);
       return existingTab(t);
     }
 
@@ -499,6 +556,9 @@
         msg.innerHTML = '';
         sheet.get().then(function (d) {
           return api('PUT', '/trials/' + encodeURIComponent(t.id) + '/existing', { existingData: d.report });
+        }).then(function (res) {
+          if (t.status !== 'REJECTED') return res;
+          return sendSheetPdf(sheet, t.id, 'EDA', 'Existing-data-' + t.trialNo + '.pdf').then(function () { return res; }, function () { return res; });
         }).then(function (res) {
           sheet.changed = false;
           flashMsg = res.message;
@@ -563,7 +623,81 @@
       return wrap;
     }
 
-    // Step 3 — savings report sheet
+    // Step 3 — DC approval (Admin / Super Admin): delivery challan + allotted trial date
+    function dcTab(t) {
+      if (t.dc) return el('div', { class: 'card p-4 space-y-1' }, [
+        el('p', { class: 'font-semibold', text: '✓ DC approved' + (t.dc.approvedBy ? ' by ' + t.dc.approvedBy : '') + (t.dc.approvedAt ? ' on ' + fmtDate(t.dc.approvedAt) : '') }),
+        el('p', { text: 'Allotted trial date: ' + fmtDate(t.dc.date) + (t.dc.no ? ' · DC no. ' + t.dc.no : '') }),
+        t.dc.note ? el('p', { class: 'trl-help', text: t.dc.note }) : null,
+        el('button', { class: 'btn-primary mt-2', text: 'Go to the trial comparison →', onclick: function () { go('/t/' + encodeURIComponent(t.id) + '/savings'); } })
+      ]);
+      if (!canManage()) return el('div', { class: 'trl-banner trl-warn', text: 'The trial is approved. Admin / Super Admin will give the DC approval with the allotted trial date — then the trial comparison opens.' });
+      var date = el('input', { class: INPUT, type: 'date', id: 'trl-dc-date' });
+      var no = el('input', { class: INPUT, id: 'trl-dc-no', placeholder: 'DC number (optional)' });
+      var note = el('textarea', { class: INPUT, rows: '2', id: 'trl-dc-note', placeholder: 'Note to the engineer (optional) — tools sent, contact person…' });
+      var err = el('div');
+      var btn = el('button', { class: 'btn-primary', id: 'trl-dc-approve', text: '✓ Approve DC', onclick: function () {
+        err.innerHTML = '';
+        if (!date.value) { err.appendChild(el('div', { class: 'trl-banner trl-err', text: 'Choose the allotted trial date.' })); return; }
+        btn.classList.add('trl-disabled');
+        api('PATCH', '/trials/' + encodeURIComponent(t.id) + '/dc', { dcDate: date.value, dcNo: no.value.trim(), note: note.value.trim() })
+          .then(function (r) { flashMsg = r.message; show('/t/' + encodeURIComponent(t.id) + '/dc'); })
+          .catch(function (e) { btn.classList.remove('trl-disabled'); err.appendChild(el('div', { class: 'trl-banner trl-err', text: e.message })); });
+      } });
+      return el('div', { class: 'card p-4 space-y-3' }, [
+        el('p', { class: 'text-base font-semibold', text: 'DC approval — allot the trial date' }),
+        el('p', { class: 'trl-help', text: 'Give the delivery challan for the trial tools and the date the trial is allotted. After this the engineer completes the trial comparison.' }),
+        el('div', { class: 'grid gap-3', style: 'grid-template-columns:repeat(auto-fit,minmax(200px,1fr))' }, [
+          el('div', {}, [el('span', { class: 'trl-lab', text: 'Allotted trial date *' }), date]),
+          el('div', {}, [el('span', { class: 'trl-lab', text: 'DC no.' }), no])
+        ]),
+        el('div', {}, [el('span', { class: 'trl-lab', text: 'Note' }), note]), err,
+        el('div', { class: 'flex justify-end' }, [btn])
+      ]);
+    }
+
+    // PDFs sent with the trial (existing data on raising, comparison on completion)
+    function docsPanel(t) {
+      var files = t.files || [];
+      return el('div', { class: 'card p-4 space-y-2', id: 'trl-docs' }, [
+        el('p', { class: 'text-sm font-semibold', text: 'Documents sent to admin' }),
+        files.length ? el('div', { class: 'trl-docs' }, files.map(function (f) {
+          return el('div', { class: 'trl-doc' }, [
+            el('span', { text: f.kind === 'CMP' ? '📊' : '📄' }),
+            el('b', { text: f.kind === 'CMP' ? 'Trial comparison PDF' : f.kind === 'EDA' ? 'Existing data analysis PDF' : f.fileName }),
+            el('span', { class: 'text-xs text-muted', text: 'sent by ' + (f.uploadedBy || '—') + ' · ' + fmtDate(f.createdAt) + (f.viewedAt ? ' · opened by ' + (f.viewedBy || 'admin') : ' · not opened yet') }),
+            el('span', { style: 'margin-left:auto' }),
+            el('button', { class: 'btn-secondary btn-sm', 'data-open-file': f.id, text: 'Open', onclick: function () { openTrialFile(t, f, false); } }),
+            el('button', { class: 'btn-secondary btn-sm', text: 'Download', onclick: function () { openTrialFile(t, f, true); } })
+          ]);
+        })) : el('p', { class: 'trl-help', text: 'The existing data PDF is sent when the request is raised; the comparison PDF when the trial is completed.' })
+      ]);
+    }
+
+    // Earlier trials for the same customer / component / recommended tool
+    function relatedPanel(t) {
+      var box = el('div', { class: 'card p-4 space-y-2', id: 'trl-related' }, [el('p', { class: 'text-sm font-semibold', text: 'Previous trials — same customer, component or tool' }), el('p', { class: 'trl-help', text: 'Loading…' })]);
+      api('GET', '/trials/' + encodeURIComponent(t.id) + '/related').then(function (r) {
+        var list = r.data.trials || [];
+        box.removeChild(box.lastChild);
+        if (!list.length) { box.appendChild(el('p', { class: 'trl-help', text: 'No earlier trials found.' })); return; }
+        box.appendChild(el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'trl-rel' }, [el('tbody', {}, list.map(function (x) {
+          var recs = x.recommendations || [];
+          return el('tr', { onclick: function () { show('/t/' + encodeURIComponent(x.id)); } }, [
+            el('td', { class: 'font-medium trl-nowrap', text: x.trialNo }),
+            el('td', { text: (x.customer && x.customer.name) || '—' }),
+            el('td', { text: x.component || '—' }),
+            el('td', { text: recs.length ? recText(recs[0]) : '—' }),
+            el('td', { class: 'trl-nowrap', text: (x.requestedBy && x.requestedBy.name) || '' }),
+            el('td', {}, [el('span', { class: 'badge ' + STATUS[x.status].badge, text: STATUS[x.status].label })]),
+            el('td', { class: 'trl-nowrap font-medium', text: x.savingsPerYear !== null ? money(x.savingsPerYear) + ' / yr' : '' })
+          ]);
+        }))])]));
+      }).catch(function () { box.removeChild(box.lastChild); box.appendChild(el('p', { class: 'trl-help', text: 'Could not load previous trials.' })); });
+      return box;
+    }
+
+    // Step 4 — trial comparison (savings report) sheet
     function savingsTab(t) {
       var sheet = new Sheet('cmp');
       current = { sheet: sheet };
@@ -595,6 +729,11 @@
         busy = true; msg.innerHTML = '';
         sheet.get().then(function (d) {
           return api('PUT', '/trials/' + encodeURIComponent(t.id) + '/savings', { savingsData: d.report, summary: d.summary || null, complete: complete });
+        }).then(function (res) {
+          if (!complete) return res;
+          // the comparison PDF goes to admin with the completed trial
+          return sendSheetPdf(sheet, t.id, 'CMP', 'Trial-comparison-' + t.trialNo + '.pdf').then(function () { res.message += ' · comparison PDF sent to admin'; return res; },
+            function (e) { res.message += ' (the comparison PDF could not be sent: ' + e.message + ')'; return res; });
         }).then(function (res) {
           busy = false; sheet.changed = false;
           flashMsg = res.message;
@@ -706,8 +845,8 @@
       busy = true; render();
       api('PATCH', '/trials/' + encodeURIComponent(t.id) + '/approve', { recommendations: lines, note: note }).then(function (res) {
         editingRecs = false;
-        flashMsg = t.status === 'APPROVED' ? 'Recommendation updated.' : 'Trial approved — ' + ((t.requestedBy && t.requestedBy.name) || 'the engineer') + ' can now run the trial and fill the savings report.';
-        show('/t/' + encodeURIComponent(t.id) + '/approval');
+        flashMsg = t.status === 'APPROVED' ? 'Recommendation updated.' : 'Trial approved — next, give the DC approval with the allotted trial date.';
+        show('/t/' + encodeURIComponent(t.id) + (t.status === 'APPROVED' ? '/approval' : '/dc'));
       }).catch(function (e) { busy = false; err = e.message; render(); });
     }
     function reject() {
