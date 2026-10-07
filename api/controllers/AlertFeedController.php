@@ -312,6 +312,18 @@ class AlertFeedController
                             '/stock/?status=low', $morning);
                     }
                 }
+                // Regular items of customers that need restocking (once a day, 9:30)
+                if (date('Y-m-d H:i:s') >= $morning && $morning > $since && class_exists('RegularItemController')) {
+                    try {
+                        $rl = RegularItemController::restockList(30);
+                        if ($rl) {
+                            $show = array_slice(array_map(fn($x) => $x['itemCode'] . ' for ' . $x['customerName'], $rl), 0, 4);
+                            $add('restock-daily-' . date('Y-m-d'), 'RESTOCK_NEEDED', 'Restock for regular customers',
+                                count($rl) . ' regular item' . (count($rl) === 1 ? '' : 's') . ' short: ' . implode(', ', $show) . (count($rl) > 4 ? '…' : ''),
+                                '/orders/#restock', $morning);
+                        }
+                    } catch (Throwable $e) { error_log('restock alert: ' . $e->getMessage()); }
+                }
                 // Saturday: check all the stock (9:30), and a second nudge at 4 pm if nobody marked it done.
                 if (date('N') === '6') {
                     $sat = date('Y-m-d');

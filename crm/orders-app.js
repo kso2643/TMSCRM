@@ -92,6 +92,13 @@
       '.ox-stock{display:inline-block;margin-top:.15rem;font-size:.72rem;font-weight:600;border-radius:.35rem;padding:0 .4rem}',
       '.ox-stock-ok{background:#f0fdf4;color:#166534}.ox-stock-low{background:#fffbeb;color:#92400e}.ox-stock-none{background:#fef2f2;color:#991b1b}',
       '.ox-line-stock{display:block;font-size:.72rem;margin-top:.2rem}',
+      '.ox-po-prev{border:1px solid #e2e8f0;border-radius:.6rem;overflow:hidden;background:#f8fafc}.ox-po-prev iframe{width:100%;height:520px;border:0;display:block}.ox-po-prev img{max-width:100%;display:block;margin:0 auto}',
+      '.dark .ox-po-prev{border-color:#334155;background:#0f172a}',
+      '.ox-rtab{padding:.45rem .9rem;font-size:.85rem;font-weight:600;color:#64748b;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}',
+      '.ox-rtab.on{color:#1e3a8a;border-bottom-color:#1e3a8a}.dark .ox-rtab.on{color:#93c5fd;border-bottom-color:#93c5fd}',
+      '.ox-reg-t td{border-top:1px solid #f1f5f9;vertical-align:top}.dark .ox-reg-t td{border-color:#1e293b}',
+      '.ox-reg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem;align-items:start}',
+      '.ox-chip{border:1px solid #cbd5e1;border-radius:999px;padding:.15rem .6rem;font-size:.75rem;font-weight:600;cursor:pointer;background:#fff}.ox-chip:hover{filter:brightness(.96)}',
       '.ox-item:first-child{border-top:0}',
       '.ox-item-on{background:rgba(34,197,94,.08)}',
       '.ox-overdue{color:#dc2626;font-weight:600}',
@@ -188,16 +195,27 @@
     var stats = el('div', { class: 'ox-stats' });
     var filters = el('div', { class: 'ox-filters' });
     var flashBox = el('div');
+    var regBox = el('div');
     // Plain wrapper — loading/error/table each render their own card inside it.
     var body = el('div', {}, [el('div', { class: 'card p-10 text-center text-muted', text: 'Loading…' })]);
 
     root.appendChild(el('div', { class: 'space-y-5' }, [
       el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
         el('h1', { class: 'page-title', text: 'Orders' }),
-        el('button', { class: 'btn-primary', text: '+ New order', onclick: function () { openOrderDialog(null, load); } })
+        el('div', { class: 'flex gap-2 flex-wrap' }, [
+          el('button', { class: 'btn-secondary', id: 'ox-reg-btn', text: '🔁 Stock reminders & regular items', onclick: function () { toggleReg(); } }),
+          el('button', { class: 'btn-primary', text: '+ New order', onclick: function () { openOrderDialog(null, load); } })
+        ])
       ]),
-      stats, filters, flashBox, body
+      regBox, stats, filters, flashBox, body
     ]));
+    function toggleReg(force) {
+      var open = force !== undefined ? force : !regBox.firstChild;
+      regBox.innerHTML = '';
+      if (open) regBox.appendChild(regularPanel({ tab: 'restock', onClose: function () { toggleReg(false); if (location.hash === '#restock') history.replaceState(null, '', location.pathname); } }));
+    }
+    if (location.hash === '#restock') setTimeout(function () { toggleReg(true); }, 0);
+    window.addEventListener('hashchange', function () { if (location.hash === '#restock') toggleReg(true); });
 
     function showFlash(msg) {
       flash = msg || '';
@@ -451,6 +469,252 @@
     load();
   }
 
+  // ── PO document: open / download with the login (a plain link has no token) ──
+  function fetchDoc(o) {
+    return fetch(API + o.poDocument.url, { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
+      if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Could not open the document'); });
+      return r.blob();
+    });
+  }
+  function openDoc(o, download) {
+    return fetchDoc(o).then(function (b) {
+      var u = URL.createObjectURL(b);
+      if (download) {
+        var a = document.createElement('a'); a.href = u; a.download = o.poDocument.originalName || 'purchase-order';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+      } else { window.open(u, '_blank'); setTimeout(function () { URL.revokeObjectURL(u); }, 120000); }
+    }).catch(function (e) { alert(e.message); });
+  }
+  function docButtons(o) {
+    function b(text, dl, attr) {
+      var x = el('button', { class: 'btn-secondary btn-sm', type: 'button', text: text });
+      x.setAttribute(attr, o.id);
+      x.addEventListener('click', function (e) { e.stopPropagation(); openDoc(o, dl); });
+      return x;
+    }
+    return el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
+      el('span', { class: 'text-sm font-medium', text: '📄 ' + o.poDocument.originalName }),
+      b('View', false, 'data-po-view'), b('⬇ Download', true, 'data-po-dl')
+    ]);
+  }
+  /** Inline preview of the uploaded PO (PDF or image) inside the order. */
+  function docPreview(o) {
+    var box = el('div', { class: 'ox-po-prev', 'data-po-preview': o.id }, [el('p', { class: 'text-xs text-muted p-3', text: 'Loading the purchase order…' })]);
+    var mime = (o.poDocument.mime || '').toLowerCase();
+    if (!/pdf|image/.test(mime)) { box.innerHTML = ''; return null; }
+    fetchDoc(o).then(function (b) {
+      var u = URL.createObjectURL(b);
+      box.innerHTML = '';
+      box.appendChild(/image/.test(mime) ? el('img', { src: u, alt: 'Purchase order' }) : el('iframe', { src: u, title: 'Purchase order' }));
+    }).catch(function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'text-xs text-red-600 p-3', text: e.message })); });
+    return box;
+  }
+
+  // ── Regular items & restock reminders ──────────────────────────────
+  var REG_STATUS = { OUT: ['Out of stock', 'ox-stock-none'], NOT_STOCKED: ['Not in stock list', 'ox-stock-none'], LOW: ['Restock', 'ox-stock-low'], OK: ['Enough stock', 'ox-stock-ok'] };
+  function regBadge(it) {
+    var s = REG_STATUS[it.status] || [it.status, ''];
+    return el('span', { class: 'ox-stock ' + s[1], text: s[0] + (it.shortBy ? ' · short ' + fmtQty(it.shortBy) : '') });
+  }
+  function dueText(it) {
+    if (!it.nextExpected) return it.everyDays ? 'every ' + it.everyDays + ' days' : '—';
+    var d = it.dueInDays;
+    return fmtDate(it.nextExpected) + (d < 0 ? ' (overdue ' + (-d) + ' d)' : d === 0 ? ' (today)' : ' (in ' + d + ' d)');
+  }
+  function stockText(st) { return st ? 'hand ' + fmtQty(st.hand) + ' · free ' + fmtQty(st.free) + ' of ' + fmtQty(st.total) : '—'; }
+  function table(heads, rows) {
+    return el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm ox-reg-t' }, [
+      el('thead', {}, [el('tr', {}, heads.map(function (h) { return el('th', { class: 'table-head text-left px-3 py-2 ox-nowrap', text: h }); }))]),
+      el('tbody', {}, rows)
+    ])]);
+  }
+  function td(x, cls) { return el('td', { class: 'px-3 py-2 ' + (cls || '') }, typeof x === 'string' || typeof x === 'number' ? [String(x)] : [x]); }
+
+  function regularPanel(opts) {
+    var tab = opts.tab || 'restock';
+    var card = el('div', { class: 'card p-4 space-y-3', id: 'ox-reg' });
+    var tabs = el('div', { class: 'flex gap-1 border-b border-slate-200 dark:border-slate-700' });
+    var body = el('div', {});
+    var TABS = [['restock', 'Restock reminders'], ['low', 'Low stock'], ['regular', 'Customer regular items']];
+    function paintTabs() {
+      tabs.innerHTML = '';
+      TABS.forEach(function (t) {
+        tabs.appendChild(el('button', { class: 'ox-rtab' + (tab === t[0] ? ' on' : ''), type: 'button', 'data-rtab': t[0], text: t[1], onclick: function () { tab = t[0]; paintTabs(); paint(); } }));
+      });
+    }
+    function loading() { body.innerHTML = ''; body.appendChild(el('p', { class: 'text-sm text-muted', text: 'Loading…' })); }
+    function fail(e) { body.innerHTML = ''; body.appendChild(el('p', { class: 'text-sm text-red-600', text: e.message })); }
+    function paint() {
+      if (tab === 'restock') return paintRestock();
+      if (tab === 'low') return paintLow();
+      paintRegular();
+    }
+    function paintRestock() {
+      loading();
+      api('GET', '/regular-items/restock?days=30').then(function (res) {
+        var d = res.data; body.innerHTML = '';
+        body.appendChild(el('p', { class: 'text-xs text-muted mb-2', text: 'Regular items of each company (added by hand, or ordered 2+ times in the last 12 months) whose free stock is below what that company usually takes, due in the next 30 days.' }));
+        if (!d.items.length) { body.appendChild(el('p', { class: 'text-sm text-emerald-700 py-3', text: '✓ Nothing to restock — every regular item has enough stock.' })); return; }
+        body.appendChild(el('p', { class: 'text-sm font-semibold mt-1 mb-1', text: 'To order (all companies together)' }));
+        body.appendChild(table(['Item', 'Needed', 'Free stock', 'To order', 'For'], d.byItem.map(function (x) {
+          return el('tr', { 'data-restock-item': x.itemCode }, [td(el('span', {}, [el('b', { text: x.itemCode }), el('span', { class: 'block text-xs text-muted', text: [x.productName, x.brand].filter(Boolean).join(' · ') })])),
+            td(fmtQty(x.need)), td(x.stock ? fmtQty(Math.max(0, x.stock.free)) : '0'), td(el('b', { class: 'text-amber-700', text: fmtQty(x.toOrder) })), td(x.customers.join(', '), 'text-xs')]);
+        })));
+        body.appendChild(el('p', { class: 'text-sm font-semibold mt-4 mb-1', text: 'By company' }));
+        body.appendChild(table(['Company', 'Item', 'Usual qty', 'Keep', 'Stock', 'Status', 'Last ordered', 'Next expected'], d.items.map(function (it) {
+          return el('tr', { 'data-restock': it.customerName + '|' + it.itemCode }, [td(it.customerName, 'font-medium ox-nowrap'),
+            td(el('span', {}, [el('b', { text: it.itemCode }), el('span', { class: 'block text-xs text-muted', text: it.productName || '' })])),
+            td(it.usualQty == null ? '—' : fmtQty(it.usualQty)), td(it.keepQty == null ? '—' : fmtQty(it.keepQty)), td(stockText(it.stock), 'text-xs ox-nowrap'),
+            td(regBadge(it)), td(it.lastOrdered ? fmtDate(it.lastOrdered) : '—', 'ox-nowrap'), td(dueText(it), 'ox-nowrap')]);
+        })));
+      }).catch(fail);
+    }
+    function paintLow() {
+      loading();
+      api('GET', '/products/stock/alerts').then(function (res) {
+        var d = res.data; body.innerHTML = '';
+        var rows = [];
+        function add(list, label, cls) {
+          (list || []).forEach(function (r) {
+            rows.push(el('tr', { 'data-low': r.itemCode }, [td(el('span', {}, [el('b', { text: r.itemCode }), el('span', { class: 'block text-xs text-muted', text: [r.itemName, r.brand].filter(Boolean).join(' · ') })])),
+              td(fmtQty(r.availableStock)), td(fmtQty(r.minimumStock)), td(fmtQty(r.reserved || 0)), td(el('span', { class: 'ox-stock ' + cls, text: label }))]));
+          });
+        }
+        add(d.outOfStock, 'Out of stock', 'ox-stock-none');
+        add(d.shortForOrders.filter(function (r) { return Number(r.availableStock) > 0; }), 'Short for open orders', 'ox-stock-low');
+        add(d.lowStock, 'Low (at or below minimum)', 'ox-stock-low');
+        if (!rows.length) { body.appendChild(el('p', { class: 'text-sm text-emerald-700 py-3', text: '✓ No item is low or out of stock.' })); return; }
+        body.appendChild(el('p', { class: 'text-xs text-muted mb-2', text: d.summary.outOfStock + ' out of stock · ' + d.summary.lowStock + ' low · ' + d.summary.shortForOrders + ' short for open orders. Set the minimum stock of an item on the Stock page.' }));
+        body.appendChild(table(['Item', 'In stock', 'Minimum', 'On open orders', ''], rows));
+      }).catch(fail);
+    }
+    var regCustomer = opts.customer || null;
+    function paintRegular() {
+      body.innerHTML = '';
+      var pick = el('input', { class: INPUT, id: 'ox-reg-cust', placeholder: 'Search the company…', style: 'max-width:360px' });
+      var list = el('div', { class: 'mt-1 space-y-1', style: 'max-width:360px' });
+      var t;
+      pick.addEventListener('input', function () {
+        clearTimeout(t);
+        var q = pick.value.trim();
+        if (!q) { list.innerHTML = ''; return; }
+        t = setTimeout(function () {
+          api('GET', '/customers?search=' + encodeURIComponent(q) + '&limit=8').then(function (res) {
+            list.innerHTML = '';
+            ((res.data && res.data.items) || []).forEach(function (c) {
+              list.appendChild(el('button', { class: 'block w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800', 'data-reg-cust': c.id, text: c.companyName,
+                onclick: function () { regCustomer = { id: c.id, companyName: c.companyName }; paintRegular(); } }));
+            });
+          }).catch(function () {});
+        }, 250);
+      });
+      body.appendChild(el('div', { class: 'flex items-start gap-3 flex-wrap' }, [
+        el('div', {}, [el('span', { class: 'text-xs text-muted block', text: 'Company' }), pick, list]),
+        regCustomer ? el('div', { class: 'text-sm pt-5' }, [el('b', { text: regCustomer.companyName })]) : null
+      ]));
+      if (!regCustomer) { body.appendChild(el('p', { class: 'text-sm text-muted mt-3', text: 'Pick a company to see its regular items, stock for them, and add items by hand.' })); return; }
+      var box = el('div', { class: 'mt-3', id: 'ox-reg-list' }, [el('p', { class: 'text-sm text-muted', text: 'Loading…' })]);
+      body.appendChild(box);
+      body.appendChild(regularAddForm(regCustomer, paintRegular));
+      api('GET', '/regular-items?customerId=' + encodeURIComponent(regCustomer.id)).then(function (res) {
+        var items = res.data.items; box.innerHTML = '';
+        if (!items.length) { box.appendChild(el('p', { class: 'text-sm text-muted', text: 'No regular items yet — they appear once an item is ordered 2+ times, or add one below.' })); return; }
+        box.appendChild(el('p', { class: 'text-xs text-muted mb-1', text: items.length + ' regular items · ' + res.data.summary.restock + ' need restocking' }));
+        box.appendChild(table(['Item', 'From', 'Orders', 'Usual qty', 'Keep in stock', 'Stock', 'Status', 'Last ordered', 'Next expected', ''], items.map(function (it) {
+          var rm = el('button', { class: 'ox-muted-link text-red-600', type: 'button', 'data-reg-remove': it.itemCode, text: 'Remove' });
+          rm.addEventListener('click', function () {
+            if (!confirm('Remove ' + it.itemCode + ' from ' + regCustomer.companyName + '’s regular items?')) return;
+            (it.id ? api('DELETE', '/regular-items/' + encodeURIComponent(it.id)) : api('POST', '/regular-items/hide', { customerId: regCustomer.id, itemCode: it.itemCode }))
+              .then(paintRegular).catch(function (e) { alert(e.message); });
+          });
+          var ed = el('button', { class: 'ox-muted-link', type: 'button', text: 'Edit', onclick: function () { fillForm(it); } });
+          return el('tr', { 'data-reg': it.itemCode }, [td(el('span', {}, [el('b', { text: it.itemCode }), el('span', { class: 'block text-xs text-muted', text: [it.productName, it.brand].filter(Boolean).join(' · ') })])),
+            td({ MANUAL: 'Added by hand', ORDERS: 'Order history', BOTH: 'Both' }[it.source], 'text-xs'), td(String(it.orders)),
+            td(it.usualQty == null ? '—' : fmtQty(it.usualQty)), td(it.keepQty == null ? '—' : fmtQty(it.keepQty)), td(stockText(it.stock), 'text-xs ox-nowrap'),
+            td(regBadge(it)), td(it.lastOrdered ? fmtDate(it.lastOrdered) : '—', 'ox-nowrap'), td(dueText(it), 'ox-nowrap'),
+            td(el('span', { class: 'flex gap-3' }, [ed, rm]))]);
+        })));
+      }).catch(function (e) { box.innerHTML = ''; box.appendChild(el('p', { class: 'text-sm text-red-600', text: e.message })); });
+    }
+    var fillForm = function () {};
+    function regularAddForm(cust, done) {
+      var f = {
+        itemCode: el('input', { class: INPUT, id: 'ox-reg-code', placeholder: 'Item code (type to search)' }),
+        productName: el('input', { class: INPUT, id: 'ox-reg-name', placeholder: 'Product name' }),
+        brand: el('input', { class: INPUT, id: 'ox-reg-brand', placeholder: 'Brand' }),
+        usualQty: el('input', { class: INPUT, id: 'ox-reg-usual', type: 'number', min: '0', step: 'any', placeholder: 'e.g. 40' }),
+        everyDays: el('input', { class: INPUT, id: 'ox-reg-every', type: 'number', min: '0', step: '1', placeholder: 'e.g. 30' }),
+        keepQty: el('input', { class: INPUT, id: 'ox-reg-keep', type: 'number', min: '0', step: 'any', placeholder: 'default = usual qty' }),
+        notes: el('input', { class: INPUT, id: 'ox-reg-notes', placeholder: 'Notes (optional)' })
+      };
+      fillForm = function (it) {
+        f.itemCode.value = it.itemCode; f.productName.value = it.productName || ''; f.brand.value = it.brand || '';
+        f.usualQty.value = it.usualQty == null ? '' : it.usualQty; f.everyDays.value = it.everyDays == null ? '' : it.everyDays;
+        f.keepQty.value = it.keepQty == null ? '' : it.keepQty; f.notes.value = it.notes || '';
+        f.usualQty.focus();
+      };
+      var sugg = el('div', { class: 'mt-1 space-y-1' }), t;
+      f.itemCode.addEventListener('input', function () {
+        clearTimeout(t);
+        var q = f.itemCode.value.trim();
+        if (q.length < 2) { sugg.innerHTML = ''; return; }
+        t = setTimeout(function () {
+          api('GET', '/products/search?limit=6&q=' + encodeURIComponent(q)).then(function (res) {
+            sugg.innerHTML = '';
+            ((res.data && res.data.results) || []).forEach(function (p) {
+              sugg.appendChild(el('button', { type: 'button', class: 'block w-full text-left px-3 py-1.5 text-xs rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800',
+                text: p.itemCode + ' — ' + (p.specification || p.productName) + (p.brand ? ' · ' + p.brand : ''),
+                onclick: function () { f.itemCode.value = p.itemCode; f.productName.value = p.productName || ''; f.brand.value = p.brand || ''; sugg.innerHTML = ''; f.usualQty.focus(); } }));
+            });
+          }).catch(function () {});
+        }, 250);
+      });
+      var err = el('p', { class: 'text-xs text-red-600' });
+      var save = el('button', { class: 'btn-primary btn-sm', type: 'button', id: 'ox-reg-save', text: 'Save regular item' });
+      save.addEventListener('click', function () {
+        var b = { customerId: cust.id }; Object.keys(f).forEach(function (k) { b[k] = f[k].value; });
+        err.textContent = ''; save.disabled = true;
+        api('POST', '/regular-items', b).then(function () { done(); }).catch(function (e) { err.textContent = e.message; save.disabled = false; });
+      });
+      function lab(text, input) { return el('label', { class: 'block' }, [el('span', { class: 'text-xs text-muted block mb-1', text: text }), input]); }
+      return el('div', { class: 'mt-4 p-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-600' }, [
+        el('p', { class: 'text-sm font-semibold mb-2', text: 'Add a regular item by hand for ' + cust.companyName }),
+        el('div', { class: 'ox-reg-grid' }, [el('div', {}, [lab('Item code', f.itemCode), sugg]), lab('Product', f.productName), lab('Brand', f.brand),
+          lab('Usual qty per order', f.usualQty), lab('Orders every (days)', f.everyDays), lab('Keep in stock for them', f.keepQty), lab('Notes', f.notes)]),
+        err, el('div', { class: 'flex justify-end mt-2' }, [save])
+      ]);
+    }
+    paintTabs(); paint();
+    card.appendChild(el('div', { class: 'flex items-center justify-between gap-2' }, [
+      el('span', { class: 'text-sm font-semibold', text: '🔁 Stock reminders & regular items' }),
+      el('button', { class: 'ox-muted-link', type: 'button', text: 'Close', onclick: function () { if (opts.onClose) opts.onClose(); } })
+    ]));
+    card.appendChild(tabs); card.appendChild(body);
+    return card;
+  }
+
+  var REG_CACHE = {};
+  /** In the order form: the picked company's regular items, one click adds a line. */
+  function regularChips(customerId, onAdd) {
+    var wrap = el('div', { class: 'ox-reg-chips', 'data-reg-chips': customerId }, []);
+    var c = REG_CACHE[customerId];
+    if (!c || Date.now() - c.at > 60000) c = REG_CACHE[customerId] = { at: Date.now(), p: api('GET', '/regular-items?customerId=' + encodeURIComponent(customerId)) };
+    c.p.then(function (res) {
+      var items = res.data.items || [];
+      if (!items.length) return;
+      wrap.appendChild(el('span', { class: 'text-xs text-muted block mb-1', text: 'Regular items of this company — click to add' }));
+      var row = el('div', { class: 'flex gap-1.5 flex-wrap' });
+      items.slice(0, 20).forEach(function (it) {
+        var s = REG_STATUS[it.status] || ['', ''];
+        row.appendChild(el('button', { type: 'button', class: 'ox-chip ' + s[1], 'data-reg-chip': it.itemCode, title: it.productName + ' · ' + s[0] + ' · ' + stockText(it.stock),
+          text: it.itemCode + (it.usualQty ? ' ×' + fmtQty(it.usualQty) : ''), onclick: function () { onAdd(it); } }));
+      });
+      wrap.appendChild(row);
+    }).catch(function () {});
+    return wrap;
+  }
+
   /** The expanded-row content: materials checklist on the left, order facts on the right. */
   function orderDetailPanel(o, opts) {
     var facts = el('div', { class: 'space-y-3 text-sm' });
@@ -465,9 +729,7 @@
       ]));
     }
     if (o.orderType === 'PO' && o.poDocument) {
-      facts.appendChild(el('a', {
-        href: API + o.poDocument.url, target: '_blank', rel: 'noopener', class: 'text-primary font-medium block'
-      }, ['📄 ' + o.poDocument.originalName]));
+      facts.appendChild(docButtons(o));
     } else if (o.orderType === 'VERBAL' && o.verbalDetails) {
       facts.appendChild(el('div', {}, [
         el('span', { class: 'text-xs text-muted block', text: 'Verbally agreed' }),
@@ -842,10 +1104,7 @@
         wrap.appendChild(etaRow);
 
         if (o.orderType === 'PO' && o.poDocument) {
-          wrap.appendChild(el('a', {
-            href: API + o.poDocument.url, target: '_blank', rel: 'noopener',
-            class: 'flex items-center gap-2 text-sm text-primary dark:text-primary-300 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700'
-          }, ['📄 ' + o.poDocument.originalName]));
+          wrap.appendChild(el('div', { class: 'space-y-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700' }, [docButtons(o), docPreview(o)]));
         } else if (o.orderType === 'VERBAL') {
           wrap.appendChild(el('div', { class: 'text-sm px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/50' }, [o.verbalDetails || '—']));
         }
@@ -918,6 +1177,13 @@
             el('span', { text: state.customerLabel }),
             el('button', { class: 'text-primary dark:text-primary-300 text-xs font-medium', text: 'Change', onclick: function () { state.customerId = ''; render(); } })
           ]));
+          wrap.appendChild(regularChips(state.customerId, function (it) {
+            var have = state.items.filter(function (x) { return String(x.itemCode).toUpperCase() === it.itemCode; })[0];
+            if (have) { have.quantity = (Number(have.quantity) || 0) + (Number(it.usualQty) || 1); }
+            else state.items.push({ productId: null, itemCode: it.itemCode, productName: it.productName || it.itemCode, unit: null, category: null, brand: it.brand || null,
+                                    quantity: Number(it.usualQty) || 1, stock: it.stock === undefined ? undefined : it.stock });
+            render();
+          }));
         } else {
           var custInput = el('input', { class: INPUT, placeholder: 'Search by company or contact name…' });
           var custList = el('div', { class: 'mt-1 space-y-1' });

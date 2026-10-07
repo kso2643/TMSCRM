@@ -1,3 +1,23 @@
+# Update — 7 Oct (b): orders — PO document viewer, low stock, customer regular items & restock reminders
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. New file: `api/controllers/RegularItemController.php`. The new table (`CustomerRegularItem`) is created automatically.
+
+- **Uploaded PO (PDF / image):**
+  - Shows inside the order, with **View** (new tab) and **⬇ Download**.
+  - The old link opened without the login and was refused by the server.
+- **🔁 Stock reminders & regular items** (button on the Orders page; the alert link opens it):
+  - **Restock reminders:** each company's regular items whose free stock (stock minus what open orders still need) is below what that company usually takes, due in the next 30 days. Shows what to order per item across all companies, and the list by company with last ordered and next expected date.
+  - **Low stock:** items out of stock, at or below their minimum, or short for open orders.
+  - **Customer regular items:** pick a company to see its regular items.
+    - **Found from orders:** any item ordered in 2 or more orders in the last 12 months, with the average qty and how often they order.
+    - **Added by hand:** usual qty, every how many days, how much stock to keep for them, notes. Edit or remove any item.
+- **Order form:** after choosing the customer, their regular items appear as buttons; one click adds the line with the usual qty.
+- **Daily alert (9:30, Manager / Admin):** "Restock for regular customers" when something is short.
+- **Trial savings sheet:** the uploaded "Existing Situation Data Analysis" file is the same as the sheet already installed, so it is unchanged. Its charts show on the **Sheet** tab of step 4 and in its PDF.
+- **Verification:** API 16/16, browser 11/11, orders 15/15.
+
+---
+
 # Update — 7 Oct: product suggestions, CPR focus brand, visit planner, trials DC approval, chat, attendance window, vendors, inward, order stock / PDF, detailed reports
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

@@ -81,6 +81,7 @@ require __DIR__ . '/controllers/TrialController.php';
 require __DIR__ . '/controllers/AlertFeedController.php';
 require __DIR__ . '/controllers/ChatController.php';
 require __DIR__ . '/controllers/VendorController.php';
+require __DIR__ . '/controllers/RegularItemController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -459,6 +460,17 @@ try {
     }
 
     // ── Chat (admin ↔ users) ────────────────────────────────────────
+    elseif ($c0 === 'regular-items') {
+        $ctrl = new RegularItemController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''        => $ctrl->index(),
+            $method === 'GET'    && $c1 === 'restock' => $ctrl->restock(),
+            $method === 'POST'   && $c1 === ''        => $ctrl->save(),
+            $method === 'POST'   && $c1 === 'hide'    => $ctrl->hide(),
+            $method === 'DELETE' && $c1 !== ''        => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
     elseif ($c0 === 'vendors') {
         $ctrl = new VendorController();
         match (true) {
