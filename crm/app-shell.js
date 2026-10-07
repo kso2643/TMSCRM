@@ -35,6 +35,8 @@
   // [tag, attributes] nodes, inlined so pages built from this shell have no
   // external icon dependency.
   var ICONS = {
+    "MessageSquare": [["path",{"d":"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"}]],
+    "Truck": [["path",{"d":"M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"}],["path",{"d":"M15 18H9"}],["path",{"d":"M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"}],["circle",{"cx":"17","cy":"18","r":"2"}],["circle",{"cx":"7","cy":"18","r":"2"}]],
     "BadgeIndianRupee": [["path",{"d":"M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"}],["path",{"d":"M8 8h8"}],["path",{"d":"M8 12h8"}],["path",{"d":"m13 17-5-1h1a3 3 0 0 0 0-6"}]],
     "Target": [["circle",{"cx":"12","cy":"12","r":"10"}],["circle",{"cx":"12","cy":"12","r":"6"}],["circle",{"cx":"12","cy":"12","r":"2"}]],
     "Activity": [["path",{"d":"M22 12h-4l-3 9L9 3l-3 9H2"}]],
@@ -71,7 +73,7 @@
     "Upload": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"17 8 12 3 7 8"}],["line",{"x1":"12","x2":"12","y1":"3","y2":"15"}]]
   };
   // Sidebar label -> icon. Keep in sync with the React layout chunk.
-  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee"};
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee","Chat": "MessageSquare","Vendors": "Truck"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -93,7 +95,8 @@
     { label: 'Fuel expense',          href: '/fuel-expense/',   icon: 'fuel',      section: 'Operations' },
     { label: 'Appointments',          href: '/appointments/',   icon: 'appts',     section: 'Operations' },
     { label: 'Tasks',                 href: '/tasks/',          icon: 'timer',     section: 'Operations' },
-    { label: 'Leave',                 href: '/leaves/',         icon: 'calendar',  section: 'Operations' }
+    { label: 'Leave',                 href: '/leaves/',         icon: 'calendar',  section: 'Operations' },
+    { label: 'Chat',                  href: '/chat/',           icon: 'chat',      section: 'Operations' }
   ];
   var ADMIN_NAV = [
     { label: 'Live tracking', href: '/admin/live-tracking/', icon: 'nav',      roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
@@ -102,6 +105,7 @@
     { label: 'Users',         href: '/admin/users/',         icon: 'users',    roles: ADMIN_ROLES },
     { label: 'HR',            href: '/hr/',                  icon: 'idcard',   roles: ADMIN_ROLES },
     { label: 'Payroll',       href: '/payroll/',              icon: 'file',    roles: ADMIN_ROLES },
+    { label: 'Vendors',       href: '/vendors/',             icon: 'truck',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
     { label: 'Reports',       href: '/admin/reports/',       icon: 'chart',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
     { label: 'Activity logs', href: '/admin/activity/',      icon: 'activity', roles: ['SUPER_ADMIN','ADMIN','MANAGER'] }
   ];

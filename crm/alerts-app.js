@@ -29,6 +29,7 @@
     ['leave', 'Leave'],
     ['prices', 'Price requests'],
     ['stock', 'Stock'],
+    ['chat', 'Chat'],
     ['breaks', 'Breaks & location']
   ];
   var TYPE_GROUP = {
@@ -36,12 +37,12 @@
     TRIAL_REQUESTED: 'trials', TRIAL_DECIDED: 'trials', TRIAL_COMPLETED: 'trials', TRIAL_PDF: 'trials',
     LEAVE_REQUESTED: 'leave', LEAVE_DECIDED: 'leave',
     PRICE_REQUEST_NEW: 'prices', PRICE_REQUEST_ANSWERED: 'prices', PRICE_REQUEST_REMINDER: 'prices',
-    STOCK_LOW: 'stock', STOCK_CHECK: 'stock',
+    STOCK_LOW: 'stock', STOCK_CHECK: 'stock', CHAT_MESSAGE: 'chat',
     BREAK_STARTED: 'breaks', STATIONARY: 'breaks', LOCATION_OFF: 'breaks'
   };
   var GROUP_STYLE = {
     followups: ['#0891b2', '↻'], appointments: ['#4f46e5', '📅'], tasks: ['#2563eb', '📋'], trials: ['#7c3aed', '🧪'],
-    leave: ['#db2777', '🌴'], prices: ['#d97706', '₹'], stock: ['#ea580c', '📦'], breaks: ['#0d9488', '☕']
+    leave: ['#db2777', '🌴'], prices: ['#d97706', '₹'], stock: ['#ea580c', '📦'], chat: ['#0284c7', '💬'], breaks: ['#0d9488', '☕']
   };
 
   function token() { try { return localStorage.getItem('crm_token'); } catch (e) { return null; } }

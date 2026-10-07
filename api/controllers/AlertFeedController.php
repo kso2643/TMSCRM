@@ -190,6 +190,14 @@ class AlertFeedController
                 '/trials/#/t/' . rawurlencode($r['id']), $r['decidedAt']);
         }
 
+        // Chat messages to me
+        try { new ChatController(); } catch (Throwable $e) {}
+        foreach (self::rows(
+            "SELECT m.id, m.body, m.createdAt, u.name AS fromName, m.fromId FROM `ChatMessage` m LEFT JOIN `User` u ON u.id=m.fromId
+             WHERE m.toId=? AND m.createdAt>? AND m.readAt IS NULL ORDER BY m.createdAt DESC LIMIT $per", [$me, $since]) as $r) {
+            $add('chat-' . $r['id'], 'CHAT_MESSAGE', 'Message from ' . ($r['fromName'] ?: 'admin'), mb_substr($r['body'], 0, 140), '/chat/#' . rawurlencode($r['fromId']), $r['createdAt']);
+        }
+
         // Trial PDFs sent to admin (existing data on raising, comparison on completion)
         if ($isManager) {
             foreach (self::rows(

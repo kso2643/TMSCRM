@@ -79,6 +79,7 @@ require __DIR__ . '/controllers/TaskController.php';
 require __DIR__ . '/controllers/PriceRequestController.php';
 require __DIR__ . '/controllers/TrialController.php';
 require __DIR__ . '/controllers/AlertFeedController.php';
+require __DIR__ . '/controllers/ChatController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -444,6 +445,18 @@ try {
             $method === 'GET' && $c1 === 'breaks'         => $ctrl->breaks(),
             $method === 'GET' && in_array($c1, ['tracking', 'daily-movement'], true)     => $ctrl->tracking(),
             default => sendError("Route /api/reports/$c1 not found", 404),
+        };
+    }
+
+    // ── Chat (admin ↔ users) ────────────────────────────────────────
+    elseif ($c0 === 'chat') {
+        $ctrl = new ChatController();
+        match (true) {
+            $method === 'GET'  && $c1 === 'users'                => $ctrl->users(),
+            $method === 'GET'  && $c1 === 'unread'               => $ctrl->unread(),
+            $method === 'GET'  && $c1 === 'thread' && $c2 !== '' => $ctrl->thread($c2),
+            $method === 'POST' && $c1 === 'send'                 => $ctrl->send(),
+            default => sendError("Route /api/chat/$c1 not found", 404),
         };
     }
 
