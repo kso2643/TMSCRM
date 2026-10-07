@@ -30,7 +30,7 @@
     ['prices', 'Price requests'],
     ['stock', 'Stock'],
     ['chat', 'Chat'],
-    ['breaks', 'Breaks & location']
+    ['breaks', 'Attendance, breaks & location']
   ];
   var TYPE_GROUP = {
     TASK_ASSIGNED: 'tasks', TASK_COMPLETED: 'tasks',
@@ -38,6 +38,7 @@
     LEAVE_REQUESTED: 'leave', LEAVE_DECIDED: 'leave',
     PRICE_REQUEST_NEW: 'prices', PRICE_REQUEST_ANSWERED: 'prices', PRICE_REQUEST_REMINDER: 'prices',
     STOCK_LOW: 'stock', STOCK_CHECK: 'stock', CHAT_MESSAGE: 'chat',
+    LATE_PUNCH_REQUEST: 'breaks', LATE_PUNCH_DECIDED: 'breaks', PUNCH_REMINDER: 'breaks',
     BREAK_STARTED: 'breaks', STATIONARY: 'breaks', LOCATION_OFF: 'breaks'
   };
   var GROUP_STYLE = {

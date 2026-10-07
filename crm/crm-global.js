@@ -78,7 +78,7 @@
   // app and as the newer hand-coded page. A React link would open the old one
   // (and a refresh the new one), so on React pages any click on such a link is
   // turned into a normal page load.
-  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors)\/?$/;
+  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance)\/?$/;
   function hardLinks() {
     if (!window.__next_f) return; // only the compiled React pages need this
     document.addEventListener('click', function (e) {
@@ -495,6 +495,9 @@
 
   var TYPE_STYLE = {
     APPOINTMENT_REMINDER:   { color: '#d97706', icon: '⏰' },
+    PUNCH_REMINDER:         { color: '#dc2626', icon: '🕘' },
+    LATE_PUNCH_REQUEST:     { color: '#d97706', icon: '🕘' },
+    LATE_PUNCH_DECIDED:     { color: '#0f766e', icon: '🕘' },
     APPOINTMENT_ASSIGNED:   { color: '#4f46e5', icon: '📅' },
     TASK_ASSIGNED:          { color: '#2563eb', icon: '📋' },
     TASK_COMPLETED:         { color: '#16a34a', icon: '✅' },
@@ -678,8 +681,10 @@
       setTimeout(function () { if (t.parentNode && !t.matches(':hover')) leave(t); }, 20000);
     }
     // At most 3 on screen, so alerts never bury the page; the rest are summarised.
-    var list = box.querySelectorAll('.t');
-    for (var i = 3; i < list.length; i++) { hidden++; list[i].remove(); }
+    // Sticky reminders (e.g. punch in) are never pushed out.
+    if (ev.sticky) t.setAttribute('data-sticky', '1');
+    var list = box.querySelectorAll('.t:not([data-sticky])'), room = 3 - box.querySelectorAll('.t[data-sticky]').length;
+    for (var i = Math.max(0, room); i < list.length; i++) { hidden++; list[i].remove(); }
   }
   // Fade / slide a toast away, then tidy the stack.
   function leave(t) {
@@ -746,8 +751,33 @@
     setInterval(fix, 1000);
   }
 
+  // ── 6. Punch-in reminder: 9:25 – 9:40 AM (India time), Mon – Sat ───
+  // Every few minutes in that window, until the attendance API says you have
+  // punched in today. Once punched in the reminder stops (and is removed).
+  var PUNCH_FLAG = 'crm_punched_in';
+  function istNow() { var d = new Date(Date.now() + (330 + new Date().getTimezoneOffset()) * 60000); return d; }
+  function punchReminder() {
+    if (!token()) return;
+    var d = istNow(), mins = d.getHours() * 60 + d.getMinutes(), day = d.toDateString();
+    var clearIt = function () { if (box) box.querySelectorAll('.t[data-id^="punch-remind-"]').forEach(function (n) { n.remove(); }); };
+    if (lsGet(PUNCH_FLAG) === day) { clearIt(); return; }
+    if (d.getDay() === 0 || mins < 9 * 60 + 25 || mins > 9 * 60 + 40) return;
+    fetch(API + '/api/attendance/today', { headers: { Authorization: 'Bearer ' + token() } })
+      .then(function (r) { return r.json(); }).then(function (j) {
+        if (j && j.data && j.data.record) { lsSet(PUNCH_FLAG, day); clearIt(); return; }
+        if (/^\/attendance\/?$/.test(location.pathname)) return; // the page itself shows it
+        var slot = Math.floor(mins / 5) * 5, left = 9 * 60 + 45 - mins;
+        clearIt();
+        window.CRMAlerts.show({ id: 'punch-remind-' + day.replace(/\W/g, '') + '-' + slot, type: 'PUNCH_REMINDER', sticky: true,
+          title: 'Punch in now', link: '/attendance/', at: new Date().toISOString(),
+          body: mins < 9 * 60 + 30 ? 'You have not punched in yet. On time until 9:30 AM.' : 'Grace time — ' + left + ' min left before punch-in locks at 9:45 AM.' });
+      }).catch(function () {});
+  }
+
   function start() {
     keepOverlays();
+    setTimeout(punchReminder, 4000);
+    setInterval(punchReminder, 60000);
     hardLinks();
     ensureMenu();
     productButtons();

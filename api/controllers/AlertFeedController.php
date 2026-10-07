@@ -198,6 +198,21 @@ class AlertFeedController
             $add('chat-' . $r['id'], 'CHAT_MESSAGE', 'Message from ' . ($r['fromName'] ?: 'admin'), mb_substr($r['body'], 0, 140), '/chat/#' . rawurlencode($r['fromId']), $r['createdAt']);
         }
 
+        // Late punch-in: requests to admins, decisions back to the employee
+        if (is_admin_tier($auth['role'])) {
+            foreach (self::rows(
+                "SELECT r.id, r.reason, r.createdAt, u.name FROM `PunchRequest` r LEFT JOIN `User` u ON u.id=r.userId
+                 WHERE r.status='PENDING' AND r.createdAt>? AND r.userId<>? ORDER BY r.createdAt DESC LIMIT $per", [$since, $me]) as $r) {
+                $add('late-punch-' . $r['id'], 'LATE_PUNCH_REQUEST', ($r['name'] ?: 'Employee') . ' wants to punch in late',
+                    mb_substr($r['reason'], 0, 140) . ' — approve on the Attendance page', '/attendance/', $r['createdAt']);
+            }
+        }
+        foreach (self::rows(
+            "SELECT r.id, r.status, r.adminNote, r.decidedAt FROM `PunchRequest` r WHERE r.userId=? AND r.decidedAt>? ORDER BY r.decidedAt DESC LIMIT $per", [$me, $since]) as $r) {
+            $add('late-punch-dec-' . $r['id'], 'LATE_PUNCH_DECIDED', $r['status'] === 'APPROVED' ? 'Punch-in released' : 'Late punch-in rejected',
+                $r['status'] === 'APPROVED' ? 'Your request was approved — punch in now.' : ($r['adminNote'] ?: 'Your request was rejected.'), '/attendance/', $r['decidedAt']);
+        }
+
         // Trial PDFs sent to admin (existing data on raising, comparison on completion)
         if ($isManager) {
             foreach (self::rows(

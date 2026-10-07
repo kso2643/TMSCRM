@@ -1,7 +1,41 @@
 <?php
 class AttendanceController
 {
-    // POST /api/attendance/checkin
+    // Punch-in window (server / IST time): on time until 09:30, late (grace) until 09:45.
+    // After 09:45 punching in is locked until an admin approves a request with a reason.
+    public const ON_TIME_UNTIL = '09:30';
+    public const GRACE_UNTIL   = '09:45';
+
+    public function __construct()
+    {
+        ensure_schema([
+            'Attendance' => ['create' => '', 'columns' => [
+                'checkInPhoto' => 'VARCHAR(120) NULL', 'lateMinutes' => 'INT NULL', 'lateRequestId' => 'VARCHAR(30) NULL',
+            ]],
+            'PunchRequest' => ['create' => "CREATE TABLE IF NOT EXISTS `PunchRequest` (
+  `id` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `date` DATE NOT NULL, `reason` TEXT NOT NULL,
+  `status` VARCHAR(12) NOT NULL DEFAULT 'PENDING', `adminNote` TEXT NULL, `decidedById` VARCHAR(30) NULL, `decidedAt` DATETIME NULL,
+  `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`), KEY `PunchRequest_user_date_idx` (`userId`, `date`), KEY `PunchRequest_status_idx` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"],
+        ], 'Attendance punch-in window');
+    }
+
+    private static function nowTs(): int { return time(); }
+
+    /** Where now falls in today's punch-in window: ON_TIME | GRACE | LOCKED, plus today's late request. */
+    private function window(string $userId): array
+    {
+        $now = date('H:i', self::nowTs());
+        $phase = $now < self::ON_TIME_UNTIL ? 'ON_TIME' : ($now < self::GRACE_UNTIL ? 'GRACE' : 'LOCKED');
+        $s = db()->prepare('SELECT r.*, u.name AS decidedByName FROM `PunchRequest` r LEFT JOIN `User` u ON u.id=r.decidedById WHERE r.userId=? AND r.date=? ORDER BY FIELD(r.status,\'APPROVED\',\'PENDING\',\'REJECTED\'), r.createdAt DESC LIMIT 1');
+        $s->execute([$userId, date('Y-m-d')]);
+        $req = $s->fetch() ?: null;
+        return ['now' => date('H:i:s', self::nowTs()), 'onTimeUntil' => self::ON_TIME_UNTIL, 'graceUntil' => self::GRACE_UNTIL, 'phase' => $phase,
+                'request' => $req, 'canPunchIn' => $phase !== 'LOCKED' || ($req && $req['status'] === 'APPROVED')];
+    }
+
+    // POST /api/attendance/checkin — { lat, lng, photo: data:image/jpeg;base64,... }
     public function checkIn(): void
     {
         $auth = authenticate();
@@ -12,6 +46,19 @@ class AttendanceController
         $s->execute([$auth['id'], $start, $end]);
         if ($s->fetch()) sendError('Already checked in today.', 400);
 
+        $win = $this->window($auth['id']);
+        if (!$win['canPunchIn']) {
+            $r = $win['request'];
+            sendError($r && $r['status'] === 'PENDING' ? 'Punch-in is locked after ' . self::GRACE_UNTIL . '. Your request is waiting for admin approval.'
+                : 'Punch-in closed at ' . self::GRACE_UNTIL . '. Send a request with the reason — an admin will release the punch-in.', 403);
+        }
+        // Photo is required (selfie at punch-in).
+        $photo = (string) ($b['photo'] ?? '');
+        if (!preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#', $photo, $pm)) sendError('Take a photo to punch in.', 400);
+        $bin = base64_decode($pm[2], true);
+        if ($bin === false || strlen($bin) < 1000) sendError('The photo could not be read — take it again.', 400);
+        if (strlen($bin) > 4 * 1024 * 1024) sendError('The photo is too large.', 400);
+
         $lat = isset($b['lat']) && is_numeric($b['lat']) ? (float)$b['lat'] : null;
         $lng = isset($b['lng']) && is_numeric($b['lng']) ? (float)$b['lng'] : null;
         // Location is mandatory: live tracking and the location history depend on it.
@@ -19,10 +66,16 @@ class AttendanceController
             sendError('Location is required to punch in. Turn on location (GPS) on your device and allow this site to use it, then try again.', 400);
         }
         $id = gen_id();
+        $dir = UPLOADS_PATH . '/attendance';
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        $photoName = $id . '.' . ($pm[1] === 'png' ? 'png' : ($pm[1] === 'webp' ? 'webp' : 'jpg'));
+        if (@file_put_contents("$dir/$photoName", $bin) === false) sendError('Could not save the photo on the server.', 500);
+        $late = date('H:i', self::nowTs()) >= self::ON_TIME_UNTIL ? (int) floor((self::nowTs() - strtotime(date('Y-m-d') . ' ' . self::ON_TIME_UNTIL)) / 60) : 0;
         db()->prepare(
-            'INSERT INTO `Attendance` (id,userId,date,checkIn,checkInLat,checkInLng,status,createdAt,updatedAt)
-             VALUES (?,?,?,?,?,?,\'PRESENT\',?,?)'
-        )->execute([$id, $auth['id'], $start, now_sql(), $lat, $lng, now_sql(), now_sql()]);
+            'INSERT INTO `Attendance` (id,userId,date,checkIn,checkInLat,checkInLng,checkInPhoto,lateMinutes,lateRequestId,status,createdAt,updatedAt)
+             VALUES (?,?,?,?,?,?,?,?,?,\'PRESENT\',?,?)'
+        )->execute([$id, $auth['id'], $start, now_sql(), $lat, $lng, $photoName, $late ?: null,
+                    ($win['phase'] === 'LOCKED' && $win['request']) ? $win['request']['id'] : null, now_sql(), now_sql()]);
 
         $s2 = db()->prepare('SELECT * FROM `Attendance` WHERE id=? LIMIT 1'); $s2->execute([$id]);
         sendSuccess(['record' => $s2->fetch()], 'Check-in recorded', 201);
@@ -149,7 +202,70 @@ class AttendanceController
         $start = start_of_day(); $end = start_of_day_plus(1);
         $s = db()->prepare('SELECT * FROM `Attendance` WHERE userId=? AND date>=? AND date<? LIMIT 1');
         $s->execute([$auth['id'], $start, $end]);
-        sendSuccess(['record' => $s->fetch() ?: null]);
+        sendSuccess(['record' => $s->fetch() ?: null, 'window' => $this->window($auth['id'])]);
+    }
+
+    // POST /api/attendance/late-request { reason } — after the grace time, ask an admin to release punch-in
+    public function lateRequest(): void
+    {
+        $auth = authenticate();
+        $reason = trim((string) (request_body()['reason'] ?? ''));
+        if ($reason === '') sendError('Give the reason you are late.', 400);
+        $w = $this->window($auth['id']);
+        if ($w['phase'] !== 'LOCKED') sendError('Punch-in is still open — punch in now.', 400);
+        if ($w['request'] && in_array($w['request']['status'], ['PENDING', 'APPROVED'], true)) sendError('You already sent a request today.', 400);
+        $id = gen_id();
+        db()->prepare('INSERT INTO `PunchRequest` (id,userId,date,reason,status,createdAt) VALUES (?,?,?,?,\'PENDING\',?)')
+            ->execute([$id, $auth['id'], date('Y-m-d'), mb_substr($reason, 0, 1000), now_sql()]);
+        log_activity($auth['id'], 'LATE_PUNCH_REQUESTED', 'PunchRequest', $id, []);
+        sendSuccess(['window' => $this->window($auth['id'])], 'Request sent — you can punch in once an admin approves it.', 201);
+    }
+
+    // GET /api/attendance/late-requests?status=PENDING — admin-tier: everyone's; others: their own
+    public function lateRequests(): void
+    {
+        $auth = authenticate();
+        $where = []; $p = [];
+        if (!is_admin_tier($auth['role'])) { $where[] = 'r.userId=?'; $p[] = $auth['id']; }
+        if (qp('status')) { $where[] = 'r.status=?'; $p[] = strtoupper(qp('status')); }
+        $s = db()->prepare('SELECT r.*, u.name AS userName, u.department, d.name AS decidedByName FROM `PunchRequest` r
+                            LEFT JOIN `User` u ON u.id=r.userId LEFT JOIN `User` d ON d.id=r.decidedById ' . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . '
+                            ORDER BY (r.status=\'PENDING\') DESC, r.createdAt DESC LIMIT 100');
+        $s->execute($p);
+        sendSuccess(['requests' => $s->fetchAll()]);
+    }
+
+    // PATCH /api/attendance/late-requests/:id { status: APPROVED|REJECTED, note }
+    public function decideLateRequest(string $id): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('Only managers and admins can release punch-in.', 403);
+        $b = request_body();
+        $st = strtoupper((string) ($b['status'] ?? ''));
+        if (!in_array($st, ['APPROVED', 'REJECTED'], true)) sendError('Approve or reject.', 400);
+        $note = trim((string) ($b['note'] ?? ''));
+        if ($st === 'REJECTED' && $note === '') sendError('Give a reason for rejecting.', 400);
+        $u = db()->prepare("UPDATE `PunchRequest` SET status=?, adminNote=?, decidedById=?, decidedAt=? WHERE id=? AND status='PENDING'");
+        $u->execute([$st, $note ?: null, $auth['id'], now_sql(), $id]);
+        if (!$u->rowCount()) sendError('Request not found or already decided.', 404);
+        log_activity($auth['id'], 'LATE_PUNCH_' . $st, 'PunchRequest', $id, []);
+        sendSuccess([], $st === 'APPROVED' ? 'Punch-in released' : 'Request rejected');
+    }
+
+    // GET /api/attendance/:id/photo — the punch-in photo (own, or admin-tier)
+    public function photo(string $id): void
+    {
+        $auth = authenticate();
+        $s = db()->prepare('SELECT userId, checkInPhoto FROM `Attendance` WHERE id=?'); $s->execute([$id]);
+        $r = $s->fetch();
+        if (!$r || !$r['checkInPhoto']) sendError('No photo.', 404);
+        if ($r['userId'] !== $auth['id'] && !is_admin_tier($auth['role'])) sendError('Not allowed.', 403);
+        $path = UPLOADS_PATH . '/attendance/' . basename($r['checkInPhoto']);
+        if (!is_file($path)) sendError('Photo missing on the server.', 404);
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        header('Content-Type: ' . ($ext === 'png' ? 'image/png' : ($ext === 'webp' ? 'image/webp' : 'image/jpeg')));
+        header('Cache-Control: private, max-age=86400');
+        readfile($path); exit;
     }
 
     // POST /api/attendance/ping
