@@ -85,6 +85,13 @@
       '.ox-check:disabled{cursor:default}',
       '.ox-item{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-top:1px solid #f1f5f9}',
       '.dark .ox-item{border-color:#1e293b}',
+      '.ox-item-part{background:#fffbeb}.dark .ox-item-part{background:rgba(245,158,11,.08)}',
+      '.ox-supbox{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;justify-content:flex-end}',
+      '.ox-supq{width:5.2rem;border:1px solid #cbd5e1;border-radius:.4rem;padding:.25rem .4rem;font-size:.85rem;text-align:right;background:#fff;color:inherit}.dark .ox-supq{background:#0f172a;border-color:#334155}',
+      '.ox-pend{font-size:.72rem;font-weight:600;color:#b45309;background:#fef3c7;border-radius:999px;padding:0 .45rem}',
+      '.ox-stock{display:inline-block;margin-top:.15rem;font-size:.72rem;font-weight:600;border-radius:.35rem;padding:0 .4rem}',
+      '.ox-stock-ok{background:#f0fdf4;color:#166534}.ox-stock-low{background:#fffbeb;color:#92400e}.ox-stock-none{background:#fef2f2;color:#991b1b}',
+      '.ox-line-stock{display:block;font-size:.72rem;margin-top:.2rem}',
       '.ox-item:first-child{border-top:0}',
       '.ox-item-on{background:rgba(34,197,94,.08)}',
       '.ox-overdue{color:#dc2626;font-weight:600}',
@@ -346,7 +353,7 @@
     }
 
     function renderTable() {
-      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Materials'];
+      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Materials', 'PDF'];
       var tbody = el('tbody');
       if (!all.length) {
         tbody.appendChild(el('tr', {}, [el('td', {
@@ -369,7 +376,8 @@
             el('td', { class: 'px-3 py-3' }, [proformaCell(o)]),
             procCell,
             el('td', { class: 'px-3 py-3' }, [deliveryCell(o)]),
-            el('td', { class: 'px-3 py-3 ox-nowrap text-muted', title: o.productSummary || '', text: supplied })
+            el('td', { class: 'px-3 py-3 ox-nowrap text-muted', title: o.productSummary || '', text: supplied }),
+            el('td', { class: 'px-3 py-3' }, [pdfButton(o)])
           ]);
           tr.addEventListener('click', function () {
             expanded[o.id] = !expanded[o.id];
@@ -470,7 +478,7 @@
     if (o.deliveredDate && o.deliveryStatus !== 'PENDING') {
       facts.appendChild(el('p', { class: 'text-xs text-muted', text: 'Last supplied ' + fmtDate(o.deliveredDate) }));
     }
-    facts.appendChild(el('button', { class: 'btn-secondary btn-sm', text: 'Open full order', onclick: opts.onOpen }));
+    facts.appendChild(el('div', { class: 'flex gap-2 flex-wrap' }, [el('button', { class: 'btn-secondary btn-sm', text: 'Open full order', onclick: opts.onOpen }), pdfButton(o)]));
 
     return el('div', { class: 'ox-expand-grid' }, [
       supplyPanel(o, { preset: opts.preset, onSaved: opts.onSaved, onCancelPreset: opts.onCancelPreset }),
@@ -479,37 +487,53 @@
   }
 
   /**
-   * Materials checklist. Tick what was supplied, then one button saves it:
-   * all ticked = complete, some = partially complete, none = not delivered.
-   * Anything short of complete requires a reason. Read-only for people who
+   * Materials supplied, by quantity. Each line takes the quantity supplied so
+   * far (the tick fills the whole quantity); one button saves it:
+   * everything supplied = complete, something = partially complete,
+   * nothing = not delivered. Anything short of complete requires a reason.
+   * Supplied quantities come out of stock (hand stock first). Each line shows
+   * the stock in hand / total for its item code. Read-only for people who
    * can't edit the order.
    */
   function supplyPanel(o, opts) {
     opts = opts || {};
     var editable = canEditOrder(o);
     var items = o.items || [];
-    var picked = {};
+    var qty = {};
     items.forEach(function (i) {
-      picked[i.id] = opts.preset === 'NOT_DELIVERED' ? false : !!i.supplied;
+      var done = i.suppliedQty != null ? Number(i.suppliedQty) : (i.supplied ? Number(i.quantity) : 0);
+      qty[i.id] = opts.preset === 'NOT_DELIVERED' ? 0 : done;
     });
     var reason = o.deliveryStatus === 'PARTIALLY_DELIVERED' || o.deliveryStatus === 'NOT_DELIVERED' ? (o.notDeliveredReason || '') : '';
     var err = '';
     var saving = false;
     var wrap = el('div', { class: 'space-y-3' });
 
-    function nPicked() { return items.filter(function (i) { return picked[i.id]; }).length; }
+    function full(i) { return (qty[i.id] || 0) >= Number(i.quantity); }
+    function nFull() { return items.filter(full).length; }
+    function anySupplied() { return items.some(function (i) { return (qty[i.id] || 0) > 0; }); }
+
+    function stockLine(i) {
+      var s = i.stock;
+      if (!i.itemCode || i.itemCode === 'MANUAL') return null;
+      if (!s) return el('span', { class: 'ox-stock ox-stock-none', text: 'Not in stock list' });
+      var pending = Math.max(0, Number(i.quantity) - (qty[i.id] || 0));
+      var cls = s.total <= 0 ? 'ox-stock-none' : (s.hand >= pending ? 'ox-stock-ok' : 'ox-stock-low');
+      return el('span', { class: 'ox-stock ' + cls, title: (s.places || []).map(function (p) { return p.place + ': ' + fmtQty(p.qty); }).join('\n'),
+        text: 'Stock: in hand ' + fmtQty(s.hand) + ' · total ' + fmtQty(s.total) + (s.onOrder ? ' · on open orders ' + fmtQty(s.onOrder) : '') });
+    }
 
     function render() {
       wrap.innerHTML = '';
-      var n = nPicked(), total = items.length;
+      var n = nFull(), total = items.length;
       wrap.appendChild(el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
         el('div', {}, [
           el('span', { class: 'text-sm font-semibold text-slate-900 dark:text-slate-100', text: 'Materials supplied' }),
-          el('span', { class: 'text-xs text-muted ml-2', text: n + ' of ' + total + ' selected' })
+          el('span', { class: 'text-xs text-muted ml-2', text: n + ' of ' + total + ' fully supplied' + (anySupplied() && n < total ? ' · partly supplied' : '') })
         ]),
         editable && total ? el('div', { class: 'flex gap-3' }, [
-          el('button', { class: 'ox-muted-link', text: 'Select all', onclick: function (e) { e.stopPropagation(); items.forEach(function (i) { picked[i.id] = true; }); render(); } }),
-          el('button', { class: 'ox-muted-link', text: 'Clear', onclick: function (e) { e.stopPropagation(); items.forEach(function (i) { picked[i.id] = false; }); render(); } })
+          el('button', { class: 'ox-muted-link', text: 'All supplied', onclick: function (e) { e.stopPropagation(); items.forEach(function (i) { qty[i.id] = Number(i.quantity); }); render(); } }),
+          el('button', { class: 'ox-muted-link', text: 'Clear', onclick: function (e) { e.stopPropagation(); items.forEach(function (i) { qty[i.id] = 0; }); render(); } })
         ]) : null
       ]));
 
@@ -517,37 +541,54 @@
         wrap.appendChild(el('div', { class: 'text-xs px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800' }, [
           opts.preset === 'NOT_DELIVERED'
             ? 'Marking as not delivered — give the reason below and save.'
-            : 'Tick the materials that were supplied, give the reason for the rest, and save.'
+            : 'Enter the quantity supplied on each line, give the reason for the rest, and save.'
         ]));
       }
 
       var list = el('div', { class: 'rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900' });
       if (!total) list.appendChild(el('p', { class: 'px-3 py-2 text-sm text-muted', text: 'No products on this order.' }));
       items.forEach(function (i) {
-        var cb = el('input', { type: 'checkbox', class: 'ox-check', 'aria-label': 'Supplied: ' + i.productName });
-        cb.checked = !!picked[i.id];
+        var q = Number(i.quantity), done = qty[i.id] || 0, pending = Math.max(0, q - done);
+        var cb = el('input', { type: 'checkbox', class: 'ox-check', 'aria-label': 'All supplied: ' + i.productName });
+        cb.checked = full(i);
+        cb.indeterminate = done > 0 && done < q;
         cb.disabled = !editable;
-        cb.addEventListener('change', function () { picked[i.id] = cb.checked; render(); });
+        cb.addEventListener('change', function () { qty[i.id] = cb.checked ? q : 0; render(); });
+
+        var qi = el('input', { type: 'number', min: '0', max: String(q), step: 'any', class: 'ox-supq', 'data-supply-qty': i.itemCode || i.id, 'aria-label': 'Quantity supplied: ' + i.productName });
+        qi.value = done ? String(done) : '';
+        qi.placeholder = '0';
+        qi.disabled = !editable;
+        qi.addEventListener('click', function (e) { e.stopPropagation(); });
+        qi.addEventListener('change', function () {
+          var v = parseFloat(qi.value); if (isNaN(v) || v < 0) v = 0; if (v > q) v = q;
+          qty[i.id] = Math.round(v * 100) / 100; render();
+        });
 
         var metaBits = [i.category, i.brand].filter(Boolean).join(' · ');
         var procLabel = labelOf(PROCUREMENT_STATUSES, i.procurementStatus);
         var procLine = procLabel + (i.expectedDeliveryDate ? ' · arriving ' + fmtDate(i.expectedDeliveryDate) : '');
 
-        var row = el('label', { class: 'ox-item' + (picked[i.id] ? ' ox-item-on' : '') + (editable ? ' cursor-pointer' : '') }, [
+        var row = el('div', { class: 'ox-item' + (full(i) ? ' ox-item-on' : done > 0 ? ' ox-item-part' : ''), 'data-line': i.itemCode || '' }, [
           cb,
           el('span', { class: 'flex-1 min-w-0' }, [
             el('span', { class: 'block text-sm text-slate-900 dark:text-slate-100', text: i.productName + (i.itemCode && i.itemCode !== 'MANUAL' ? ' (' + i.itemCode + ')' : '') }),
             metaBits ? el('span', { class: 'block text-xs text-muted', text: metaBits }) : null,
-            i.supplied && i.suppliedAt ? el('span', { class: 'block text-xs text-muted', text: 'Supplied ' + fmtDate(i.suppliedAt) }) : null,
-            el('span', { class: 'block text-xs text-muted', text: procLine })
+            done > 0 && i.suppliedAt ? el('span', { class: 'block text-xs text-muted', text: 'Supplied ' + fmtDate(i.suppliedAt) }) : null,
+            el('span', { class: 'block text-xs text-muted', text: procLine }),
+            stockLine(i)
           ]),
-          el('span', { class: 'text-sm text-muted ox-nowrap', text: i.quantity + (i.unit ? ' ' + i.unit : '') })
+          el('span', { class: 'ox-supbox' }, [
+            el('span', { class: 'text-xs text-muted', text: 'Supplied' }), qi,
+            el('span', { class: 'text-sm text-muted ox-nowrap', text: 'of ' + fmtQty(q) + (i.unit ? ' ' + i.unit : '') }),
+            pending > 0 && done > 0 ? el('span', { class: 'ox-pend', text: fmtQty(pending) + ' pending' }) : null
+          ])
         ]);
         row.addEventListener('click', function (e) { e.stopPropagation(); });
         list.appendChild(row);
 
         // Per-item procurement — admin-tier only, right under that item.
-        // Separate from the checkbox above: this is about whether WE have
+        // Separate from the quantity above: this is about whether WE have
         // ordered this specific line from OUR supplier, not whether it's
         // been handed to the customer.
         if (isAdmin()) {
@@ -578,27 +619,27 @@
         return;
       }
 
-      var complete = total > 0 && n === total;
+      var complete = total > 0 && n === total, some = anySupplied();
       if (!complete && total) {
-        var ta = el('textarea', { class: INPUT, rows: '2', placeholder: n ? 'Why is the order only partially complete?' : 'Why wasn’t it delivered?' });
+        var ta = el('textarea', { class: INPUT, rows: '2', placeholder: some ? 'Why is the order only partially complete?' : 'Why wasn’t it delivered?' });
         ta.value = reason;
         ta.addEventListener('input', function () { reason = ta.value; });
         ta.addEventListener('click', function (e) { e.stopPropagation(); });
         wrap.appendChild(el('div', {}, [
-          el('span', { class: 'text-xs font-medium text-amber-800', text: n ? 'Reason for partial completion (required)' : 'Reason for non-delivery (required)' }),
+          el('span', { class: 'text-xs font-medium text-amber-800', text: some ? 'Reason for partial completion (required)' : 'Reason for non-delivery (required)' }),
           el('div', { class: 'mt-1' }, [ta])
         ]));
       }
       if (err) wrap.appendChild(el('p', { class: 'text-xs text-red-600', text: err }));
 
-      var label = complete ? '✓ Mark order complete' : (n ? 'Save as partially complete' : 'Mark not delivered');
+      var label = complete ? '✓ Mark order complete' : (some ? 'Save as partially complete' : 'Mark not delivered');
       var btns = el('div', { class: 'flex gap-2 justify-end flex-wrap' });
       if (opts.preset && opts.onCancelPreset) {
         btns.appendChild(el('button', { class: 'btn-secondary btn-sm', text: 'Cancel', onclick: function (e) { e.stopPropagation(); opts.onCancelPreset(); } }));
       }
       if (total) {
         btns.appendChild(el('button', {
-          class: 'btn-primary btn-sm' + (saving ? ' ox-btn-disabled' : ''), text: saving ? 'Saving…' : label,
+          class: 'btn-primary btn-sm' + (saving ? ' ox-btn-disabled' : ''), 'data-supply-save': '1', text: saving ? 'Saving…' : label,
           onclick: function (e) { e.stopPropagation(); save(); }
         }));
       }
@@ -608,13 +649,15 @@
     function save() {
       if (saving) return;
       err = '';
-      var ids = items.filter(function (i) { return picked[i.id]; }).map(function (i) { return i.id; });
-      if (ids.length < items.length && !reason.trim()) {
-        err = ids.length ? 'Please give a reason why the order is only partially complete.' : 'Please give a reason for the non-delivery.';
+      var complete = items.length && nFull() === items.length;
+      if (!complete && !reason.trim()) {
+        err = anySupplied() ? 'Please give a reason why the order is only partially complete.' : 'Please give a reason for the non-delivery.';
         return render();
       }
+      var quantities = {};
+      items.forEach(function (i) { quantities[i.id] = qty[i.id] || 0; });
       saving = true; render();
-      api('PATCH', '/orders/' + o.id + '/supply', { suppliedItemIds: ids, reason: reason.trim() }).then(function (res) {
+      api('PATCH', '/orders/' + o.id + '/supply', { quantities: quantities, reason: reason.trim() }).then(function (res) {
         saving = false;
         if (opts.onSaved) opts.onSaved(res.data.order);
       }).catch(function (e2) { saving = false; err = e2.message; render(); });
@@ -633,6 +676,37 @@
 
     render();
     return wrap;
+  }
+
+  /** Downloads (or opens) the order as a PDF. */
+  function orderPdf(o, open) {
+    var t = token();
+    return fetch(API + '/api/orders/' + encodeURIComponent(o.id) + '/pdf' + (open ? '?inline=1' : ''), { headers: { Authorization: 'Bearer ' + (t || '') } })
+      .then(function (r) {
+        if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Could not make the PDF'); });
+        var cd = r.headers.get('Content-Disposition') || '', m = /filename="?([^";]+)"?/.exec(cd);
+        return r.blob().then(function (b) {
+          var u8 = new Uint8Array(b.size ? 4 : 0);
+          return b.slice(0, 4).arrayBuffer().then(function (h) {
+            u8 = new Uint8Array(h);
+            if (!(u8[0] === 37 && u8[1] === 80 && u8[2] === 68 && u8[3] === 70)) throw new Error('The server sent an error instead of the PDF.');
+            var u = URL.createObjectURL(b);
+            if (open) { window.open(u, '_blank'); setTimeout(function () { URL.revokeObjectURL(u); }, 60000); return; }
+            var a = document.createElement('a'); a.href = u; a.download = m ? m[1] : 'order.pdf';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+          });
+        });
+      });
+  }
+  function pdfButton(o, cls) {
+    var b = el('button', { class: cls || 'btn-secondary btn-sm', type: 'button', 'data-order-pdf': o.id, title: 'Download this order as PDF', text: '⬇ PDF' });
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      b.disabled = true;
+      orderPdf(o).catch(function (er) { alert(er.message); }).then(function () { b.disabled = false; });
+    });
+    return b;
   }
 
   // ── create / detail-edit dialog ─────────────────────────────────────
@@ -675,7 +749,7 @@
         notes: order ? order.notes || '' : '',
         engineerId: order ? order.engineer.id : (currentUser() && currentUser().id),
         items: order && order.items ? order.items.map(function (i) {
-          return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, unit: i.unit, category: i.category, brand: i.brand, quantity: i.quantity };
+          return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, unit: i.unit, category: i.category, brand: i.brand, quantity: i.quantity, stock: i.stock === undefined ? undefined : i.stock };
         }) : [],
         file: null
       };
@@ -705,7 +779,10 @@
             el('h2', { class: 'section-title mb-0', text: title }),
             !isCreate ? el('p', { class: 'text-xs text-muted mt-0.5', text: fmtDate(order.orderDate) + ' · ' + (order.engineer.name || '') }) : null
           ]),
-          el('button', { class: 'p-1 rounded text-slate-400 hover:text-slate-600', 'aria-label': 'Close', text: '✕', onclick: close })
+          el('div', { class: 'flex items-center gap-2' }, [
+            !isCreate ? pdfButton(order) : null,
+            el('button', { class: 'p-1 rounded text-slate-400 hover:text-slate-600', 'aria-label': 'Close', text: '✕', onclick: close })
+          ])
         ]);
       }
 
@@ -944,14 +1021,27 @@
         var list = el('div', { class: 'mt-1 space-y-2' });
         state.items.forEach(function (it, idx) {
           var qty = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, style: 'max-width:80px', value: it.quantity });
-          qty.addEventListener('input', function () { state.items[idx].quantity = Number(qty.value) || 0; });
+          var stockEl = el('span', { class: 'ox-line-stock', 'data-line-stock': it.itemCode || '' });
+          function paintStock() {
+            var st = it.stock, q = Number(state.items[idx] && state.items[idx].quantity) || 0;
+            stockEl.innerHTML = '';
+            if (!it.itemCode || it.itemCode === 'MANUAL') return;
+            if (it.stock === undefined) { stockEl.appendChild(el('span', { class: 'text-muted', text: 'Checking stock…' })); return; }
+            if (!st) { stockEl.appendChild(el('span', { class: 'ox-stock ox-stock-none', text: 'Not in stock list — needs to be procured' })); return; }
+            var cls = st.total <= 0 ? 'ox-stock-none' : (st.hand >= q ? 'ox-stock-ok' : 'ox-stock-low');
+            stockEl.appendChild(el('span', { class: 'ox-stock ' + cls, text: 'In hand ' + fmtQty(st.hand) + ' · total ' + fmtQty(st.total) +
+              (st.onOrder ? ' · on open orders ' + fmtQty(st.onOrder) : '') +
+              (q > st.hand ? (q > st.total ? ' — short by ' + fmtQty(q - st.total) : ' — ' + fmtQty(q - st.hand) + ' from other places') : ' — enough in hand') }));
+          }
+          paintStock();
+          qty.addEventListener('input', function () { state.items[idx].quantity = Number(qty.value) || 0; paintStock(); });
           var brand = el('input', { class: INPUT, placeholder: 'Brand', style: 'max-width:110px', value: it.brand || '' });
           brand.addEventListener('input', function () { state.items[idx].brand = brand.value.trim() || null; });
           var label = it.productName + (it.itemCode && it.itemCode !== 'MANUAL' ? ' (' + it.itemCode + ')' : '');
           if (it.category) label += ' · ' + it.category;
           if (!it.productId) label += ' · manual';
           list.appendChild(el('div', { class: 'flex items-center gap-2' }, [
-            el('span', { class: 'flex-1 text-sm truncate', text: label, title: label }),
+            el('span', { class: 'flex-1 min-w-0' }, [el('span', { class: 'block text-sm truncate', text: label, title: label }), stockEl]),
             brand,
             qty,
             el('button', {
@@ -961,6 +1051,15 @@
           ]));
         });
         wrap.appendChild(list);
+        // stock for lines that don't have it yet (manual codes, older orders)
+        var need = state.items.filter(function (x) { return x.itemCode && x.itemCode !== 'MANUAL' && x.stock === undefined; });
+        if (need.length) {
+          api('GET', '/orders/stock-check?codes=' + encodeURIComponent(need.map(function (x) { return x.itemCode; }).join(','))).then(function (res) {
+            var map = (res.data && res.data.stock) || {};
+            need.forEach(function (x) { x.stock = map[String(x.itemCode).toUpperCase()] || null; });
+            render();
+          }).catch(function () { need.forEach(function (x) { x.stock = null; }); });
+        }
 
         var prodInput = el('input', { class: INPUT, placeholder: 'Search products to add…' });
         var prodResults = el('div', { class: 'mt-1 space-y-1' });

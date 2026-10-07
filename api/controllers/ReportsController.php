@@ -42,16 +42,19 @@ class ReportsController extends ExportController
     public function orders(): void
     {
         $auth = authenticate(); require_manager($auth);
+        StockLedger::ensure(); // also makes sure order lines have suppliedQty
         [$w, $p] = $this->where('o.orderDate');
         $rows = $this->rows(
             "SELECT o.*, c.companyName, u.name AS engineerName,
-                    (SELECT GROUP_CONCAT(CONCAT(i.productName, ' x', i.quantity, IF(i.supplied=1, ' (supplied)', '')) SEPARATOR '; ')
+                    (SELECT GROUP_CONCAT(CONCAT(i.productName, ' x', i.quantity + 0, IF(i.supplied=1, ' (supplied)', IF(COALESCE(i.suppliedQty,0)>0, CONCAT(' (', i.suppliedQty + 0, ' supplied)'), ''))) SEPARATOR '; ')
                        FROM `CustomerOrderItem` i WHERE i.orderId=o.id) AS items
              FROM `CustomerOrder` o
              LEFT JOIN `Customer` c ON c.id=o.customerId
              LEFT JOIN `User` u ON u.id=o.engineerId
              $w ORDER BY o.orderDate DESC", $p);
+        if (in_array(strtolower(qp('format', 'csv')), ['excel', 'xlsx'], true)) $this->orderSheets($w, $p);
         $this->sendExport($rows, [
+            ['label' => 'Order ref',       'value' => fn($r) => OrderController::orderRef($r)],
             ['label' => 'Order date',      'value' => fn($r) => self::d($r['orderDate'])],
             ['label' => 'Customer',        'value' => fn($r) => $r['companyName'] ?? ''],
             ['label' => 'Sales engineer',  'value' => fn($r) => $r['engineerName'] ?? ''],
@@ -64,6 +67,161 @@ class ReportsController extends ExportController
             ['label' => 'Delivered date',  'value' => fn($r) => self::d($r['deliveredDate'])],
             ['label' => 'Reason',          'value' => fn($r) => $r['notDeliveredReason'] ?? ''],
         ], 'orders-' . $this->stamp(), 'Orders Report');
+    }
+
+    /** Orders: one row per line (with supplied / pending and current stock), week-wise orders, week-wise stock out. */
+    private function orderSheets(string $w, array $p): void
+    {
+        $lines = $this->rows(
+            "SELECT o.id AS oid, o.orderDate, o.deliveryStatus, o.id, c.companyName, u.name AS engineerName, i.*
+             FROM `CustomerOrderItem` i JOIN `CustomerOrder` o ON o.id=i.orderId
+             LEFT JOIN `Customer` c ON c.id=o.customerId LEFT JOIN `User` u ON u.id=o.engineerId
+             $w ORDER BY o.orderDate DESC, c.companyName, i.createdAt", $p);
+        $stock = OrderController::stockFor(array_column($lines, 'itemCode'));
+        $out = [];
+        foreach ($lines as $l) {
+            $q = (float) $l['quantity'];
+            $sup = $l['supplied'] ? $q : (float) ($l['suppliedQty'] ?? 0);
+            $st = $stock[strtoupper((string) $l['itemCode'])] ?? null;
+            $out[] = [OrderController::orderRef(['orderDate' => $l['orderDate'], 'id' => $l['oid']]), ['v' => substr($l['orderDate'], 0, 10), 't' => 'date', 's' => 'date'],
+                $l['companyName'], $l['engineerName'], $l['itemCode'], $l['productName'], $l['brand'], $l['category'],
+                $q, $sup, max(0, $q - $sup), $sup >= $q ? 'Supplied' : ($sup > 0 ? 'Partly supplied' : 'Pending'),
+                $l['suppliedAt'] ? date('d-m-Y', strtotime($l['suppliedAt'])) : '', $l['procurementStatus'],
+                $l['expectedDeliveryDate'] ? date('d-m-Y', strtotime($l['expectedDeliveryDate'])) : '',
+                $st ? $st['hand'] : '', $st ? $st['total'] : '', $st ? $st['onOrder'] : ''];
+        }
+        $this->extraSheets[] = ['name' => 'Order lines', 'title' => 'Order lines — ordered, supplied, pending and stock today',
+            'header' => ['Order ref', 'Order date', 'Customer', 'Engineer', 'Item code', 'Product', 'Brand', 'Category', 'Ordered', 'Supplied', 'Pending', 'Line status',
+                         'Supplied on', 'Procurement', 'Expected', 'Stock in hand', 'Stock total', 'On open orders'],
+            'widths' => [18, 12, 26, 18, 18, 30, 12, 12, 9, 9, 9, 14, 12, 12, 12, 10, 10, 10], 'rows' => $out];
+
+        // week-wise (Monday start)
+        $weeks = [];
+        foreach ($lines as $l) {
+            $wk = date('Y-m-d', strtotime('monday this week', strtotime($l['orderDate'])));
+            $x = &$weeks[$wk];
+            $x = $x ?? ['orders' => [], 'lines' => 0, 'qty' => 0, 'sup' => 0];
+            $x['orders'][$l['oid']] = 1; $x['lines']++; $x['qty'] += (float) $l['quantity'];
+            $x['sup'] += $l['supplied'] ? (float) $l['quantity'] : (float) ($l['suppliedQty'] ?? 0);
+            unset($x);
+        }
+        krsort($weeks);
+        $wr = [];
+        foreach ($weeks as $wk => $x) $wr[] = [['v' => $wk, 't' => 'date', 's' => 'date'], date('d M', strtotime($wk)) . ' – ' . date('d M Y', strtotime($wk . ' +6 days')),
+            count($x['orders']), $x['lines'], $x['qty'], $x['sup'], max(0, $x['qty'] - $x['sup'])];
+        $this->extraSheets[] = ['name' => 'Week-wise orders', 'title' => 'Orders week by week (by order date)',
+            'header' => ['Week from', 'Week', 'Orders', 'Lines', 'Qty ordered', 'Qty supplied', 'Qty pending'], 'widths' => [12, 22, 9, 9, 12, 12, 12], 'rows' => $wr];
+
+        // stock taken out for orders, week by week and item
+        [$sc, $sp] = $this->dateRange('m.createdAt');
+        $mv = $this->rows("SELECT m.createdAt, m.qty, m.reason, s.itemCode, s.itemName, s.brand FROM `StockMovement` m JOIN `Stock` s ON s.id=m.stockId
+                           WHERE m.reason IN ('ORDER_SUPPLIED','ORDER_RESTORED')" . ($sc ? ' AND ' . implode(' AND ', $sc) : '') . ' ORDER BY m.createdAt', $sp);
+        $agg = [];
+        foreach ($mv as $m) {
+            $wk = date('Y-m-d', strtotime('monday this week', strtotime($m['createdAt'])));
+            $k = $wk . '|' . $m['itemCode'];
+            $agg[$k] = $agg[$k] ?? [$wk, $m['itemCode'], $m['itemName'], $m['brand'], 0];
+            $agg[$k][4] += -(float) $m['qty'];
+        }
+        krsort($agg);
+        $this->extraSheets[] = ['name' => 'Week-wise stock out', 'title' => 'Stock taken out for orders, week by week',
+            'header' => ['Week from', 'Item code', 'Item', 'Brand', 'Qty out'], 'widths' => [12, 20, 34, 14, 10],
+            'rows' => array_map(fn($a) => [['v' => $a[0], 't' => 'date', 's' => 'date'], $a[1], $a[2], $a[3], round($a[4], 2)], array_values($agg))];
+    }
+
+    // GET /api/reports/stock — every stock item with places, on open orders, free; movements in the period
+    public function stock(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        StockLedger::ensure();
+        $items = $this->rows("SELECT s.* FROM `Stock` s WHERE s.isActive=1 ORDER BY s.brand, s.itemCode", []);
+        $lv = StockLedger::levels(array_column($items, 'id'));
+        $res = StockLedger::reserved(array_column($items, 'id'));
+        foreach ($items as &$r) {
+            $l = $lv[$r['id']] ?? ['HAND' => 0, 'LOCAL' => 0, 'local' => [], 'states' => []];
+            $r['_hand'] = $l['HAND']; $r['_local'] = $l['LOCAL']; $r['_state'] = array_sum($l['states']);
+            $r['_places'] = implode('; ', array_merge(array_map(fn($c, $q) => "$c: " . qtyfmt($q), array_keys($l['local']), $l['local']), array_map(fn($c, $q) => "$c: " . qtyfmt($q), array_keys($l['states']), $l['states'])));
+            $r['_on'] = $res[$r['id']] ?? 0;
+        }
+        unset($r);
+        if (in_array(strtolower(qp('format', 'csv')), ['excel', 'xlsx'], true)) {
+            [$sc, $sp] = $this->dateRange('m.createdAt');
+            $mv = $this->rows("SELECT m.*, s.itemCode, s.itemName, s.brand, u.name AS byName FROM `StockMovement` m JOIN `Stock` s ON s.id=m.stockId LEFT JOIN `User` u ON u.id=m.userId"
+                              . ($sc ? ' WHERE ' . implode(' AND ', $sc) : '') . ' ORDER BY m.createdAt DESC LIMIT 20000', $sp);
+            $this->extraSheets[] = ['name' => 'Movements', 'title' => 'Stock movements (in / out) in the period',
+                'header' => ['Date', 'Item code', 'Item', 'Brand', 'Place', 'In / out', 'Balance there', 'Why', 'Note', 'By'], 'widths' => [17, 20, 30, 12, 22, 9, 11, 16, 40, 16],
+                'rows' => array_map(fn($m) => [date('d-m-Y h:i A', strtotime($m['createdAt'])), $m['itemCode'], $m['itemName'], $m['brand'], StockLedger::label($m['locType'], $m['state']),
+                                             (float) $m['qty'], $m['balance'] === null ? '' : (float) $m['balance'], $m['reason'], $m['note'], $m['byName']], $mv)];
+            $brands = [];
+            foreach ($items as $r) { $b = $r['brand'] ?: '(no brand)'; $brands[$b] = $brands[$b] ?? [0, 0, 0, 0]; $brands[$b][0]++; $brands[$b][1] += $r['_hand']; $brands[$b][2] += (float) $r['availableStock']; $brands[$b][3] += (float) $r['availableStock'] * (float) $r['netPrice']; }
+            ksort($brands);
+            $this->extraSheets[] = ['name' => 'Brand-wise', 'header' => ['Brand', 'Items', 'In hand', 'Total stock', 'Stock value (net price)'], 'widths' => [22, 9, 11, 11, 18],
+                'rows' => array_map(fn($b, $x) => [$b, $x[0], $x[1], $x[2], ['v' => round($x[3], 2), 's' => 'num']], array_keys($brands), $brands)];
+        }
+        $this->sendExport($items, [
+            ['label' => 'Item code',       'value' => fn($r) => $r['itemCode']],
+            ['label' => 'Item',            'value' => fn($r) => $r['itemName']],
+            ['label' => 'Brand',           'value' => fn($r) => $r['brand'] ?? ''],
+            ['label' => 'Item group',      'value' => fn($r) => $r['itemGroup'] ?? ''],
+            ['label' => 'In hand qty',     'value' => fn($r) => qtyfmt((float) $r['_hand'])],
+            ['label' => 'Local stock qty', 'value' => fn($r) => qtyfmt((float) $r['_local'])],
+            ['label' => 'State stock qty', 'value' => fn($r) => qtyfmt((float) $r['_state'])],
+            ['label' => 'Total stock',     'value' => fn($r) => qtyfmt((float) $r['availableStock'])],
+            ['label' => 'On open orders qty', 'value' => fn($r) => qtyfmt((float) $r['_on'])],
+            ['label' => 'Free stock',      'value' => fn($r) => qtyfmt((float) $r['availableStock'] - (float) $r['_on'])],
+            ['label' => 'Minimum stock',   'value' => fn($r) => qtyfmt((float) $r['minimumStock'])],
+            ['label' => 'Net price',       'value' => fn($r) => number_format((float) $r['netPrice'], 2, '.', '')],
+            ['label' => 'Places',          'value' => fn($r) => $r['_places']],
+            ['label' => 'Last updated',    'value' => fn($r) => self::dt($r['lastUpdated'] ?? null)],
+        ], 'stock-' . $this->stamp(), 'Stock Report');
+    }
+
+    // GET /api/reports/inwards — goods received from suppliers, one row per line
+    public function inwards(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        try { new VendorController(); } catch (Throwable $e) {}
+        [$w, $p] = $this->where('w.receivedDate');
+        $rows = $this->rows("SELECT w.*, x.itemCode, x.productName, x.brand, x.quantity, x.rate, x.amount, u.name AS byName
+                             FROM `StockInward` w JOIN `StockInwardItem` x ON x.inwardId=w.id LEFT JOIN `User` u ON u.id=w.createdById
+                             $w ORDER BY w.receivedDate DESC, w.inwardNo, x.itemCode", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Received',     'value' => fn($r) => self::d($r['receivedDate'])],
+            ['label' => 'Inward no.',   'value' => fn($r) => $r['inwardNo']],
+            ['label' => 'Supplier',     'value' => fn($r) => $r['supplierName']],
+            ['label' => 'Invoice no.',  'value' => fn($r) => $r['invoiceNo'] ?? ''],
+            ['label' => 'Invoice date', 'value' => fn($r) => self::d($r['invoiceDate'])],
+            ['label' => 'Added to (place)', 'value' => fn($r) => StockLedger::label($r['locType'], $r['state'])],
+            ['label' => 'Item code',    'value' => fn($r) => $r['itemCode']],
+            ['label' => 'Product',      'value' => fn($r) => $r['productName'] ?? ''],
+            ['label' => 'Brand',        'value' => fn($r) => $r['brand'] ?? ''],
+            ['label' => 'Qty',          'value' => fn($r) => qtyfmt((float) $r['quantity'])],
+            ['label' => 'Rate',         'value' => fn($r) => $r['rate'] === null ? '' : number_format((float) $r['rate'], 2, '.', '')],
+            ['label' => 'Amount',       'value' => fn($r) => $r['amount'] === null ? '' : number_format((float) $r['amount'], 2, '.', '')],
+            ['label' => 'Entered by',   'value' => fn($r) => $r['byName'] ?? ''],
+        ], 'stock-inward-' . $this->stamp(), 'Stock Inward Report');
+    }
+
+    // GET /api/reports/vendors — every vendor product with price, net price and stock
+    public function vendors(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        try { new VendorController(); } catch (Throwable $e) {}
+        $rows = $this->rows("SELECT i.*, v.name AS vendorName, v.phone, v.city FROM `VendorItem` i JOIN `Vendor` v ON v.id=i.vendorId ORDER BY v.name, i.brand, i.itemCode", []);
+        $this->sendExport($rows, [
+            ['label' => 'Vendor',       'value' => fn($r) => $r['vendorName']],
+            ['label' => 'Brand',        'value' => fn($r) => $r['brand'] ?? ''],
+            ['label' => 'Item code',    'value' => fn($r) => $r['itemCode']],
+            ['label' => 'Product',      'value' => fn($r) => $r['productName'] ?? ''],
+            ['label' => 'Grade',        'value' => fn($r) => $r['grade'] ?? ''],
+            ['label' => 'Specification','value' => fn($r) => $r['specification'] ?? ''],
+            ['label' => 'Price',        'value' => fn($r) => $r['price'] === null ? '' : (string) (float) $r['price']],
+            ['label' => 'Discount %',   'value' => fn($r) => $r['discount'] === null ? '' : (string) (float) $r['discount']],
+            ['label' => 'Net price',    'value' => fn($r) => $r['netPrice'] === null ? '' : (string) (float) $r['netPrice']],
+            ['label' => 'Vendor stock qty', 'value' => fn($r) => $r['stockQty'] === null ? '' : qtyfmt((float) $r['stockQty'])],
+            ['label' => 'Lead time',    'value' => fn($r) => $r['leadTime'] ?? ''],
+            ['label' => 'Updated',      'value' => fn($r) => self::d($r['updatedAt'])],
+        ], 'vendor-price-lists-' . $this->stamp(), 'Vendor Price Lists');
     }
 
     // GET /api/reports/tasks

@@ -482,7 +482,7 @@
     setInterval(refreshTracking, 60000);
     setInterval(checkStationary, 30000);
     // For testing / other scripts.
-    window.CRMTracking = { refresh: refreshTracking, check: checkStationary, state: trk, fix: function (lat, lng, acc) { onFix({ coords: { latitude: lat, longitude: lng, accuracy: acc || 10 } }); } };
+    window.CRMTracking = { refresh: refreshTracking, check: checkStationary, state: trk, help: locationHelp, fix: function (lat, lng, acc) { onFix({ coords: { latitude: lat, longitude: lng, accuracy: acc || 10 } }); } };
   }
 
   // ── 1. alerts ────────────────────────────────────────────────────────

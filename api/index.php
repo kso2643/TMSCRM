@@ -343,6 +343,8 @@ try {
         match (true) {
             $method === 'GET'   && $c1 === 'meta'                          => $ctrl->meta(),
             $method === 'GET'   && $c1 === 'engineers'                     => $ctrl->engineers(),
+            $method === 'GET'   && $c1 === 'stock-check'                   => $ctrl->stockCheck(),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'pdf'             => $ctrl->pdf($c1),
             $method === 'GET'   && $c1 !== '' && $c2 === 'document'        => $ctrl->downloadDocument($c1),
             $method === 'POST'  && $c1 !== '' && $c2 === 'document'        => $ctrl->uploadDocument($c1),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'delivery'        => $ctrl->updateDelivery($c1),
@@ -443,6 +445,9 @@ try {
         $ctrl = new ReportsController();
         match (true) {
             $method === 'GET' && $c1 === 'orders'         => $ctrl->orders(),
+            $method === 'GET' && $c1 === 'stock'          => $ctrl->stock(),
+            $method === 'GET' && $c1 === 'inwards'        => $ctrl->inwards(),
+            $method === 'GET' && $c1 === 'vendors'        => $ctrl->vendors(),
             $method === 'GET' && $c1 === 'tasks'          => $ctrl->tasks(),
             $method === 'GET' && $c1 === 'price-requests' => $ctrl->priceRequests(),
             $method === 'GET' && $c1 === 'trials'         => $ctrl->trials(),

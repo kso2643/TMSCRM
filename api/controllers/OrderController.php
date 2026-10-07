@@ -174,6 +174,8 @@ class OrderController
                     'procurementStatus'    => "VARCHAR(20) NOT NULL DEFAULT 'NOT_ORDERED'",
                     'expectedDeliveryDate' => 'DATE NULL',
                     'createdAt'   => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
+                    // quantity supplied so far (partial supply); NULL on old lines = all or nothing by "supplied"
+                    'suppliedQty' => 'DECIMAL(14,2) NULL',
                 ],
             ],
         ];
@@ -237,11 +239,64 @@ class OrderController
                 'productName' => $i['productName'], 'unit' => $i['unit'], 'category' => $i['category'],
                 'brand' => $i['brand'], 'quantity' => (float) $i['quantity'],
                 'supplied' => (bool) $i['supplied'], 'suppliedAt' => $i['suppliedAt'],
+                'suppliedQty' => self::suppliedQty($i), 'pendingQty' => max(0, round((float) $i['quantity'] - self::suppliedQty($i), 2)),
+                'stock' => $i['_stock'] ?? null,
                 'procurementStatus' => $i['procurementStatus'], 'expectedDeliveryDate' => $i['expectedDeliveryDate'],
             ], $items) : null,
             'createdAt'          => $row['createdAt'],
             'updatedAt'          => $row['updatedAt'],
         ];
+    }
+
+    /** Quantity supplied on a line (old lines only have the supplied tick). */
+    private static function suppliedQty(array $i): float
+    {
+        if ($i['supplied']) return (float) $i['quantity'];
+        return isset($i['suppliedQty']) && $i['suppliedQty'] !== null ? (float) $i['suppliedQty'] : 0.0;
+    }
+
+    /** Stock per item code: hand / local / state / total and what open orders still need. */
+    public static function stockFor(array $codes): array
+    {
+        $out = [];
+        $codes = array_values(array_unique(array_filter(array_map(fn($c) => strtoupper(trim((string) $c)), $codes), fn($c) => $c !== '' && $c !== 'MANUAL')));
+        if (!$codes) return $out;
+        try {
+            StockLedger::ensure();
+            $in = implode(',', array_fill(0, count($codes), '?'));
+            $s = db()->prepare("SELECT id, itemCode, availableStock, minimumStock FROM `Stock` WHERE isActive=1 AND UPPER(itemCode) IN ($in)");
+            $s->execute($codes);
+            $rows = $s->fetchAll();
+            $lv = StockLedger::levels(array_column($rows, 'id'));
+            $res = StockLedger::reserved(array_column($rows, 'id'));
+            foreach ($rows as $r) {
+                $l = $lv[$r['id']] ?? ['HAND' => 0, 'LOCAL' => 0, 'local' => [], 'states' => []];
+                $total = (float) $r['availableStock']; $on = (float) ($res[$r['id']] ?? 0);
+                $out[strtoupper($r['itemCode'])] = ['hand' => (float) $l['HAND'], 'local' => (float) $l['LOCAL'], 'state' => (float) array_sum($l['states']),
+                    'total' => $total, 'onOrder' => $on, 'free' => round($total - $on, 2), 'minimum' => (float) $r['minimumStock'],
+                    'places' => array_merge(array_map(fn($c, $q) => ['place' => 'Local – ' . $c, 'qty' => $q], array_keys($l['local']), $l['local']),
+                                            array_map(fn($st, $q) => ['place' => $st, 'qty' => $q], array_keys($l['states']), $l['states']))];
+            }
+        } catch (Throwable $e) { error_log('order stockFor: ' . $e->getMessage()); }
+        return $out;
+    }
+
+    /** Items with their stock attached (for show / pdf). */
+    private function itemsWithStock(string $orderId): array
+    {
+        $items = $this->fetchItems($orderId);
+        $st = self::stockFor(array_column($items, 'itemCode'));
+        foreach ($items as &$i) $i['_stock'] = $st[strtoupper((string) $i['itemCode'])] ?? null;
+        unset($i);
+        return $items;
+    }
+
+    // GET /api/orders/stock-check?codes=A,B — stock for item codes typed in the order form
+    public function stockCheck(): void
+    {
+        authenticate();
+        $codes = array_filter(array_map('trim', explode(',', (string) qp('codes', ''))));
+        sendSuccess(['stock' => self::stockFor(array_slice($codes, 0, 100))]);
     }
 
     private function canEdit(array $auth, array $row): bool
@@ -317,7 +372,7 @@ class OrderController
         foreach ($this->fetchItems($orderId) as $old) {
             if (!$old['productId']) continue;
             $prev[$old['productId']] = [
-                'supplied' => $old['supplied'], 'suppliedAt' => $old['suppliedAt'],
+                'supplied' => $old['supplied'], 'suppliedAt' => $old['suppliedAt'], 'suppliedQty' => $old['suppliedQty'] ?? null,
                 'procurementStatus' => $old['procurementStatus'], 'expectedDeliveryDate' => $old['expectedDeliveryDate'],
             ];
         }
@@ -325,8 +380,8 @@ class OrderController
         db()->prepare('DELETE FROM `CustomerOrderItem` WHERE orderId=?')->execute([$orderId]);
         $ins = db()->prepare(
             'INSERT INTO `CustomerOrderItem`
-                (id,orderId,productId,itemCode,productName,unit,category,brand,quantity,supplied,suppliedAt,procurementStatus,expectedDeliveryDate,createdAt)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                (id,orderId,productId,itemCode,productName,unit,category,brand,quantity,supplied,suppliedAt,procurementStatus,expectedDeliveryDate,createdAt,suppliedQty)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         foreach ($items as $it) {
             $carry = $prev[$it['productId']] ?? null;
@@ -335,6 +390,8 @@ class OrderController
                 $carry && $carry['supplied'] ? 1 : 0, $carry && $carry['supplied'] ? $carry['suppliedAt'] : null,
                 $carry ? $carry['procurementStatus'] : 'NOT_ORDERED', $carry ? $carry['expectedDeliveryDate'] : null,
                 now_sql(),
+                // a partly supplied line keeps what was already sent (never more than the new quantity)
+                $carry && !$carry['supplied'] && $carry['suppliedQty'] !== null ? min((float) $carry['suppliedQty'], (float) $it['quantity']) : null,
             ]);
         }
     }
@@ -343,9 +400,9 @@ class OrderController
     private function setAllItemsSupplied(string $orderId, bool $supplied): void
     {
         $sql = $supplied
-            ? "UPDATE `CustomerOrderItem` SET supplied=1,suppliedAt=?,
+            ? "UPDATE `CustomerOrderItem` SET supplied=1,suppliedAt=?,suppliedQty=quantity,
                  procurementStatus=IF(procurementStatus='NOT_ORDERED','ORDERED',procurementStatus) WHERE orderId=?"
-            : 'UPDATE `CustomerOrderItem` SET supplied=0,suppliedAt=NULL WHERE orderId=?';
+            : 'UPDATE `CustomerOrderItem` SET supplied=0,suppliedAt=NULL,suppliedQty=NULL WHERE orderId=?';
         $params = $supplied ? [now_sql(), $orderId] : [$orderId];
         db()->prepare($sql)->execute($params);
     }
@@ -480,7 +537,7 @@ class OrderController
         authenticate();
         $row = $this->fetchRow($id);
         if (!$row) sendError('Order not found.', 404);
-        sendSuccess(['order' => $this->shape($row, $this->fetchItems($id))], 'Success', $statusCode);
+        sendSuccess(['order' => $this->shape($row, $this->itemsWithStock($id))], 'Success', $statusCode);
     }
 
     // POST /api/orders  (multipart/form-data when orderType=PO, JSON otherwise)
@@ -680,23 +737,45 @@ class OrderController
         if (is_string($ids)) { $d = json_decode($ids, true); $ids = is_array($d) ? $d : []; }
         if (!is_array($ids)) $ids = [];
         $ids = array_values(array_unique(array_map('strval', $ids)));
+        // Partial supply: { quantities: { itemId: qty supplied so far } } — wins over suppliedItemIds.
+        $qmap = $b['quantities'] ?? null;
+        if (is_string($qmap)) { $d = json_decode($qmap, true); $qmap = is_array($d) ? $d : null; }
 
         $items = $this->fetchItems($id);
         if (!$items) sendError('This order has no product lines to supply.', 400);
         $known = array_column($items, 'id');
-        foreach ($ids as $itemId) {
+        foreach (array_merge($ids, is_array($qmap) ? array_map('strval', array_keys($qmap)) : []) as $itemId) {
             if (!in_array($itemId, $known, true)) sendError('One of the selected items does not belong to this order.', 400);
         }
+        $want = [];
+        foreach ($items as $it) {
+            $q = (float) $it['quantity'];
+            if (is_array($qmap) && array_key_exists($it['id'], $qmap)) {
+                $v = $qmap[$it['id']];
+                if ($v !== '' && $v !== null && !is_numeric($v)) sendError('Enter a number for the quantity supplied of ' . $it['itemCode'] . '.', 400);
+                $v = round((float) $v, 2);
+                if ($v < 0) sendError('Quantity supplied cannot be negative.', 400);
+                if ($v > $q) sendError($it['itemCode'] . ': supplied ' . qtyfmt($v) . ' is more than ordered ' . qtyfmt($q) . '.', 400);
+                $want[$it['id']] = $v;
+            } elseif (is_array($qmap)) {
+                $want[$it['id']] = self::suppliedQty($it);
+            } else {
+                $want[$it['id']] = in_array($it['id'], $ids, true) ? $q : 0.0;
+            }
+        }
 
-        $total = count($items); $ticked = count($ids);
-        $status = $ticked === $total ? 'DELIVERED' : ($ticked > 0 ? 'PARTIALLY_DELIVERED' : 'NOT_DELIVERED');
+        $total = count($items);
+        $full = count(array_filter($items, fn($it) => $want[$it['id']] >= (float) $it['quantity']));
+        $any = array_sum($want) > 0;
+        $status = $full === $total ? 'DELIVERED' : ($any ? 'PARTIALLY_DELIVERED' : 'NOT_DELIVERED');
+        $ticked = $full;
         $reason = null;
         if ($status !== 'DELIVERED') {
             $reason = trim((string) ($b['reason'] ?? ''));
             if (!$reason) {
                 sendError($status === 'PARTIALLY_DELIVERED'
-                    ? 'Not every item is selected — please give a reason for the partial delivery.'
-                    : 'No items are selected — please give a reason for the non-delivery.', 400);
+                    ? 'Not everything is supplied yet — please give a reason for the partial delivery.'
+                    : 'Nothing is supplied — please give a reason for the non-delivery.', 400);
             }
         }
         $deliveredDate = $status === 'NOT_DELIVERED' ? null
@@ -704,27 +783,25 @@ class OrderController
 
         $now = now_sql();
         $upd = db()->prepare(
-            "UPDATE `CustomerOrderItem` SET supplied=?,suppliedAt=?,
+            "UPDATE `CustomerOrderItem` SET supplied=?,suppliedAt=?,suppliedQty=?,
                 procurementStatus=IF(?=1 AND procurementStatus='NOT_ORDERED','ORDERED',procurementStatus)
              WHERE id=? AND orderId=?"
         );
         foreach ($items as $it) {
-            $on = in_array($it['id'], $ids, true);
-            // Keep the original timestamp for lines that were already ticked.
-            $at = $on ? ($it['supplied'] ? $it['suppliedAt'] : $now) : null;
-            // Same reasoning as the order-level version: a line can't be
-            // supplied without having been procured, so ticking it also
-            // brings its own procurement status in line if it was still
-            // sitting at the default.
-            $upd->execute([$on ? 1 : 0, $at, $on ? 1 : 0, $it['id'], $id]);
+            $v = $want[$it['id']];
+            $on = $v >= (float) $it['quantity'];
+            // Keep the original timestamp for lines that already had something supplied.
+            $at = $v > 0 ? (self::suppliedQty($it) > 0 && $it['suppliedAt'] ? $it['suppliedAt'] : $now) : null;
+            // A line can't be supplied without having been procured — bring its procurement status along.
+            $upd->execute([$on ? 1 : 0, $at, $v > 0 ? $v : null, $v > 0 ? 1 : 0, $it['id'], $id]);
         }
         db()->prepare(
             'UPDATE `CustomerOrder` SET deliveryStatus=?,notDeliveredReason=?,deliveredDate=?,updatedAt=? WHERE id=?'
         )->execute([$status, $reason, $deliveredDate, $now, $id]);
-        if ($ticked > 0) $this->autoMarkProcured($id);
+        if ($any) $this->autoMarkProcured($id);
 
-        StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
-        log_activity($auth['id'], 'ORDER_SUPPLY_UPDATED', 'CustomerOrder', $id, ['status' => $status, 'supplied' => $ticked, 'of' => $total]);
+        StockLedger::syncOrder($id, $auth['id']); // supplied quantities come out of stock (undo puts them back)
+        log_activity($auth['id'], 'ORDER_SUPPLY_UPDATED', 'CustomerOrder', $id, ['status' => $status, 'supplied' => $ticked, 'of' => $total, 'qty' => array_sum($want)]);
         $this->show($id);
     }
 
@@ -870,6 +947,124 @@ class OrderController
         StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
         log_activity($auth['id'], 'ORDER_DELETED', 'CustomerOrder', $id, ['customer' => $row['companyName']]);
         sendSuccess([], 'Order deleted');
+    }
+
+    // GET /api/orders/:id/pdf?company=TMS|APJ — the order as a PDF (lines, supplied / pending, stock)
+    public function pdf(string $id): void
+    {
+        authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Order not found.', 404);
+        $items = $this->itemsWithStock($id);
+        $co = strtoupper((string) qp('company', 'TMS')) === 'APJ' ? 'APJ' : 'TMS';
+        $C = PayrollController::COMPANIES[$co] ?? PayrollController::COMPANIES['TMS'];
+        $ref = self::orderRef($row);
+        $pdf = new SimplePdf();
+        $W = SimplePdf::A4_WIDTH; $H = SimplePdf::A4_HEIGHT; $m = 32; $cw = $W - 2 * $m;
+        $q = fn($v) => qtyfmt((float) $v);
+        $d = fn($v) => $v ? date('d-m-Y', strtotime($v)) : '—';
+        $label = ['PENDING' => 'Pending', 'DELIVERED' => 'Delivered', 'PARTIALLY_DELIVERED' => 'Partially delivered', 'NOT_DELIVERED' => 'Not delivered',
+                  'NOT_ORDERED' => 'Not ordered', 'ORDERED' => 'Ordered', 'RECEIVED' => 'Received', 'CONFIRMED' => 'Confirmed', 'NOT_CONFIRMED' => 'Not confirmed'];
+        $L = fn($k) => $label[$k] ?? ucwords(strtolower(str_replace('_', ' ', (string) $k)));
+
+        $header = function () use ($pdf, $C, $co, $W, $m, $cw, $ref, $row, $L) {
+            $pdf->addPage();
+            $y = $m; $lh = 42; $lw = $lh * $C['logoRatio'];
+            if (!$pdf->addImage(__DIR__ . '/../assets/' . $C['logo'], $m, $y, $lw, $lh)) { $pdf->setFont('Helvetica-Bold', 16); $pdf->setFillColor('#1E3A5F'); $pdf->text($co, $m, $y + 12); }
+            $pdf->setFont('Helvetica-Bold', 12); $pdf->setFillColor('#1E3A5F'); $pdf->text($C['name'], $W - $m, $y + 2, ['align' => 'right']);
+            $pdf->setFont('Helvetica', 7.5); $pdf->setFillColor('#4B5563');
+            foreach ($C['lines'] as $i => $line) $pdf->text($line, $W - $m, $y + 18 + $i * 9.5, ['align' => 'right']);
+            $y += $lh + 12;
+            $pdf->rect($m, $y, $cw, 24, '#1E3A5F');
+            $pdf->setFont('Helvetica-Bold', 12); $pdf->setFillColor('#FFFFFF'); $pdf->text('SALES ORDER  ' . $ref, $m + 10, $y + 6.5);
+            $pdf->setFont('Helvetica', 9); $pdf->text($L($row['deliveryStatus']), $W - $m - 10, $y + 8, ['align' => 'right']);
+            return $y + 34;
+        };
+        $y = $header();
+        // details
+        $left = [['Customer', $row['companyName']], ['Contact', trim(($row['contactPerson'] ?? '') . ' ' . ($row['contactNumber'] ?? ''))], ['Engineer', $row['engineerName']],
+                 ['Order type', $row['orderType'] === 'PO' ? 'Purchase order' . ($row['poDocumentOriginalName'] ? ' (' . $row['poDocumentOriginalName'] . ')' : '') : 'Verbal order']];
+        $right = [['Order date', $d($row['orderDate'])], ['Expected delivery', $d($row['expectedDeliveryDate'])],
+                  ['Procurement', $L($row['procurementStatus']) . ' · Proforma ' . strtolower($L($row['proformaStatus']))],
+                  ['Delivered', $row['deliveredDate'] ? $d($row['deliveredDate']) : '—']];
+        $half = $cw / 2; $top = $y;
+        foreach ($left as $i => $r) {
+            foreach ([[$r, $m], [$right[$i], $m + $half]] as [[$k, $v], $x]) {
+                $pdf->setFont('Helvetica', 8); $pdf->setFillColor('#6B7280'); $pdf->text($k, $x + 8, $y + 5);
+                $pdf->setFont('Helvetica-Bold', 9); $pdf->setFillColor('#111827'); $pdf->text((string) ($v ?: '—'), $x + 92, $y + 5, ['width' => $half - 100]);
+            }
+            $y += 16;
+        }
+        $bc = '#E5E7EB'; $bh = $y - $top + 4;
+        foreach ([[$m, $top, $m + $cw, $top], [$m, $top + $bh, $m + $cw, $top + $bh], [$m, $top, $m, $top + $bh], [$m + $cw, $top, $m + $cw, $top + $bh]] as $ln) $pdf->line($ln[0], $ln[1], $ln[2], $ln[3], $bc);
+        $y += 16;
+        // lines
+        $cols = [['#', 20, 'left'], ['Item code', 92, 'left'], ['Product', 150, 'left'], ['Brand', 56, 'left'], ['Ordered', 42, 'right'], ['Supplied', 44, 'right'],
+                 ['Pending', 42, 'right'], ['Stock (hand / total)', 85, 'right']];
+        $thead = function ($y) use ($pdf, $cols, $m, $cw) {
+            $pdf->rect($m, $y, $cw, 18, '#EEF2F7');
+            $pdf->setFont('Helvetica-Bold', 7.8); $pdf->setFillColor('#1E3A5F');
+            $x = $m + 4;
+            foreach ($cols as [$t, $w, $al]) { $pdf->text($t, $x, $y + 5, ['width' => $w - 6, 'align' => $al]); $x += $w; }
+            return $y + 20;
+        };
+        $y = $thead($y);
+        $tq = $ts = $tp = 0;
+        foreach ($items as $n => $it) {
+            $supplied = self::suppliedQty($it); $pending = max(0, (float) $it['quantity'] - $supplied);
+            $tq += (float) $it['quantity']; $ts += $supplied; $tp += $pending;
+            $st = $it['_stock'];
+            $pdf->setFont('Helvetica', 8.2);
+            $nameLines = $pdf->splitTextToSize((string) $it['productName'], $cols[2][1] - 6);
+            $rh = max(16, 11 * count($nameLines) + 5);
+            if ($y + $rh > $H - 70) { $y = $thead($header()); }
+            if ($n % 2) $pdf->rect($m, $y - 2, $cw, $rh, '#FAFBFC');
+            $vals = [(string) ($n + 1), (string) $it['itemCode'], (string) $it['productName'], (string) ($it['brand'] ?? ''), $q($it['quantity']), $q($supplied),
+                     $pending > 0 ? $q($pending) : '-', $st ? $q($st['hand']) . ' / ' . $q($st['total']) : 'not in stock list'];
+            $x = $m + 4;
+            foreach ($cols as $ci => [$t, $w, $al]) {
+                $pdf->setFont($ci === 1 ? 'Helvetica-Bold' : 'Helvetica', 8.2);
+                $pdf->setFillColor($ci === 6 && $pending > 0 ? '#B45309' : ($ci === 7 && $st && $st['total'] < $pending ? '#B91C1C' : '#111827'));
+                $pdf->text($vals[$ci], $x, $y + 2, ['width' => $w - 6, 'align' => $al, 'lineGap' => 2.8]);
+                $x += $w;
+            }
+            $y += $rh;
+            $pdf->line($m, $y - 2, $m + $cw, $y - 2, '#E5E7EB', 0.5);
+        }
+        if (!$items) { $pdf->setFont('Helvetica', 9); $pdf->setFillColor('#6B7280'); $pdf->text('No product lines on this order.', $m + 6, $y + 4); $y += 20; }
+        else {
+            $pdf->setFont('Helvetica-Bold', 8.6); $pdf->setFillColor('#111827');
+            $x = $m + 4 + 20 + 92 + 150 + 56;
+            $pdf->text('Total', $m + 4, $y + 3);
+            foreach ([[$tq, 42], [$ts, 44], [$tp, 42]] as [$v, $w]) { $pdf->text($q($v), $x, $y + 3, ['width' => $w - 6, 'align' => 'right']); $x += $w; }
+            $y += 22;
+        }
+        foreach ([['Verbal order details', $row['verbalDetails']], ['Notes', $row['notes']], ['Reason (not / partly delivered)', $row['notDeliveredReason']]] as [$k, $v]) {
+            if (!trim((string) $v)) continue;
+            if ($y > $H - 110) $y = $header();
+            $pdf->setFont('Helvetica-Bold', 8.5); $pdf->setFillColor('#1E3A5F'); $pdf->text($k, $m, $y);
+            $pdf->setFont('Helvetica', 8.5); $pdf->setFillColor('#111827');
+            $lines = $pdf->splitTextToSize((string) $v, $cw);
+            foreach (array_slice($lines, 0, 12) as $li => $ln) $pdf->text($ln, $m, $y + 13 + $li * 11);
+            $y += 18 + 11 * min(12, count($lines));
+        }
+        // footer on every page
+        for ($p = 0; $p < $pdf->pageCount(); $p++) {
+            $pdf->setActivePage($p);
+            $pdf->setFont('Helvetica', 7.5); $pdf->setFillColor('#6B7280');
+            $pdf->text('Generated ' . date('d-m-Y h:i A') . ' · ' . $ref . ' · page ' . ($p + 1) . ' of ' . $pdf->pageCount(), $W / 2, $H - 26, ['align' => 'center']);
+        }
+        $fn = 'order-' . preg_replace('/[^A-Za-z0-9]+/', '-', ($row['companyName'] ?: 'customer')) . '-' . date('d-m-Y', strtotime($row['orderDate'])) . '.pdf';
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: ' . (qp('inline') === '1' ? 'inline' : 'attachment') . '; filename="' . $fn . '"');
+        echo $pdf->output(); exit;
+    }
+
+    /** Short readable order reference: ORD-YYMMDD-XXXX. */
+    public static function orderRef(array $row): string
+    {
+        return 'ORD-' . date('ymd', strtotime($row['orderDate'])) . '-' . strtoupper(substr($row['id'], -4));
     }
 
     // GET /api/orders/:id/document

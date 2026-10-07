@@ -28,6 +28,11 @@
       ['Trials report', 'Trial requests, recommendations, best tool and savings per year', '/reports/trials', 'FlaskConical', '#7c3aed', 'trials'],
       ['Price requests report', 'Price asked vs list vs approved, who decided and when', '/reports/price-requests', 'Wallet', '#b45309', 'price-requests']
     ]],
+    ['Stock & vendors', [
+      ['Stock report', 'Every item: in hand, local, state, total, on open orders, free; movements and brand-wise value', '/reports/stock', 'Boxes', '#0d9488', 'stock'],
+      ['Stock inward report', 'Goods received from suppliers — invoice, place, item, qty, rate', '/reports/inwards', 'Truck', '#7c2d12', 'stock-inward'],
+      ['Vendor price lists', 'All vendors’ products with price, discount, net price and stock', '/reports/vendors', 'Truck', '#9a3412', 'vendor-price-lists']
+    ]],
     ['Operations', [
       ['Attendance report', 'Employee attendance and working hours summary', '/attendance/export', 'Clock', '#16a34a', 'attendance'],
       ['Daily tracking report', 'Punch in/out, location points and distance travelled per person per day', '/reports/daily-movement', 'Route', '#0f766e', 'tracking'],
@@ -124,7 +129,7 @@
     injectCss();
     var from = el('input', { type: 'date', class: 'rp-in', 'aria-label': 'From date' });
     var to = el('input', { type: 'date', class: 'rp-in', 'aria-label': 'To date' });
-    var fmt = el('select', { class: 'rp-in', 'aria-label': 'Format' }, [['csv', 'CSV'], ['excel', 'Excel (.xlsx)'], ['pdf', 'PDF']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+    var fmt = el('select', { class: 'rp-in', 'aria-label': 'Format' }, [['excel', 'Excel — detailed (.xlsx)'], ['csv', 'CSV'], ['pdf', 'PDF']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
     function preset(label, f) {
       return el('button', { class: 'rp-chip', type: 'button', text: label, onclick: function () { var r = f(new Date()); from.value = r[0]; to.value = r[1]; } });
     }
@@ -132,7 +137,7 @@
     root.appendChild(el('div', { class: 'space-y-4' }, [
       el('div', {}, [
         el('h1', { class: 'page-title', text: 'Reports & exports' }),
-        el('p', { class: 'text-sm text-muted mt-1', text: 'Download any page’s data as CSV, Excel or PDF. Leave the dates blank for all-time data.' })
+        el('p', { class: 'text-sm text-muted mt-1', text: 'Download any page’s data. Excel is the detailed one: the full register, a summary sheet (by status, person, type… with totals) and extra sheets such as order lines, week-wise orders and stock out, quotation items and attendance per employee. Leave the dates blank for all-time data.' })
       ]),
       el('div', { class: 'card p-4 space-y-3' }, [
         el('div', { class: 'rp-filters' }, [

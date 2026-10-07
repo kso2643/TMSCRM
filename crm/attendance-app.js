@@ -98,8 +98,10 @@
     return new Promise(function (resolve, reject) {
       if (!navigator.geolocation) return reject(new Error('This device cannot share its location.'));
       function fail(e) {
-        reject(new Error(e && e.code === 1 ? 'Location permission is blocked. Allow this site to use your location and try again.'
-          : 'Could not get your location. Turn on GPS and try again.'));
+        var er = new Error(e && e.code === 1 ? 'Location permission is blocked. Allow this site to use your location and try again.'
+          : 'Could not get your location. Turn on GPS and try again.');
+        er.geo = { code: e && e.code };
+        reject(er);
       }
       navigator.geolocation.getCurrentPosition(function (p) { resolve(p.coords); }, function (e) {
         if (e && e.code === 1) return fail(e);
@@ -235,7 +237,7 @@
       toast(j.message || 'Punched in'); state.photo = null;
       try { localStorage.setItem('crm_punched_in', new Date().toDateString()); } catch (e) {}
       return load();
-    }).catch(function (e) { toast(e.message, 'err'); })
+    }).catch(function (e) { locFail(e, 'in'); })
       .then(function () { state.busy = false; render(); });
   }
   function punchOut() {
@@ -243,7 +245,12 @@
     var b = document.getElementById('at-out'); if (b) { b.disabled = true; b.textContent = 'Punching out…'; }
     getLocation().then(function (c) { return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy }); })
       .then(function (j) { toast(j.message || 'Punched out'); return load(); })
-      .catch(function (e) { toast(e.message, 'err'); render(); });
+      .catch(function (e) { locFail(e, 'out'); render(); });
+  }
+  // Location problems open the same "Turn on location" help as the rest of the CRM.
+  function locFail(e, dir) {
+    if (e && e.geo && window.CRMTracking && window.CRMTracking.help) window.CRMTracking.help(dir, e.geo);
+    else toast(e.message, 'err');
   }
 
   var photoCache = {};

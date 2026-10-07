@@ -64,6 +64,9 @@ $tail"],
   KEY `StockCheck_date_idx` (`checkDate`)
 $tail"],
         ], 'Stock locations (StockLevel / StockMovement / StockCheck)');
+        // order lines carry suppliedQty (partial supply) — make sure the column is there
+        try { if (class_exists('OrderController')) ensure_schema(OrderController::schema(), 'migration_orders_all.sql'); }
+        catch (Throwable $e) { error_log('StockLedger orders schema: ' . $e->getMessage()); }
         // One-off: quantities from before locations existed become Hand stock.
         try {
             $old = db()->query("SELECT s.id, s.availableStock FROM `Stock` s WHERE s.availableStock<>0
@@ -185,7 +188,7 @@ $tail"],
     /** Quantity on open orders not yet supplied, per stock item ("reserved"). */
     public static function reserved(?array $stockIds = null): array
     {
-        $sql = "SELECT s.id, SUM(i.quantity) AS q FROM `CustomerOrderItem` i
+        $sql = "SELECT s.id, SUM(i.quantity - COALESCE(i.suppliedQty,0)) AS q FROM `CustomerOrderItem` i
                 JOIN `CustomerOrder` o ON o.id=i.orderId
                 JOIN `Stock` s ON (s.itemCode=i.itemCode OR (s.productId IS NOT NULL AND s.productId=i.productId))
                 WHERE i.supplied=0 AND o.deliveryStatus IN ('PENDING','PARTIALLY_DELIVERED')";
@@ -221,7 +224,7 @@ $tail"],
         try {
             self::ensure();
             $want = [];
-            $s = db()->prepare('SELECT itemCode, productId, SUM(CASE WHEN supplied=1 THEN quantity ELSE 0 END) AS q FROM `CustomerOrderItem` WHERE orderId=? GROUP BY itemCode, productId');
+            $s = db()->prepare('SELECT itemCode, productId, SUM(CASE WHEN supplied=1 THEN quantity ELSE COALESCE(suppliedQty,0) END) AS q FROM `CustomerOrderItem` WHERE orderId=? GROUP BY itemCode, productId');
             $s->execute([$orderId]);
             foreach ($s->fetchAll() as $r) {
                 $sid = self::findStock((string) $r['itemCode'], $r['productId']);
