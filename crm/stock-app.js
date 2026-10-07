@@ -15,7 +15,7 @@
   'use strict';
   var API = 'https://api.apjtech.in';
   var LOC_LABEL = { HAND: 'Hand stock', LOCAL: 'Local stock', STATE: 'Other state stock' };
-  var REASON = { IMPORT: 'Upload', ADJUST: 'Adjusted', OPENING: 'Opening', ORDER_SUPPLIED: 'Order supplied', ORDER_RESTORED: 'Order undone' };
+  var REASON = { IMPORT: 'Upload', ADJUST: 'Adjusted', OPENING: 'Opening', ORDER_SUPPLIED: 'Order supplied', ORDER_RESTORED: 'Order undone', INWARD: 'Inward from supplier', INWARD_REVERSED: 'Inward deleted' };
 
   function token() { try { return localStorage.getItem('crm_token'); } catch (e) { return null; } }
   function me() { try { return JSON.parse(localStorage.getItem('crm_user') || 'null') || {}; } catch (e) { return {}; } }
@@ -521,6 +521,7 @@
         el('div', { class: 'st-actions' }, [
           el('button', { class: 'st-btn', id: 'st-template', text: '⬇ Template', onclick: function () { download('/products/stock/template', 'stock-upload-template.xlsx').catch(function (e) { toast(e.message, 'err'); }); } }),
           canEdit ? el('button', { class: 'st-btn', id: 'st-add-stock', text: '+ Add stock', onclick: addStockDialog }) : null,
+          canEdit ? el('a', { class: 'st-btn', id: 'st-inward', href: '/vendors/#/inward', text: '⇩ Inward from supplier' }) : null,
           canEdit ? el('button', { class: 'st-btn pri', id: 'st-upload', text: '⬆ Upload stock', onclick: uploadDialog }) : null
         ])
       ]),

@@ -58,7 +58,7 @@ class ProductController
     // Each result carries the stock (hand stock + total) when the item is in Stock.
     public function search(): void
     {
-        authenticate();
+        $auth = authenticate();
         $q = trim(qp('q',''));
         if (strlen($q)<1) { sendSuccess(['results' => []]); }
         $limit = max(1, min(50, (int) qp('limit', 20)));
@@ -96,7 +96,10 @@ class ProductController
                 }
             } catch (Throwable $e) { error_log('product search stock: ' . $e->getMessage()); }
         }
-        $results = array_map(function($r) use ($stock) {
+        // vendor prices / stock — for Manager / Admin only (buying prices)
+        $offers = ($rows && is_admin_tier($auth['role']) && class_exists('VendorController')) ? VendorController::offers(array_column($rows, 'itemCode')) : [];
+        $results = array_map(function($r) use ($stock, $offers) {
+            if ($offers) $r['vendors'] = array_slice($offers[strtoupper($r['itemCode'])] ?? [], 0, 4);
             $r['categoryRef'] = $r['cat_name'] ? ['name'=>$r['cat_name'],'color'=>$r['cat_color']] : null;
             $r['standardPrice'] = (float) $r['standardPrice'];
             $r['stock'] = $stock['id:' . $r['id']] ?? $stock['code:' . strtoupper($r['itemCode'])] ?? null;

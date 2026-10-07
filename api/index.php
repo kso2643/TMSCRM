@@ -80,6 +80,7 @@ require __DIR__ . '/controllers/PriceRequestController.php';
 require __DIR__ . '/controllers/TrialController.php';
 require __DIR__ . '/controllers/AlertFeedController.php';
 require __DIR__ . '/controllers/ChatController.php';
+require __DIR__ . '/controllers/VendorController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -453,6 +454,38 @@ try {
     }
 
     // ── Chat (admin ↔ users) ────────────────────────────────────────
+    elseif ($c0 === 'vendors') {
+        $ctrl = new VendorController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                                   => $ctrl->index(),
+            $method === 'POST'   && $c1 === ''                                   => $ctrl->create(),
+            $method === 'GET'    && $c1 === 'template'                           => $ctrl->template(),
+            $method === 'GET'    && $c1 === 'compare'                            => $ctrl->compare(),
+            $method === 'GET'    && $c2 === ''                                   => $ctrl->show($c1),
+            $method === 'PUT'    && $c2 === ''                                   => $ctrl->update($c1),
+            $method === 'DELETE' && $c2 === ''                                   => $ctrl->delete($c1),
+            $method === 'GET'    && $c2 === 'items'                              => $ctrl->items($c1),
+            $method === 'POST'   && $c2 === 'items'                              => $ctrl->saveItem($c1),
+            $method === 'DELETE' && $c2 === 'items'                              => $ctrl->deleteItem($c1, $c3),
+            $method === 'POST'   && $c2 === 'import'                             => $ctrl->import($c1),
+            $method === 'GET'    && $c2 === 'export'                             => $ctrl->export($c1),
+            $method === 'POST'   && $c2 === 'files'                              => $ctrl->uploadFile($c1),
+            $method === 'GET'    && $c2 === 'files' && $c3 !== ''                => $ctrl->downloadFile($c1, $c3),
+            $method === 'DELETE' && $c2 === 'files' && $c3 !== ''                => $ctrl->deleteFile($c1, $c3),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'inwards') {
+        $ctrl = new VendorController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''        => $ctrl->inwards(),
+            $method === 'POST'   && $c1 === ''        => $ctrl->createInward(),
+            $method === 'GET'    && $c1 === 'export'  => $ctrl->exportInwards(),
+            $method === 'GET'                         => $ctrl->inward($c1),
+            $method === 'DELETE'                      => $ctrl->deleteInward($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
     elseif ($c0 === 'chat') {
         $ctrl = new ChatController();
         match (true) {

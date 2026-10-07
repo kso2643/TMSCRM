@@ -26,7 +26,7 @@
     '.ps-it:hover,.ps-it.on{background:#eff6ff}.ps-it b{font-weight:700}.ps-it .ps-s{color:#475569;font-size:12px;margin-top:2px}',
     '.ps-tag{display:inline-block;padding:0 6px;border-radius:5px;font-size:11px;font-weight:600;margin-left:6px;background:#eef2ff;color:#3730a3}',
     '.ps-tag.g{background:#ecfeff;color:#0e7490}.ps-tag.st{background:#f0fdf4;color:#166534}.ps-tag.st0{background:#fef2f2;color:#991b1b}',
-    '.ps-empty{padding:10px 12px;color:#64748b}',
+    '.ps-empty{padding:10px 12px;color:#64748b}.ps-v{color:#7c2d12;font-size:11.5px}',
     'input.ps-locked{background:#f1f5f9!important;color:#334155!important;cursor:not-allowed}',
     '.ps-lock{position:absolute;right:2px;top:50%;transform:translateY(-50%);border:0;background:none;cursor:pointer;font-size:12px;padding:2px}',
     '.ps-wrap{position:relative;display:contents}'
@@ -67,7 +67,10 @@
         (p.grade ? '<span class="ps-tag g">' + esc(p.grade) + '</span>' : '') +
         (st ? '<span class="ps-tag ' + (st.total > 0 ? 'st' : 'st0') + '">Stock ' + num(st.total) + (st.hand ? ' · hand ' + num(st.hand) : '') + '</span>' : '') +
         (p.standardPrice ? '<span style="float:right;font-weight:700">₹' + num(p.standardPrice) + '</span>' : '') + '</div>' +
-        '<div class="ps-s">' + esc([p.specification, p.productName !== p.specification ? p.productName : '', p.productType].filter(Boolean).join(' · ')) + '</div></button>';
+        '<div class="ps-s">' + esc([p.specification, p.productName !== p.specification ? p.productName : '', p.productType].filter(Boolean).join(' · ')) + '</div>' +
+        (p.vendors && p.vendors.length ? '<div class="ps-s ps-v">Vendors: ' + p.vendors.map(function (v) {
+          return esc(v.vendor) + (v.netPrice != null ? ' ₹' + num(v.netPrice) : '') + (v.stock != null ? ' (stock ' + num(v.stock) + ')' : '');
+        }).join(' · ') + '</div>' : '') + '</button>';
     }).join('') : '<div class="ps-empty">No product matches — keep typing to enter it by hand.</div>';
     place();
   }
