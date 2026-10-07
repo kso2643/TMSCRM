@@ -76,8 +76,16 @@
     if (!users.length) listBox.appendChild(el('div', { class: 'ch-empty', text: canStart ? 'No users.' : 'No messages yet. The admin team will write to you here.' }));
   }
 
+  var lastUnread = null;
+  function ding() { if (window.CRMAlerts && window.CRMAlerts.chime) window.CRMAlerts.chime(); }
   function loadUsers() {
-    return api('GET', '/chat/users').then(function (j) { users = j.data.users || []; canStart = j.data.canStart; renderList(); });
+    return api('GET', '/chat/users').then(function (j) {
+      users = j.data.users || []; canStart = j.data.canStart; renderList();
+      // a new unread message in another conversation → sound
+      var unread = j.data.unread || 0;
+      if (lastUnread !== null && unread > lastUnread) ding();
+      lastUnread = unread;
+    });
   }
 
   function bubble(m) {
@@ -124,11 +132,14 @@
     if (active && lastAt) {
       api('GET', '/chat/thread/' + encodeURIComponent(active.id) + '?after=' + encodeURIComponent(lastAt)).then(function (j) {
         var msgs = document.getElementById('ch-msgs'); if (!msgs) return;
+        var incoming = false;
         (j.data.messages || []).forEach(function (m) {
           if (msgs.querySelector('[data-msg="' + m.id + '"]')) return;
+          if (!m.mine) incoming = true;
           var e = msgs.querySelector('.ch-empty'); if (e) e.remove();
           msgs.appendChild(bubble(m)); lastAt = m.createdAt; msgs.scrollTop = msgs.scrollHeight;
         });
+        if (incoming) ding();
       }).catch(function () {});
     }
     loadUsers().catch(function () {});

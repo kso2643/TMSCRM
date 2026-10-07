@@ -117,7 +117,7 @@ class AlertFeedController
             // One alert per request (a multi-item request is one alert, not one per item).
             foreach (self::rows(
                 "SELECT COALESCE(r.batchId, r.id) AS gid, MIN(r.productName) AS productName, COUNT(*) AS n, MAX(r.createdAt) AS createdAt,
-                        MAX(u.name) AS byName, MAX(c.companyName) AS companyName, MAX(b.requestNo) AS requestNo, MAX(r.revisionCount) AS rev
+                        MAX(u.name) AS byName, MAX(c.companyName) AS companyName, MAX(b.requestNo) AS requestNo, MAX(r.revisionCount) AS rev, MAX(r.priority='URGENT') AS urgent, MAX(r.priority='HIGH') AS high
                  FROM `PriceRequest` r
                  LEFT JOIN `User` u ON u.id = r.requestedById
                  LEFT JOIN `Customer` c ON c.id = r.customerId
@@ -126,7 +126,7 @@ class AlertFeedController
                  GROUP BY COALESCE(r.batchId, r.id) ORDER BY MAX(r.createdAt) DESC LIMIT $per",
                 [$since, $me]) as $r) {
                 $what = (int) $r['n'] > 1 ? $r['n'] . ' items' : $r['productName'];
-                $add('price-new-' . $r['gid'] . '-' . $r['createdAt'], 'PRICE_REQUEST_NEW', ((int) $r['rev'] ? 'Revised price request' : 'New price request') . ($r['requestNo'] ? ' ' . $r['requestNo'] : ''),
+                $add('price-new-' . $r['gid'] . '-' . $r['createdAt'], 'PRICE_REQUEST_NEW', ((int) $r['urgent'] ? '🔴 URGENT · ' : ((int) $r['high'] ? 'High priority · ' : '')) . ((int) $r['rev'] ? 'Revised price request' : 'New price request') . ($r['requestNo'] ? ' ' . $r['requestNo'] : ''),
                     ($r['byName'] ?: 'An engineer') . ' asks for a price on ' . $what . ($r['companyName'] ? ' for ' . $r['companyName'] : ''),
                     '/price-requests/', $r['createdAt']);
             }

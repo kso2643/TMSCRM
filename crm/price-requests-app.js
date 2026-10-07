@@ -21,6 +21,9 @@
   var ROOT = null;
   var CATS = [];
   var TYPES = { REGULAR: 'Regular', ONE_TIME: 'One time' };
+  var PRIO = { URGENT: ['Urgent', '#dc2626'], HIGH: ['High', '#ea580c'], NORMAL: ['Normal', '#2563eb'], LOW: ['Low', '#64748b'] };
+  var PRIO_KEYS = ['URGENT', 'HIGH', 'NORMAL', 'LOW'];
+  function prioBadge(p) { var x = PRIO[p]; return x ? el('span', { class: 'pr-badge', 'data-prio': p, style: '--c:' + x[1], text: (p === 'URGENT' ? '● ' : '') + x[0] }) : el('span', { class: 'pr-meta', text: '—' }); }
 
   /* ── helpers ─────────────────────────────────────────────────────── */
   function token() { try { return localStorage.getItem('crm_token'); } catch (e) { return null; } }
@@ -127,6 +130,7 @@
       '.pr-card{background:#fff;border:1px solid #e2e8f0;border-radius:.8rem;padding:1rem;margin-bottom:.9rem}.dark .pr-card{background:#0f172a;border-color:#1e293b}',
       '.pr-card h2{font-size:.95rem;margin:0 0 .7rem;display:flex;align-items:center;gap:.5rem}',
       '.pr-card h2 small{font-weight:500;color:#64748b;font-size:.78rem}',
+      'select.pr-prio{font-weight:600}select.pr-prio[data-p=URGENT]{color:#dc2626;border-color:#fca5a5;background:#fef2f2}select.pr-prio[data-p=HIGH]{color:#c2410c;border-color:#fdba74;background:#fff7ed}select.pr-prio[data-p=LOW]{color:#64748b}',
       '.pr-in{border:1px solid #cbd5e1;border-radius:.5rem;padding:.45rem .6rem;font-size:.85rem;background:#fff;color:#0f172a;min-width:0;width:100%;transition:border-color .15s,box-shadow .15s}',
       '.pr-in:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}',
       '.pr-in.bad{border-color:#dc2626;background:#fef2f2}',
@@ -247,7 +251,7 @@
   function go(tab) { state.tab = tab; history.replaceState(null, '', '#' + tab); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
   /* ── New request ─────────────────────────────────────────────────── */
-  function blankItem() { return { productId: '', itemCode: '', productName: '', category: '', brand: '', supplyType: '', quantity: '', unit: '', requestedPrice: '', discount: '', leadTime: '', expectedDelivery: '', notes: '', listPrice: null, problems: [] }; }
+  function blankItem() { return { productId: '', itemCode: '', productName: '', category: '', brand: '', supplyType: '', quantity: '', unit: '', requestedPrice: '', priority: 'NORMAL', notes: '', listPrice: null, problems: [] }; }
 
   function renderNew(body) {
     if (!state.form) state.form = { customer: null, notes: '', items: [blankItem()], source: 'FORM', problems: [] };
@@ -304,7 +308,7 @@
     var fileIn = el('input', { type: 'file', id: 'pr-excel', accept: '.xlsx,.csv', style: 'display:none' });
     fileIn.addEventListener('change', function () { if (fileIn.files[0]) uploadExcel(fileIn.files[0]); fileIn.value = ''; });
     var card = el('div', { class: 'pr-card' }, [
-      el('h2', {}, ['2. Items ', el('small', { text: 'all fields marked * are required (discount: enter 0 if none)' })]),
+      el('h2', {}, ['2. Items ', el('small', { text: 'all fields marked * are required — set the priority; the admin gives price, discount and lead time' })]),
       el('div', { class: 'pr-tools' }, [
         el('button', { class: 'pr-btn', type: 'button', id: 'pr-add-item', text: '＋ Add item', onclick: function () { F.items.push(blankItem()); drawItems(true); } }),
         el('button', { class: 'pr-btn', type: 'button', id: 'pr-upload', text: '⤒ Upload items from Excel', onclick: function () { fileIn.click(); } }),
@@ -395,7 +399,12 @@
             Array.prototype.forEach.call(seg.children, function (b) { var on = b.getAttribute('data-v') === k; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); });
           } }));
       });
-      var discount = field('discount', 'Disc. %', { req: true, type: 'number', ph: '0' });
+      // Priority instead of discount / lead time / delivery (the admin gives those when answering)
+      var prSel = el('select', { class: 'pr-in pr-prio', 'data-k': 'priority', 'aria-label': 'Priority (item ' + (idx + 1) + ')' },
+        PRIO_KEYS.map(function (k) { return el('option', { value: k, text: PRIO[k][0], selected: (it.priority || 'NORMAL') === k }); }));
+      prSel.setAttribute('data-p', it.priority || 'NORMAL');
+      prSel.addEventListener('change', function () { it.priority = prSel.value; prSel.setAttribute('data-p', prSel.value); });
+      var priority = el('div', { class: 'pr-f' }, [el('label', {}, ['Priority ', el('span', { class: 'req', text: '*' })]), prSel]);
       c.appendChild(el('div', { class: 'pr-igrid' }, [
         pWrap,
         field('category', 'Category', { req: true, ph: 'e.g. Inserts', list: 'pr-cats' }),
@@ -404,9 +413,7 @@
         field('quantity', 'Quantity', { req: true, type: 'number', ph: '0' }),
         field('unit', 'Unit', { ph: 'PCS' }),
         field('requestedPrice', 'Target ₹/unit', { req: true, type: 'number', ph: '0.00' }),
-        discount,
-        field('leadTime', 'Lead time', { req: true, ph: 'e.g. 2 weeks' }),
-        field('expectedDelivery', 'Expected delivery', { req: true, type: 'date' }),
+        priority,
         field('notes', 'Note', { cls: 'wide', ph: 'Competitor price, application, drawing reference…' })
       ]));
       if (it.problems && it.problems.length) c.appendChild(el('div', { class: 'pr-err', text: it.problems.join(' · ') }));
@@ -435,8 +442,7 @@
           var rows = j.data.items.map(function (x) {
             return { productId: x.productId || '', itemCode: x.itemCode || '', productName: x.productName || '', category: x.category || '', brand: x.brand || '',
               supplyType: x.supplyType === 'REGULAR' || x.supplyType === 'ONE_TIME' ? x.supplyType : '', quantity: x.quantity == null ? '' : x.quantity,
-              unit: x.unit || '', requestedPrice: x.requestedPrice == null ? '' : x.requestedPrice, discount: x.discount == null ? '' : x.discount,
-              leadTime: x.leadTime || '', expectedDelivery: x.expectedDelivery || '',
+              unit: x.unit || '', requestedPrice: x.requestedPrice == null ? '' : x.requestedPrice, priority: x.priority || 'NORMAL',
               notes: x.notes || '', listPrice: x.listPrice, problems: (x.problems || []).map(function (p) { return p.replace(/^Row \d+: /, ''); }) };
           });
           var empty = F.items.every(function (i) { return !i.productName.trim() && !i.brand.trim(); });
@@ -464,9 +470,7 @@
         if (!it.supplyType) { bad('supplyType'); miss.push('Regular / One time'); }
         if (!(num(it.quantity) > 0)) { bad('quantity'); miss.push('quantity'); }
         if (!(num(it.requestedPrice) > 0)) { bad('requestedPrice'); miss.push('target price'); }
-        if (String(it.discount).trim() === '' || num(it.discount) === null || num(it.discount) < 0 || num(it.discount) > 100) { bad('discount'); miss.push('discount % (0 if none)'); }
-        if (!String(it.leadTime || '').trim()) { bad('leadTime'); miss.push('lead time'); }
-        if (!it.expectedDelivery) { bad('expectedDelivery'); miss.push('expected delivery'); }
+        if (!PRIO[it.priority]) { bad('priority'); miss.push('priority'); }
         if (miss.length) errs.push('Item ' + (i + 1) + ': ' + miss.join(', '));
       });
       if (!F.customer) errs.unshift('Select the company');
@@ -486,7 +490,7 @@
         customerId: F.customer.id, notes: F.notes, source: F.source,
         items: F.items.map(function (i) {
           return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, category: i.category, brand: i.brand, supplyType: i.supplyType,
-            quantity: i.quantity, unit: i.unit, requestedPrice: i.requestedPrice, discount: i.discount, leadTime: i.leadTime, expectedDelivery: i.expectedDelivery, notes: i.notes };
+            quantity: i.quantity, unit: i.unit, requestedPrice: i.requestedPrice, priority: i.priority || 'NORMAL', notes: i.notes };
         })
       }).then(function (r) {
         toast(r.message);
@@ -564,6 +568,7 @@
       ]),
       el('div', { style: 'display:flex;align-items:center;gap:.6rem' }, [
         b.counts.PENDING && b.counts.PENDING < b.items.length ? el('span', { class: 'pr-meta', text: b.counts.PENDING + ' pending' }) : null,
+        (function () { var top = PRIO_KEYS.filter(function (k) { return b.items.some(function (x) { return x.priority === k; }); })[0]; return top && top !== 'NORMAL' && top !== 'LOW' ? prioBadge(top) : null; })(),
         badge(b.status), el('span', { class: 'chev', 'aria-hidden': 'true', text: '▸' })
       ])
     ]);
@@ -580,18 +585,16 @@
       btn.addEventListener('click', function () {
         clear(wrap);
         var p = el('input', { class: 'pr-in', type: 'number', step: 'any', min: '0', placeholder: 'Revised price ₹', 'aria-label': 'Revised price', value: it.approvedPrice != null ? it.approvedPrice : it.requestedPrice });
-        var d = el('input', { class: 'pr-in', type: 'number', step: 'any', min: '0', max: '100', placeholder: 'Disc %', 'aria-label': 'Revised discount', value: it.approvedDiscount != null ? it.approvedDiscount : (it.discount != null ? it.discount : '') });
-        var l = el('input', { class: 'pr-in full', placeholder: 'Lead time', 'aria-label': 'Revised lead time', value: it.approvedLeadTime || it.leadTime || '' });
         var n = el('input', { class: 'pr-in full', placeholder: 'Why? e.g. customer counter-offer ₹230, competitor price', 'aria-label': 'Reason for revised price' });
         var send = el('button', { class: 'pr-btn grn sm full', type: 'button', text: 'Send revised request' });
         var cancel = el('button', { class: 'pr-btn sm full', type: 'button', text: 'Cancel', onclick: function () { clear(wrap); wrap.appendChild(btn); } });
         send.addEventListener('click', function () {
           send.disabled = true;
-          api('PATCH', '/price-requests/' + encodeURIComponent(it.id) + '/revise', { requestedPrice: p.value, discount: d.value, leadTime: l.value, note: n.value })
+          api('PATCH', '/price-requests/' + encodeURIComponent(it.id) + '/revise', { requestedPrice: p.value, note: n.value })
             .then(function (r) { toast(r.message); reload(); })
             .catch(function (e) { toast(e.message, 'err'); send.disabled = false; });
         });
-        wrap.appendChild(el('div', { class: 'pr-ans' }, [p, d, l, n, send, cancel]));
+        wrap.appendChild(el('div', { class: 'pr-ans' }, [p, n, send, cancel]));
         p.focus();
       });
       wrap.appendChild(btn);
@@ -614,8 +617,8 @@
       var drafts = state.drafts[b.id] || (state.drafts[b.id] = {});
       var answering = canRespond && b.counts.PENDING > 0;
       var tbl = el('table', { class: 'pr-tbl' });
-      tbl.appendChild(el('thead', {}, [el('tr', {}, ['#', 'Product', 'Category · Brand', 'Type', 'Qty', 'List', 'Asked', 'Disc %', 'Lead · Delivery', 'Answer'].map(function (h, i) {
-        return el('th', { class: i >= 4 && i <= 7 ? 'r' : null, text: h });
+      tbl.appendChild(el('thead', {}, [el('tr', {}, ['#', 'Product', 'Category · Brand', 'Type', 'Qty', 'List', 'Asked', 'Priority', 'Answer'].map(function (h, i) {
+        return el('th', { class: i >= 4 && i <= 6 ? 'r' : null, text: h });
       }))]));
       var tb = el('tbody');
       b.items.forEach(function (it, i) {
@@ -676,8 +679,8 @@
           el('td', { class: 'r', text: (it.quantity != null ? Number(it.quantity).toLocaleString('en-IN') : '—') + (it.unit ? ' ' + it.unit : '') }),
           el('td', { class: 'r', text: money(it.listPrice) }),
           el('td', { class: 'r', text: money(it.requestedPrice) }),
-          el('td', { class: 'r', text: it.discount != null ? it.discount + '%' : '—' }),
-          el('td', {}, [it.leadTime || '—', el('div', { class: 'pr-meta', text: it.expectedDelivery ? 'by ' + dmyDate(it.expectedDelivery) : '' })]),
+          el('td', {}, [prioBadge(it.priority),
+            it.discount != null || it.leadTime ? el('div', { class: 'pr-meta', text: [it.discount != null ? 'asked ' + it.discount + '%' : '', it.leadTime || '', it.expectedDelivery ? 'by ' + dmyDate(it.expectedDelivery) : ''].filter(Boolean).join(' · ') }) : null]),
           ansCell
         ]));
       });

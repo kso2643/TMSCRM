@@ -1,3 +1,36 @@
+# Update — 7 Oct (c): price request priority, sound for every notification, CPR status colours
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. The new column (`PriceRequest.priority`) is created automatically.
+
+1. **Price requests — priority instead of discount / lead time / delivery:**
+   - Engineers no longer enter discount %, lead time or expected delivery. Each item has a **Priority** dropdown: Urgent / High / Normal / Low (default Normal; Urgent shows in red, High in orange).
+   - The **admin** gives price, discount and lead time when answering, as before.
+   - The request list shows each item's priority, plus an Urgent / High badge on the request.
+   - The admin's alert says "🔴 URGENT" or "High priority".
+   - The Excel template has a Priority column instead of the three old ones.
+   - Revised-price requests only need the price and the reason.
+   - Old requests still show the values they were sent with.
+2. **Sound for every notification:**
+   - Every alert now chimes, including reminders shown by the page itself (punch-in reminder, appointment reminders).
+   - **Urgent alerts** play a louder 5-note chime and vibrate on phones: punch-in, location off, late punch-in requests, and anything urgent / overdue / out of stock.
+   - **Chat:** new incoming messages chime on the Chat page too.
+   - **Browser rule:** browsers allow sound only after the first click or tap on a page. An alert that arrives before that now plays at your first touch instead of being lost.
+   - The 🔕 sound off switch still works.
+3. **CPR status colours:** the "Status of the opportunity" dropdown (last field of the form, and in the Saturday review cards) takes the colour of the status and changes when you pick another:
+   - Trial underway: blue
+   - Trial planned: purple
+   - Order awaited: orange
+   - Order received: green
+   - Trial failed: red
+   - Parked: grey
+
+**Verification:**
+- Price requests: API 41/41, browser 33/33.
+- Sounds + CPR colours: 10/10.
+- CPR 27/27, global 31/31, chat 10/10.
+
+---
+
 # Update — 7 Oct (b): orders — PO document viewer, low stock, customer regular items & restock reminders
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. New file: `api/controllers/RegularItemController.php`. The new table (`CustomerRegularItem`) is created automatically.

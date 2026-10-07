@@ -270,6 +270,7 @@ class ReportsController extends ExportController
             ['label' => 'Category',        'value' => fn($r) => $r['category'] ?? ''],
             ['label' => 'Brand',           'value' => fn($r) => $r['brand'] ?? ''],
             ['label' => 'Regular / One time', 'value' => fn($r) => PriceRequestController::SUPPLY_TYPES[$r['supplyType'] ?? ''] ?? ''],
+            ['label' => 'Priority',        'value' => fn($r) => PriceRequestController::PRIORITIES[$r['priority'] ?? ''] ?? ''],
             ['label' => 'Qty',             'value' => fn($r) => ($r['quantity'] ?? '') . (!empty($r['unit']) ? ' ' . $r['unit'] : '')],
             ['label' => 'List price',      'value' => fn($r) => $r['listPrice'] ?? ''],
             ['label' => 'Asked price',     'value' => fn($r) => $r['requestedPrice'] ?? ''],

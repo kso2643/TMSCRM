@@ -111,6 +111,18 @@
   function statusBadge(s) {
     return el('span', { class: 'cp-badge', style: '--c:' + (STATUS_COLOR[s] || '#64748b'), text: s || '—' });
   }
+  /** Status dropdown takes the colour of the chosen status (and changes with it). */
+  function paintStatus(sel) {
+    function apply() {
+      var c = STATUS_COLOR[sel.value];
+      sel.classList.toggle('cp-st', !!c);
+      sel.setAttribute('data-status', sel.value || '');
+      if (c) sel.style.setProperty('--sc', c); else sel.style.removeProperty('--sc');
+    }
+    sel.addEventListener('change', apply);
+    apply();
+    return sel;
+  }
   function ragDot(r) { return r ? el('span', { class: 'cp-rag', title: r, style: 'background:' + RAG_COLOR[r] }) : el('span', { class: 'cp-rag none', title: 'No colour set' }); }
 
   /* ── styles ──────────────────────────────────────────────────────── */
@@ -147,6 +159,9 @@
       '.cp-chip.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 10%,#fff);font-weight:600}',
       '.dark .cp-chip{background:#0f172a;border-color:#334155}.dark .cp-chip.on{background:color-mix(in srgb,var(--c) 20%,#0f172a)}',
       '.cp-filters{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.8rem}',
+      'select.cp-in.cp-st{--sc:#64748b;color:var(--sc);font-weight:700;border:2px solid var(--sc);background:color-mix(in srgb,var(--sc) 12%,#fff)}',
+      '.dark select.cp-in.cp-st{background:color-mix(in srgb,var(--sc) 22%,#0f172a)}',
+      'select.cp-in.cp-st option{color:#0f172a;background:#fff;font-weight:500}',
       '.cp-in{border:1px solid #cbd5e1;border-radius:.5rem;padding:.45rem .6rem;font-size:.85rem;background:#fff;color:#0f172a;min-width:0}',
       '.dark .cp-in{background:#1e293b;border-color:#334155;color:#e2e8f0}',
       '.cp-filters .cp-in.grow{flex:1 1 220px}',
@@ -553,6 +568,7 @@
         inp('status', 'Status of the opportunity', { list: META.statuses, def: 'Trial planned' }),
         seg('rag', 'Red / Yellow / Green', META.rag, 'rag')
       ])]));
+      if (fields.status && fields.status.tagName === 'SELECT') paintStatus(fields.status);
       if (id) {
         var hist = el('div', { class: 'cp-hist' });
         if (!reviews.length) hist.appendChild(el('div', { class: 'cp-sub', text: 'No review remarks yet — add them in the Saturday review tab.' }));
@@ -731,6 +747,7 @@
     if (META.statuses.indexOf(o.status) === -1) st.appendChild(el('option', { value: o.status, text: o.status }));
     st.value = val('status', o.status);
     st.addEventListener('change', function () { mark('status', st.value); });
+    paintStatus(st);
     var rag = el('div', { class: 'cp-seg rag', role: 'radiogroup', 'aria-label': 'Red / Yellow / Green' });
     var rv = val('rag', o.rag) || '';
     META.rag.forEach(function (x) {

@@ -519,30 +519,56 @@
     LOCATION_OFF:           { color: '#dc2626', icon: '📵' }
   };
 
-  // Sound: a short two-note chime from WebAudio (no audio file needed).
-  var audioCtx = null, audioUnlocked = false;
+  // Sound: every alert chimes (WebAudio, no audio file needed). Urgent ones
+  // (urgent tasks / price requests, punch-in, location off, out of stock…)
+  // play a louder three-note chime. Browsers only allow sound after the first
+  // click / tap on the page: a chime that arrives before that is kept and
+  // played at that first touch, so no alert is silent.
+  var audioCtx = null, audioUnlocked = false, pendingChime = null, lastChimeAt = 0;
+  var URGENT_TYPES = { PUNCH_REMINDER: 1, LOCATION_OFF: 1, LATE_PUNCH_REQUEST: 1, RESTOCK_NEEDED: 0 };
+  function isUrgent(ev) {
+    if (!ev) return false;
+    if (URGENT_TYPES[ev.type]) return true;
+    return /urgent|out of stock|overdue/i.test((ev.title || '') + ' ' + (ev.body || ''));
+  }
   function unlockAudio() {
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioCtx.state === 'suspended') audioCtx.resume();
       audioUnlocked = true;
       refreshSoundHint();
+      if (pendingChime) { var lv = pendingChime; pendingChime = null; setTimeout(function () { chime(lv); }, 60); }
     } catch (e) {}
   }
   ['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) { window.addEventListener(ev, unlockAudio, { passive: true }); });
-  function chime() {
-    if (lsGet(SOUND_KEY) === 'off' || !audioCtx || !audioUnlocked) return;
+  // Sites the browser already lets play sound (used before) start unlocked.
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'running') audioUnlocked = true;
+  } catch (e) {}
+  function chime(level) {
+    if (lsGet(SOUND_KEY) === 'off') return;
+    level = level === 'urgent' ? 'urgent' : 'normal';
+    if (!audioCtx || !audioUnlocked || audioCtx.state !== 'running') {
+      if (audioCtx && audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
+      if (!audioCtx || audioCtx.state !== 'running') { if (pendingChime !== 'urgent') pendingChime = level; return; }
+    }
+    var now = Date.now();
+    if (now - lastChimeAt < 1500) return; // two alerts at once = one sound
+    lastChimeAt = now;
     try {
       var t0 = audioCtx.currentTime;
-      [[880, 0], [1318.5, 0.16]].forEach(function (n) {
+      var notes = level === 'urgent' ? [[988, 0, 0.32], [1319, 0.18, 0.32], [1568, 0.36, 0.34], [1319, 0.7, 0.3], [1568, 0.88, 0.32]] : [[880, 0, 0.25], [1318.5, 0.16, 0.25]];
+      notes.forEach(function (n) {
         var o = audioCtx.createOscillator(), g = audioCtx.createGain();
-        o.type = 'sine'; o.frequency.value = n[0];
+        o.type = level === 'urgent' ? 'triangle' : 'sine'; o.frequency.value = n[0];
         g.gain.setValueAtTime(0.0001, t0 + n[1]);
-        g.gain.exponentialRampToValueAtTime(0.25, t0 + n[1] + 0.02);
+        g.gain.exponentialRampToValueAtTime(n[2], t0 + n[1] + 0.02);
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + n[1] + 0.45);
         o.connect(g); g.connect(audioCtx.destination);
         o.start(t0 + n[1]); o.stop(t0 + n[1] + 0.5);
       });
+      try { if (navigator.vibrate) navigator.vibrate(level === 'urgent' ? [180, 80, 180] : 120); } catch (e) {}
     } catch (e) {}
   }
 
@@ -738,7 +764,7 @@
       lsSet(SEEN_KEY, JSON.stringify(seen.concat(fresh.map(function (ev) { return ev.id; })).slice(-300)));
       fresh.slice().reverse().forEach(function (ev) { toast(ev); desktop(ev); });
       refreshSoundHint();
-      chime();
+      chime(fresh.some(isUrgent) ? 'urgent' : 'normal');
       try { window.dispatchEvent(new CustomEvent('crm-alert', { detail: { events: fresh } })); } catch (e) {}
     }).catch(function () { polling = false; });
   }
@@ -802,6 +828,7 @@
       ensureBox();
       if (ev.id && box.querySelector('.t[data-id="' + String(ev.id).replace(/"/g, '') + '"]')) return true;
       toast(ev); desktop(ev); refreshSoundHint();
+      if (!ev.silent) chime(isUrgent(ev) ? 'urgent' : 'normal');
       return true;
     }
   };

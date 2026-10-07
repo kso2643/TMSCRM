@@ -21,6 +21,8 @@ class PriceRequestController
 {
     private const STATUSES = ['PENDING', 'APPROVED', 'REJECTED'];
     public const SUPPLY_TYPES = ['REGULAR' => 'Regular', 'ONE_TIME' => 'One time'];
+    // Engineers set how urgent each item is; the admin gives price, discount and lead time.
+    public const PRIORITIES = ['URGENT' => 'Urgent', 'HIGH' => 'High', 'NORMAL' => 'Normal', 'LOW' => 'Low'];
     private const MAX_ITEMS = 200;
 
     public function __construct()
@@ -75,6 +77,7 @@ class PriceRequestController
                     'revisionCount'    => 'INT NOT NULL DEFAULT 0',
                     'history'          => 'TEXT NULL',
                     'originalItemCode' => 'VARCHAR(255) NULL',
+                    'priority'         => 'VARCHAR(10) NULL',
                 ],
             ],
             'PriceRequestBatch' => [
@@ -146,6 +149,7 @@ $tail",
             'revisionCount'  => (int) ($r['revisionCount'] ?? 0),
             'history'        => !empty($r['history']) ? (json_decode($r['history'], true) ?: []) : [],
             'originalItemCode' => $r['originalItemCode'] ?? null,
+            'priority'       => $r['priority'] ?? null,
         ];
     }
 
@@ -360,29 +364,29 @@ $tail",
         if ($priceRaw === '') $errs[] = "$label: target price is required";
         elseif (!is_numeric($priceRaw) || (float) $priceRaw <= 0) $errs[] = "$label: price must be a number more than 0";
         else $price = round((float) $priceRaw, 2);
-        $discRaw = str_replace(['%', ' '], '', (string) ($it['discount'] ?? ''));
-        $disc = null;
-        if ($discRaw === '') $errs[] = "$label: discount % is required (enter 0 for none)";
-        elseif (!is_numeric($discRaw) || (float) $discRaw < 0 || (float) $discRaw > 100) $errs[] = "$label: discount must be 0–100 %";
-        else $disc = round((float) $discRaw, 2);
-        $lead = trim((string) ($it['leadTime'] ?? ''));
-        if ($lead === '') $errs[] = "$label: lead time is required";
-        elseif (is_numeric($lead)) $lead .= ' days';
-        $edRaw = trim((string) ($it['expectedDelivery'] ?? ''));
-        $ed = null;
-        if ($edRaw === '') $errs[] = "$label: expected delivery date is required";
-        else {
-            $ed = self::parseDate($edRaw);
-            if (!$ed) $errs[] = "$label: expected delivery must be a date";
-        }
+        // Priority (engineers no longer give discount, lead time or delivery date — the admin does)
+        $prio = self::priority($it['priority'] ?? '');
+        if ($prio === false) $errs[] = "$label: priority must be Urgent, High, Normal or Low";
         return [[
             'productId' => $product['id'] ?? null, 'itemCode' => $code ?: null, 'productName' => mb_substr($name, 0, 255),
             'category' => mb_substr($category, 0, 120) ?: null, 'brand' => mb_substr($brand, 0, 120) ?: null, 'supplyType' => $type,
             'quantity' => $qty, 'unit' => mb_substr(trim((string) ($it['unit'] ?? '')) ?: ($product['unit'] ?? ''), 0, 20) ?: null,
             'listPrice' => isset($product['standardPrice']) && $product['standardPrice'] !== null ? (float) $product['standardPrice'] : null,
-            'requestedPrice' => $price, 'discount' => $disc, 'notes' => trim((string) ($it['notes'] ?? '')) ?: null,
-            'leadTime' => $lead !== '' ? mb_substr($lead, 0, 60) : null, 'expectedDelivery' => $ed,
+            'requestedPrice' => $price, 'discount' => null, 'notes' => trim((string) ($it['notes'] ?? '')) ?: null,
+            'leadTime' => null, 'expectedDelivery' => null, 'priority' => $prio ?: 'NORMAL',
         ], $errs];
+    }
+
+    /** "Urgent" / "high" / "URGENT" → key; blank → NORMAL; anything else → false. */
+    private static function priority($v)
+    {
+        $v = strtoupper(trim((string) $v));
+        if ($v === '') return 'NORMAL';
+        if (isset(self::PRIORITIES[$v])) return $v;
+        foreach (self::PRIORITIES as $k => $l) if (strtoupper($l) === $v) return $k;
+        if (in_array($v, ['MEDIUM', 'MED'], true)) return 'NORMAL';
+        if (in_array($v, ['CRITICAL', 'ASAP', 'IMMEDIATE'], true)) return 'URGENT';
+        return false;
     }
 
     /** "2026-10-20", "20/10/2026", "20-10-26", Excel serial → Y-m-d, or null. */
@@ -428,12 +432,12 @@ $tail",
             $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, createdAt) VALUES (?,?,?,?,?,?,?)')
                 ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', now_sql()]);
             $ins = $pdo->prepare('INSERT INTO `PriceRequest` (id,requestedById,customerId,productId,itemCode,productName,quantity,listPrice,requestedPrice,notes,status,
-                                  batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt)
-                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?)');
+                                  batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt,priority)
+                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?,?)');
             foreach ($clean as $pos => $ci) {
                 $ins->execute([gen_id(), $auth['id'], $customerId, $ci['productId'], $ci['itemCode'], $ci['productName'], $ci['quantity'], $ci['listPrice'],
                     $ci['requestedPrice'], $ci['notes'], $bid, $ci['category'], $ci['brand'], $ci['supplyType'], $ci['unit'], $ci['discount'],
-                    $ci['leadTime'], $ci['expectedDelivery'], $pos + 1, now_sql(), now_sql()]);
+                    $ci['leadTime'], $ci['expectedDelivery'], $pos + 1, now_sql(), now_sql(), $ci['priority']]);
             }
             $pdo->commit();
         } catch (Throwable $e) {
@@ -580,7 +584,7 @@ $tail",
         sendSuccess([], 'Price request withdrawn');
     }
 
-    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Target Price (Rs) *', 'Discount % *', 'Lead Time *', 'Expected Delivery (dd-mm-yyyy) *', 'Note'];
+    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Target Price (Rs) *', 'Priority (Urgent / High / Normal / Low)', 'Note'];
 
     // GET /api/price-requests/template
     public function template(): void
@@ -588,11 +592,10 @@ $tail",
         authenticate();
         $wb = new StyledXlsxWriter();
         $sh = $wb->addSheet('Price request items');
-        $wb->setWidths($sh, [16, 34, 18, 16, 18, 10, 8, 16, 11, 14, 18, 36]);
+        $wb->setWidths($sh, [16, 34, 18, 16, 18, 10, 8, 16, 18, 36]);
         $wb->addRow($sh, self::TEMPLATE_COLS, 'header', 32);
-        $d1 = date('d-m-Y', strtotime('+21 days')); $d2 = date('d-m-Y', strtotime('+35 days'));
-        $wb->addRow($sh, ['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Inserts', 'YG-1', 'Regular', 100, 'PCS', 245, 10, '2 weeks', $d1, 'Customer currently buys from competitor at Rs 230']);
-        $wb->addRow($sh, ['', 'Special step drill D8.5 x 120', 'Drills', 'YG-1', 'One time', 5, 'PCS', 2850, 0, '4 weeks', $d2, 'Drawing attached by mail']);
+        $wb->addRow($sh, ['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Inserts', 'YG-1', 'Regular', 100, 'PCS', 245, 'High', 'Customer currently buys from competitor at Rs 230']);
+        $wb->addRow($sh, ['', 'Special step drill D8.5 x 120', 'Drills', 'YG-1', 'One time', 5, 'PCS', 2850, 'Normal', 'Drawing attached by mail']);
         $wb->freeze($sh, 1);
         $ls = $wb->addSheet('Lists');
         $cats = [];
@@ -600,7 +603,7 @@ $tail",
         $wb->setWidths($ls, [24, 20, 60]);
         $wb->addRow($ls, ['Category (any, these exist)', 'Regular / One time', 'How to fill'], 'header');
         $help = ['Delete the two sample rows, one row per item.', 'Item Code fills the product from your product list (optional).',
-                 'Product Name, Category, Brand, Regular / One time, Quantity, Target Price, Discount %, Lead Time and Expected Delivery are required.', 'Target Price = price per unit you want to offer; Discount % = discount you are asking for (0 if none); Lead Time e.g. 2 weeks.',
+                 'Product Name, Category, Brand, Regular / One time, Quantity and Target Price are required.', 'Priority: Urgent, High, Normal or Low (blank = Normal). Discount, lead time and delivery are given by the admin.',
                  'Upload the file on the Price requests page, choose the company, check the items, then Raise request.'];
         $n = max(count($cats), 2, count($help));
         for ($i = 0; $i < $n; $i++) $wb->addRow($ls, [$cats[$i] ?? '', ['Regular', 'One time'][$i] ?? '', $help[$i] ?? '']);
@@ -634,8 +637,7 @@ $tail",
         if ($hIdx === null) sendError('Could not find the heading row (Product Name, Brand …). Use the template from "Download template".', 400);
         $alias = ['itemCode' => '/item\s*code|^code|edp/i', 'productName' => '/product|description/i', 'category' => '/categor/i', 'brand' => '/brand|make/i',
                   'supplyType' => '/regular|one\s*time|single|type/i', 'quantity' => '/qty|quantity/i', 'unit' => '/^unit|uom/i',
-                  'leadTime' => '/lead/i', 'expectedDelivery' => '/expected|delivery\s*date|required\s*by|need\s*by/i',
-                  'requestedPrice' => '/price|rate/i', 'discount' => '/disc/i', 'notes' => '/note|remark/i'];
+                  'priority' => '/priority|urgen/i', 'requestedPrice' => '/price|rate/i', 'notes' => '/note|remark/i'];
         $map = [];
         foreach ($rows[$hIdx] as $ci => $h) {
             $h = trim((string) $h);
@@ -680,8 +682,7 @@ $tail",
         $b = request_body();
         $price = str_replace([',', '₹', ' '], '', (string) ($b['requestedPrice'] ?? ''));
         if ($price === '' || !is_numeric($price) || (float) $price <= 0) sendError('Enter the revised price you need.', 400);
-        $disc = str_replace(['%', ' '], '', (string) ($b['discount'] ?? ''));
-        if ($disc === '' || !is_numeric($disc) || (float) $disc < 0 || (float) $disc > 100) sendError('Enter the discount % (0–100).', 400);
+        $disc = null; // the admin gives the discount
         $note = trim((string) ($b['note'] ?? ''));
         if ($note === '') sendError('Say why a revised price is needed (e.g. competitor price, customer counter-offer).', 400);
         $lead = trim((string) ($b['leadTime'] ?? '')) ?: $row['leadTime'];
@@ -696,7 +697,7 @@ $tail",
             }
             array_unshift($h, ['type' => 'REQUEST', 'at' => $row['createdAt'], 'by' => $row['requestedByName'], 'price' => (float) $row['requestedPrice'], 'discount' => $row['discount'] === null ? null : (float) $row['discount'], 'leadTime' => $row['leadTime'], 'note' => $row['notes']]);
         }
-        $h[] = ['type' => 'REVISION', 'at' => now_sql(), 'by' => $auth['name'], 'price' => round((float) $price, 2), 'discount' => round((float) $disc, 2), 'leadTime' => $lead, 'note' => $note];
+        $h[] = ['type' => 'REVISION', 'at' => now_sql(), 'by' => $auth['name'], 'price' => round((float) $price, 2), 'discount' => null, 'leadTime' => $lead, 'note' => $note];
         db()->prepare('UPDATE `PriceRequest` SET status=\'PENDING\', requestedPrice=?, discount=?, leadTime=?, expectedDelivery=?, approvedPrice=NULL, approvedDiscount=NULL, approvedLeadTime=NULL,
                        responseNote=NULL, respondedById=NULL, respondedAt=NULL, revisionCount=revisionCount+1, history=?, createdAt=?, updatedAt=? WHERE id=?')
             ->execute([round((float) $price, 2), round((float) $disc, 2), $lead, $ed, json_encode($h, JSON_UNESCAPED_UNICODE), now_sql(), now_sql(), $id]);
