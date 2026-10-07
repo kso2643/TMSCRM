@@ -1,3 +1,20 @@
+# Update — 7 Oct (d): meetings for today only, trial report no. automatic
+
+**Upload:** `api/` and `crm/` (including `crm/trial-sheet/index.html`), then press **Ctrl+Shift+R** once.
+
+1. **Meetings & follow-ups → Log a meeting:**
+   - The meeting date is fixed to today and shows as "📅 Today · Wed, 7 Oct 2026". There is no calendar to pick another day; only the time can be changed.
+   - The server also refuses a meeting dated any other day.
+   - The next follow-up date still has its calendar.
+2. **Trials → existing data analysis:**
+   - The **Report no.** is generated automatically: it shows the number the trial will get (e.g. TR-2026-014) and is locked.
+   - On sending, the trial gets that same number.
+   - The savings report keeps its automatic number (TR-…-SR), also locked.
+
+**Verification:** meetings 5/5 + attachments 17/17, trials 38/38.
+
+---
+
 # Update — 7 Oct (c): price request priority, sound for every notification, CPR status colours
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. The new column (`PriceRequest.priority`) is created automatically.

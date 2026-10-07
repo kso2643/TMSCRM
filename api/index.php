@@ -414,6 +414,7 @@ try {
         $ctrl = new TrialController();
         match (true) {
             $method === 'GET'    && $c1 === 'meta'                     => $ctrl->meta(),
+            $method === 'GET'    && $c1 === 'next-no'                  => $ctrl->nextNo(),
             $method === 'GET'    && $c1 === ''                         => $ctrl->index(),
             $method === 'POST'   && $c1 === ''                         => $ctrl->create(),
             $method === 'GET'    && $c1 !== '' && $c2 === ''           => $ctrl->show($c1),

@@ -189,6 +189,12 @@ class MeetingController
             sendError('Customer, date, and type are required.', 400);
         if (!in_array($meetingType, self::VALID_TYPES))
             sendError('Invalid meeting type.', 400);
+        // A meeting is logged on the day it happens — only today's date is accepted.
+        try {
+            $md = new DateTime((string) $meetingDate);
+            $md->setTimezone(new DateTimeZone(date_default_timezone_get()));
+            if ($md->format('Y-m-d') !== date('Y-m-d')) sendError('A meeting can only be added for today (' . date('d M Y') . ').', 400);
+        } catch (Exception $e) { sendError('Invalid meeting date.', 400); }
         $status = $b['status'] ?? 'NEW_LEAD';
         if (!in_array($status, self::VALID_STATUSES))
             sendError('Invalid status.', 400);

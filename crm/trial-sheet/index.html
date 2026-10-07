@@ -344,7 +344,7 @@ details.fmt ul{margin:6px 0 0 18px}
 :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 </style>
-<link rel="stylesheet" href="/motion.css?v=20261007d"/></head>
+<link rel="stylesheet" href="/motion.css?v=20261007e"/></head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 
@@ -4253,6 +4253,14 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
       bt.querySelector('b').textContent = KIND === 'cmp' ? 'Trial cost savings report' : 'Existing situation data analysis';
       bt.querySelector('small').textContent = KIND === 'cmp' ? 'Step 3 · after the trial' : 'Step 1 · trial request';
     }
+    // Report no. comes from the CRM (the trial number) — shown, not typed.
+    ['#f-reportNo', '#c-reportNo'].forEach(function (sel) {
+      var i = document.querySelector(sel);
+      if (!i) return;
+      i.readOnly = true; i.tabIndex = -1;
+      i.title = 'Generated automatically from the trial number';
+      i.style.cssText += ';background:#EEF2F5;color:#173E58;font-weight:600;cursor:default';
+    });
     window.addEventListener('message', onMessage);
     post({ type: 'ready' });
   }

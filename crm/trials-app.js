@@ -424,7 +424,9 @@
     renderCust();
 
     var u = currentUser();
-    sheet.load({ prefill: { engineer: (u && u.name) || '', reportNo: 'New trial request' }, company: company });
+    // Report no. is generated: the number this trial request will get (TR-YYYY-NNN), fixed on sending.
+    api('GET', '/trials/next-no').then(function (j) { return j.data.trialNo; }).catch(function () { return 'Given when you send'; })
+      .then(function (no) { sheet.load({ prefill: { engineer: (u && u.name) || '', reportNo: no }, company: company }); });
 
     function showErr(msg) { err.innerHTML = ''; if (msg) err.appendChild(el('div', { class: 'trl-banner trl-err', text: msg })); }
 

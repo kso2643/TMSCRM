@@ -189,6 +189,13 @@ $tail",
         return $id;
     }
 
+    // GET /api/trials/next-no — the number the next trial request will get (shown as the report no.)
+    public function nextNo(): void
+    {
+        authenticate();
+        sendSuccess(['trialNo' => $this->nextTrialNo()]);
+    }
+
     private function nextTrialNo(): string
     {
         $prefix = 'TR-' . (new DateTime('now'))->format('Y') . '-';
