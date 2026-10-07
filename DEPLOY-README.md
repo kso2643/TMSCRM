@@ -1,3 +1,95 @@
+# Update — 7 Oct: product suggestions, CPR focus brand, visit planner, trials DC approval, chat, attendance window, vendors, inward, order stock / PDF, detailed reports
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+
+- **New pages:** `crm/vendors/` (Vendors), `crm/chat/` (Chat). `crm/attendance/` is now a hand-coded page.
+- **New scripts:** `crm/product-suggest.js`, `crm/chat-app.js`, `crm/vendors-app.js`, `crm/attendance-app.js`.
+- **New controllers:** `api/controllers/ChatController.php`, `api/controllers/VendorController.php`.
+- **Database:** new tables and columns are created automatically the first time each page is used.
+- **Uploads:** new photos and files are saved in `api/uploads/attendance`, `api/uploads/vendors` and `api/uploads/trials`. The server must be able to write there.
+
+**Refresh problem (only the newest page showing after a refresh):**
+- The app's own scripts are now always fetched fresh (network first) instead of from the old cache.
+- Every page links its scripts with a version stamp (`?v=20261007b`), so a refresh always gets the current files.
+
+## Products and suggestions
+- **Product fields:** each product has **brand, grade, specification and type**.
+- **Product Excel import:**
+  - Reads every sheet and finds the header row by itself.
+  - Understands Product code / Order code / EDP / Article no. as the item code.
+- **Suggestions while typing:** in the **quotation** (TMS and APJ) and **order** pages, typing in Product code or Specification (e.g. `SNMX`, `snmx1206`, `YG602`) lists matching products with brand, grade, price and stock. Picking one fills the code, the specification and the price.
+- **Fixed prices:** prices from the product list or an approved price request are fixed for engineers. Manager / Admin / Super Admin can unlock them with 🔒.
+- **Vendor prices:** Manager and above also see vendor prices and stock in the suggestions.
+
+## CPR, appointments, price requests
+- **CPR:**
+  - New **Focus brand** dropdown, built from the stock, product and CPR brands.
+  - **Focus product** is now Hi feed / Ceramic / CBN / Tap / EndMill / Other. "Other" lets you type your own.
+  - Duplicates are removed from the lists.
+- **Appointments → Planner view:** dates run across the top and companies down the side, with each visit in its cell. Click an empty cell to book that company on that day. Use "+ Add company row" to add a company, and the footer shows visits per day.
+- **Price requests:**
+  - When answering, admin enters the price, lead time, discount and note.
+  - Admin can also **correct the product code**; the request keeps the old code and the note says "Product code corrected: OLD → NEW".
+
+## Trials
+- **Visibility:** everyone can see all trials. The list has a **My trials / All engineers' trials** switch, and each trial shows the **previous trials** for the same customer.
+- **Auto fields:** each trial gets a quotation no. automatically (e.g. TMS/TRQ/2026/0012) and shows the customer and company.
+- **Steps:** Existing data → Approval → **DC approval** → Trial comparison.
+  - At DC approval, an Admin or Super Admin enters the trial date and DC no. The comparison opens only after that.
+- **PDFs to admin:**
+  - The **existing data analysis PDF** is sent to admin when the trial is raised.
+  - The **comparison PDF** is sent when the trial is completed.
+  - Admins get an alert and open the PDFs on the trial, and both can be downloaded.
+
+## Chat
+- **New page:** Chat, under Operations.
+- **Admin side:** Manager / Admin / Super Admin pick any user in the **Send to** dropdown, and the message goes to that user's chat.
+- **User side:** users see the message (with an alert) and reply. New messages appear every few seconds.
+
+## Attendance
+- **Punch in:** needs a **photo** (camera, or the phone camera on mobile) and your **location**.
+- **Time window:**
+  - **On time** until 9:30.
+  - **Grace** 9:30–9:45; the punch-in is marked late with the minutes.
+  - **After 9:45** Punch in is disabled. The employee writes the reason and sends a request. Once a Manager or Admin approves it on the Attendance page, Punch in opens again for that day.
+- **Reminder:** 9:25–9:40 (Mon–Sat), a reminder on every page until you punch in. It stops once you have punched in.
+- **History:** monthly history with the photos. Admins also have the All employees tab and the late-request list.
+
+## Vendors (new page, admin section, `/vendors/`)
+- **Vendors:** add, edit and delete vendors, each with several brands.
+- **Per vendor product list:** price, discount, net price, stock, MOQ and lead time.
+  - Add products by hand, or upload the vendor's own Excel price list or stock list: any layout, every sheet, header found automatically.
+  - New item codes are also added to **Products**.
+- **Catalogues & files:** PDF, Excel and images per vendor, which you can open, download or delete.
+- **Compare prices:** one item code across all vendors, with the cheapest marked.
+- **Stock inward:**
+  - Record goods received from a supplier: invoice no., date, lines, and the place (hand / local city / state).
+  - Saving **adds the quantities to stock**. Deleting an inward takes them back out.
+  - Excel register available; the Stock page has an "Inward from supplier" button.
+
+## Orders
+- **Stock per line:** each line shows the stock **in hand / total / on open orders** for its code, in the order form and in the order detail.
+- **Partial supply by quantity:**
+  - Enter the quantity supplied on each line; the pending quantity is shown.
+  - The order becomes partially complete, and only what was supplied comes out of stock (hand first).
+- **⬇ PDF:** every order has a PDF button (list, detail and dialog) with the letterhead, lines, supplied / pending and stock.
+
+## Reports — detailed Excel
+- **Default format:** Excel is now the default, and every Excel report is a full workbook:
+  - the register (styled, with totals);
+  - a **Summary** sheet (counts by status, person and type, plus number totals);
+  - extra sheets where useful: **order lines**, **week-wise orders**, **week-wise stock out**, **quotation items**, **attendance per employee** and **late punch requests**.
+- **New reports:** **Stock** (with movements and brand-wise value), **Stock inward** and **Vendor price lists**.
+
+## Verification
+- **API tests:** attendance 32/32, vendors & inward 35/35, orders & reports 30/30, products 7/7, CPR / planner / price requests 14/14, trials 11/11, chat 10/10.
+- **Browser tests:** attendance 19/19, vendors 21/21, orders & reports 15/15, suggestions 13/13, trials 35/35.
+- **Earlier suites, all passing:**
+  - global 31/31, batch 44/44, stock 27/27, stock upload 16/16, brand-wise 10/10, CPR 27/27.
+  - Some old tests needed updating for intended changes: the new attendance page, 19 report cards, and Excel as the default format.
+
+---
+
 # Fix — 5 Oct (e): "Excel cannot open the file … format or extension is not valid"
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
