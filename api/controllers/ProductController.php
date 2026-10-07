@@ -1,6 +1,21 @@
 <?php
 class ProductController
 {
+    public function __construct()
+    {
+        // Catalogue details: brand, insert grade, specification (e.g. SNMX 1206ANN-MM), tool type.
+        ensure_schema(['Product' => ['create' => '', 'columns' => [
+            'brand'         => 'VARCHAR(100) NULL',
+            'grade'         => 'VARCHAR(100) NULL',
+            'specification' => 'VARCHAR(255) NULL',
+            'productType'   => 'VARCHAR(60) NULL',
+        ]]], 'Product catalogue columns');
+    }
+
+    /** Lower-case, no spaces / dashes / dots / slashes — so "SNMX1206" finds "SNMX 1206-ANN". */
+    public static function squash(string $s): string { return strtolower(preg_replace('/[\s\-\.\/_]+/', '', $s)); }
+    private const SQ = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(%s,' ',''),'-',''),'.',''),'/',''),'_',''))";
+
     // GET /api/products
     public function index(): void
     {
@@ -11,8 +26,10 @@ class ProductController
         $where = ['p.isActive=1']; $params = [];
         if ($search) {
             $like = "%$search%";
-            $where[] = '(p.itemCode LIKE ? OR p.productName LIKE ? OR p.description LIKE ?)';
-            $params = array_merge($params,[$like,$like,$like]);
+            $sq = '%' . self::squash($search) . '%';
+            $where[] = '(p.itemCode LIKE ? OR p.productName LIKE ? OR p.description LIKE ? OR p.grade LIKE ? OR p.brand LIKE ? OR '
+                     . sprintf(self::SQ, 'p.itemCode') . ' LIKE ? OR ' . sprintf(self::SQ, "COALESCE(p.specification,'')") . ' LIKE ?)';
+            $params = array_merge($params,[$like,$like,$like,$like,$like,$sq,$sq]);
         }
         if ($category)   { $where[] = 'p.category=?';   $params[] = $category; }
         if ($categoryId) { $where[] = 'p.categoryId=?'; $params[] = $categoryId; }
@@ -35,25 +52,56 @@ class ProductController
         sendPaginated($items,$total,$page,$limit,'Products fetched');
     }
 
-    // GET /api/products/search?q=
+    // GET /api/products/search?q=&limit= — type-ahead for quotations / orders / price requests.
+    // Matches item code, specification, name, grade and brand; spaces and dashes are ignored
+    // (SNMX, snmx1206, "SNMX 1206 ANN" all match). Code / spec prefix matches come first.
+    // Each result carries the stock (hand stock + total) when the item is in Stock.
     public function search(): void
     {
         authenticate();
         $q = trim(qp('q',''));
         if (strlen($q)<1) { sendSuccess(['results' => []]); }
-        $like = "%$q%";
+        $limit = max(1, min(50, (int) qp('limit', 20)));
+        $like = "%$q%"; $sq = self::squash($q); $sqLike = "%$sq%"; $sqPre = "$sq%";
+        $code = sprintf(self::SQ, 'p.itemCode'); $spec = sprintf(self::SQ, "COALESCE(p.specification,'')");
         $s = db()->prepare(
-            "SELECT p.id,p.itemCode,p.productName,p.description,p.unit,p.standardPrice,p.hsnCode,p.categoryId,
+            "SELECT p.id,p.itemCode,p.productName,p.description,p.unit,p.standardPrice,p.hsnCode,p.categoryId,p.category,
+                    p.brand,p.grade,p.specification,p.productType,
                     c.name AS cat_name, c.color AS cat_color
              FROM `Product` p LEFT JOIN `Category` c ON c.id=p.categoryId
-             WHERE p.isActive=1 AND (p.itemCode LIKE ? OR p.description LIKE ? OR p.productName LIKE ?)
-             ORDER BY p.itemCode ASC LIMIT 15"
+             WHERE p.isActive=1 AND (p.itemCode LIKE ? OR p.description LIKE ? OR p.productName LIKE ? OR p.grade LIKE ? OR p.brand LIKE ?
+                                     OR $code LIKE ? OR $spec LIKE ?)
+             ORDER BY ($code LIKE ? OR $spec LIKE ?) DESC, ($code = ? OR $spec = ?) DESC, p.itemCode ASC LIMIT $limit"
         );
-        $s->execute([$like,$like,$like]);
-        $results = array_map(function($r){
+        $s->execute([$like,$like,$like,$like,$like,$sqLike,$sqLike,$sqPre,$sqPre,$sq,$sq]);
+        $rows = $s->fetchAll();
+        // stock for the results (by product id or item code)
+        $stock = [];
+        if ($rows) {
+            try {
+                StockLedger::ensure();
+                $codes = array_column($rows, 'itemCode'); $ids = array_column($rows, 'id');
+                $in1 = implode(',', array_fill(0, count($codes), '?')); $in2 = implode(',', array_fill(0, count($ids), '?'));
+                $st = db()->prepare("SELECT id,itemCode,productId,availableStock,netPrice FROM `Stock` WHERE isActive=1 AND (itemCode IN ($in1) OR productId IN ($in2))");
+                $st->execute(array_merge($codes, $ids));
+                $srows = $st->fetchAll();
+                $lv = StockLedger::levels(array_column($srows, 'id'));
+                $res = StockLedger::reserved(array_column($srows, 'id'));
+                foreach ($srows as $r) {
+                    $l = $lv[$r['id']] ?? ['HAND' => 0, 'LOCAL' => 0, 'states' => []];
+                    $info = ['hand' => (float) $l['HAND'], 'local' => (float) $l['LOCAL'], 'state' => (float) array_sum($l['states']),
+                             'total' => (float) $r['availableStock'], 'onOrder' => (float) ($res[$r['id']] ?? 0), 'netPrice' => (float) $r['netPrice']];
+                    if ($r['productId']) $stock['id:' . $r['productId']] = $info;
+                    $stock['code:' . strtoupper($r['itemCode'])] = $info;
+                }
+            } catch (Throwable $e) { error_log('product search stock: ' . $e->getMessage()); }
+        }
+        $results = array_map(function($r) use ($stock) {
             $r['categoryRef'] = $r['cat_name'] ? ['name'=>$r['cat_name'],'color'=>$r['cat_color']] : null;
+            $r['standardPrice'] = (float) $r['standardPrice'];
+            $r['stock'] = $stock['id:' . $r['id']] ?? $stock['code:' . strtoupper($r['itemCode'])] ?? null;
             unset($r['cat_name'],$r['cat_color']); return $r;
-        },$s->fetchAll());
+        },$rows);
         sendSuccess(['results'=>$results]);
     }
 
@@ -104,8 +152,8 @@ class ProductController
         $id = gen_id();
         db()->prepare(
             'INSERT INTO `Product` (id,itemCode,productName,description,unit,standardPrice,category,categoryId,
-             productRef,isCustom,drawingNumber,revisionNumber,hsnCode,isActive,createdAt,updatedAt)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)'
+             productRef,isCustom,drawingNumber,revisionNumber,hsnCode,brand,grade,specification,productType,isActive,createdAt,updatedAt)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)'
         )->execute([
             $id,$itemCode,$productName,
             $b['description']??null,$b['unit']??null,
@@ -113,6 +161,7 @@ class ProductController
             $b['category']??null,($b['categoryId']??null)?:null,
             $b['productRef']??null,(int)!empty($b['isCustom']),
             $b['drawingNumber']??null,$b['revisionNumber']??null,$b['hsnCode']??null,
+            ($b['brand']??null)?:null,($b['grade']??null)?:null,($b['specification']??null)?:null,($b['productType']??null)?:null,
             now_sql(),now_sql(),
         ]);
         $this->show($id);
@@ -125,7 +174,7 @@ class ProductController
         $b = request_body();
         $sets=[]; $params=[];
         $str=fn($k)=>$b[$k]??null;
-        foreach(['productName','description','unit','category','productRef','drawingNumber','revisionNumber','hsnCode'] as $f) {
+        foreach(['productName','description','unit','category','productRef','drawingNumber','revisionNumber','hsnCode','brand','grade','specification','productType'] as $f) {
             if(array_key_exists($f,$b)){$sets[]="$f=?";$params[]=$str($f);}
         }
         if(array_key_exists('standardPrice',$b)){$sets[]='standardPrice=?';$params[]=(float)$b['standardPrice'];}
@@ -140,10 +189,10 @@ class ProductController
     public function export(): void
     {
         $auth = authenticate(); require_admin($auth);
-        $s = db()->query('SELECT p.itemCode,p.productName,p.category,p.unit,p.standardPrice,p.hsnCode,p.isActive,c.name AS catName FROM `Product` p LEFT JOIN `Category` c ON c.id=p.categoryId ORDER BY p.itemCode');
+        $s = db()->query('SELECT p.itemCode,p.productName,p.category,p.unit,p.standardPrice,p.hsnCode,p.isActive,p.brand,p.productType,p.specification,p.grade,c.name AS catName FROM `Product` p LEFT JOIN `Category` c ON c.id=p.categoryId ORDER BY p.itemCode');
         $w = new XlsxWriter('Products');
-        $w->addRow(['Item Code','Product Name','Category','Unit','Standard Price','HSN Code','Active']);
-        foreach($s->fetchAll() as $r) $w->addRow([$r['itemCode'],$r['productName'],$r['catName']??$r['category'],$r['unit'],$r['standardPrice'],$r['hsnCode'],$r['isActive']?'Yes':'No']);
+        $w->addRow(['Item Code','Product Name','Category','Unit','Standard Price','HSN Code','Active','Brand','Product Type','Specification','Grade']);
+        foreach($s->fetchAll() as $r) $w->addRow([$r['itemCode'],$r['productName'],$r['catName']??$r['category'],$r['unit'],$r['standardPrice'],$r['hsnCode'],$r['isActive']?'Yes':'No',$r['brand'],$r['productType'],$r['specification'],$r['grade']]);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="products-export.xlsx"');
         echo $w->output(); exit;
@@ -163,8 +212,9 @@ class ProductController
     // Columns are matched by their header text (any order, case-insensitive),
     // so an exported product list can be edited and imported straight back.
     private const IMPORT_COLUMNS = [
-        'itemCode'       => ['item code', 'itemcode', 'code', 'item no', 'part no'],
-        'productName'    => ['product name', 'productname', 'name', 'item name', 'itemname', 'product'],
+        'itemCode'       => ['item code', 'itemcode', 'code', 'item no', 'part no', 'product code', 'cutter code', 'insert code', 'order code', 'ordering code',
+                             'article no', 'article number', 'catalogue no', 'catalog no', 'cat no', 'edp', 'edp no', 'edp number', 'part number', 'sku'],
+        'productName'    => ['product name', 'productname', 'name', 'item name', 'itemname', 'product', 'item description'],
         'description'    => ['description', 'desc'],
         'unit'           => ['unit', 'uom'],
         'standardPrice'  => ['standard price', 'price', 'rate', 'list price', 'price (₹)', 'standardprice'],
@@ -174,6 +224,10 @@ class ProductController
         'revisionNumber' => ['revision number', 'revision', 'rev'],
         'productRef'     => ['product ref', 'reference', 'ref'],
         'isActive'       => ['active', 'is active', 'status'],
+        'brand'          => ['brand', 'make', 'manufacturer'],
+        'productType'    => ['product type', 'type', 'tool type', 'item type'],
+        'specification'  => ['specification', 'spec', 'insert specification', 'insert spec', 'cutter specification', 'iso code', 'iso designation', 'designation', 'geometry'],
+        'grade'          => ['grade', 'insert grade', 'carbide grade', 'grades'],
     ];
 
     // GET /api/products/template
@@ -182,12 +236,39 @@ class ProductController
         authenticate();
         $w = new XlsxWriter('Products');
         $w->setForceTextColumns([0, 6]); // keep item codes / HSN like 0012 as text
-        $w->addRow(['Item Code *', 'Product Name *', 'Description', 'Unit', 'Standard Price', 'Category', 'HSN Code', 'Drawing Number', 'Revision Number', 'Product Ref', 'Active (Yes/No)']);
-        $w->addRow(['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Carbide insert for steel finishing', 'nos', 250, 'Inserts', '82090090', '', '', '', 'Yes']);
-        $w->addRow(['ER32-COLLET-12', 'ER32 Collet 12mm', '', 'nos', 1100, 'Holders', '84669310', '', '', '', 'Yes']);
+        $w->addRow(['Item Code *', 'Product Name *', 'Description', 'Unit', 'Standard Price', 'Category', 'HSN Code', 'Drawing Number', 'Revision Number', 'Product Ref', 'Active (Yes/No)', 'Brand', 'Product Type', 'Specification', 'Grade']);
+        $w->addRow(['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Carbide insert for steel finishing', 'nos', 250, 'Inserts', '82090090', '', '', '', 'Yes', 'YG-1', 'Insert', 'CNMG 120408-MF', 'YG3020']);
+        $w->addRow(['SNMX1206ANN-MM-YG602', 'SNMX 1206ANN-MM Milling Insert', '', 'nos', 420, 'Inserts', '82090090', '', '', '', 'Yes', 'YG-1', 'Insert', 'SNMX 1206ANN-MM', 'YG602']);
+        $w->addRow(['HF-D50-Z5', 'Hi-feed cutter D50 Z5', '', 'nos', 18500, 'Cutters', '82077090', '', '', '', 'Yes', 'YG-1', 'Cutter', 'SNMX12 D50 Z5 Arbor 22', '']);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="product-upload-template.xlsx"');
         echo $w->output(); exit;
+    }
+
+    private static function normHeader($h): string { return trim(preg_replace('/\s+/', ' ', strtolower(str_replace(['*', '(yes/no)', '.', ':'], '', (string) $h)))); }
+    private static function fieldOf(string $h): ?string { foreach (self::IMPORT_COLUMNS as $f => $al) if (in_array($h, $al, true)) return $f; return null; }
+    /** Index of the header row (has an item-code column) in the first 10 rows, or null. */
+    private static function headerRow(array $rows): ?int
+    {
+        foreach (array_slice($rows, 0, 10, true) as $i => $r) {
+            foreach ((array) $r as $h) if (self::fieldOf(self::normHeader($h)) === 'itemCode') return $i;
+        }
+        return null;
+    }
+    /** Rewrites a sheet (header + rows) into the column order of $header. */
+    private static function remap(array $header, array $body): array
+    {
+        $target = [];
+        foreach ($header as $i => $h) if (($f = self::fieldOf(self::normHeader($h)))) $target[$f] = $i;
+        $src = [];
+        foreach ($body[0] as $i => $h) if (($f = self::fieldOf(self::normHeader($h)))) $src[$f] = $i;
+        $out = [];
+        foreach (array_slice($body, 1) as $r) {
+            $row = array_fill(0, count($header), '');
+            foreach ($src as $f => $i) if (isset($target[$f])) $row[$target[$f]] = $r[$i] ?? '';
+            $out[] = $row;
+        }
+        return $out;
     }
 
     // POST /api/products/import  (multipart "file": .xlsx or .csv)
@@ -202,14 +283,25 @@ class ProductController
         if (preg_match('/\.csv$/i', $name)) {
             if (($fh = fopen($tmp, 'r')) !== false) { while (($r = fgetcsv($fh)) !== false) $rows[] = $r; fclose($fh); }
         } elseif (preg_match('/\.xlsx$/i', $name)) {
-            try { $rows = XlsxReader::readFirstSheetRows($tmp); } catch (\Exception $e) { sendError('Could not read the Excel file: ' . $e->getMessage(), 400); }
+            // Catalogues often have several sheets (inserts, cutters, drills…): read them all.
+            try {
+                $rows = [];
+                foreach (XlsxReader::readAllSheets($tmp) as $sh) {
+                    $hr = self::headerRow($sh['rows']);
+                    if ($hr === null) continue;
+                    $body = array_slice($sh['rows'], $hr);
+                    if (!$rows) { $rows = $body; continue; }
+                    // later sheets: re-map their columns onto the first sheet's header order
+                    $rows = array_merge($rows, self::remap($rows[0], $body));
+                }
+            } catch (\Exception $e) { sendError('Could not read the Excel file: ' . $e->getMessage(), 400); }
         } else {
             sendError('Upload an .xlsx (Excel) or .csv file. Old .xls files: open in Excel and "Save As" .xlsx first.', 400);
         }
         if (count($rows) < 2) sendError('The file has no product rows under the header.', 400);
 
         // Map headers -> fields
-        $norm = fn($h) => trim(preg_replace('/\s+/', ' ', strtolower(str_replace(['*', '(yes/no)'], '', (string) $h))));
+        $norm = fn($h) => self::normHeader($h);
         $map = [];
         foreach ($rows[0] as $i => $h) {
             $h = $norm($h);
@@ -217,8 +309,8 @@ class ProductController
                 if (!isset($map[$field]) && in_array($h, $aliases, true)) { $map[$field] = $i; break; }
             }
         }
-        if (!isset($map['itemCode']) || !isset($map['productName'])) {
-            sendError('The first row must have "Item Code" and "Product Name" columns — download the template to see the layout.', 400);
+        if (!isset($map['itemCode']) || (!isset($map['productName']) && !isset($map['specification']))) {
+            sendError('The header row must have an item / product code column and a "Product Name" or "Specification" column — download the template to see the layout.', 400);
         }
 
         $cats = [];
@@ -248,7 +340,12 @@ class ProductController
                 'categoryId' => $cat !== '' ? ($cats[strtolower($cat)] ?? null) : null,
                 'hsnCode' => $get('hsnCode'), 'drawingNumber' => $get('drawingNumber'),
                 'revisionNumber' => $get('revisionNumber'), 'productRef' => $get('productRef'), 'isActive' => $active,
+                'brand' => $get('brand'), 'productType' => $get('productType'), 'specification' => $get('specification'), 'grade' => $get('grade'),
             ];
+            // The Products page lists the description: show the catalogue details there when none is given.
+            if ($vals['description'] === '' && ($vals['specification'] !== '' || $vals['grade'] !== '')) {
+                $vals['description'] = implode(' · ', array_filter([$vals['specification'], $vals['grade'] !== '' ? 'Grade ' . $vals['grade'] : '', $vals['brand']]));
+            }
             try {
                 $find->execute([$code]);
                 $ex = $find->fetch();
@@ -265,13 +362,15 @@ class ProductController
                     }
                     $updated++;
                 } else {
-                    if ($pname === '') { $errors[] = "Row $line ($code): product name is needed for a new product."; $skipped++; continue; }
+                    // Catalogues often have no separate name: build one from specification / grade.
+                    if ($pname === '') $pname = trim(implode(' ', array_filter([$vals['specification'] ?: $code, $vals['grade'], $vals['productType']])));
                     db()->prepare(
-                        'INSERT INTO `Product` (id,itemCode,productName,description,unit,standardPrice,category,categoryId,hsnCode,drawingNumber,revisionNumber,productRef,isActive,createdAt,updatedAt)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                        'INSERT INTO `Product` (id,itemCode,productName,description,unit,standardPrice,category,categoryId,hsnCode,drawingNumber,revisionNumber,productRef,brand,productType,specification,grade,isActive,createdAt,updatedAt)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
                     )->execute([gen_id(), $code, $pname, $vals['description'] ?: null, $vals['unit'] ?: null, $vals['standardPrice'] ?? 0,
                         $cat ?: null, $vals['categoryId'], $vals['hsnCode'] ?: null, $vals['drawingNumber'] ?: null, $vals['revisionNumber'] ?: null,
-                        $vals['productRef'] ?: null, $active ?? 1, now_sql(), now_sql()]);
+                        $vals['productRef'] ?: null, $vals['brand'] ?: null, $vals['productType'] ?: null, $vals['specification'] ?: null, $vals['grade'] ?: null,
+                        $active ?? 1, now_sql(), now_sql()]);
                     $created++;
                 }
             } catch (PDOException $e) {

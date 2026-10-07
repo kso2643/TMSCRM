@@ -1760,7 +1760,7 @@ body.theme-apj { background: #0a1628; }
   color: var(--muted, #64748b);
 }
 </style>
-<script src="/fuel-expense-app.js?v=20261007a" defer></script><script src="/attendance-all-app.js?v=20261007a" defer></script><script src="/appointments-reminder-app.js?v=20261007a" defer></script><script src="/crm-global.js?v=20261007a" defer></script><link rel="stylesheet" href="/motion.css?v=20261007a"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261007a" defer></script><script src="/attendance-all-app.js?v=20261007a" defer></script><script src="/appointments-reminder-app.js?v=20261007a" defer></script><script src="/crm-global.js?v=20261007a" defer></script><script src="/product-suggest.js?v=20261007a" defer></script><link rel="stylesheet" href="/motion.css?v=20261007a"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 <script>
 const API_BASE = 'https://api.apjtech.in/api';
@@ -2548,7 +2548,7 @@ function quotationServerToLocal(q) {
 
             gid("sign-designation").value = (q.sign && q.sign.designation) || "";
 
-            items = q.items || [];
+            items = q.items || []; if (window.productSuggestUnlockAll) productSuggestUnlockAll('tms');
 
             /* keep the running item-id counter ahead of anything restored,
                so newly added items never collide with restored ones */
@@ -2704,8 +2704,9 @@ function calcTotalMOQ() {
         }
         // Price request → quotation items (see prLoadIntoQuotation)
         window.tms_setItemsFromPR = function (list, replace) {
-            if (replace) { items = []; itemId = 0; }
-            list.forEach(function (x) { items.push(Object.assign({ id: ++itemId, notes: "" }, x)); });
+            if (replace) { items = []; itemId = 0; if (window.productSuggestUnlockAll) productSuggestUnlockAll('tms'); }
+            list.forEach(function (x) { var it = Object.assign({ id: ++itemId, notes: "" }, x); items.push(it);
+                if (window.productSuggestLock && Number(it.unitPrice) > 0) productSuggestLock('tms', it.id, Number(it.unitPrice)); });
             renderItems();
             return { gid: gid };
         };
@@ -4102,8 +4103,9 @@ function apj_addItem(productCode, spec, moq, unitPrice, discount, delivery) {
 }
 // Price request → quotation items (see prLoadIntoQuotation)
 window.apj_setItemsFromPR = function (list, replace) {
-  if (replace) { items = []; itemId = 0; }
-  list.forEach(function (x) { items.push(Object.assign({ id: ++itemId, notes: '' }, x)); });
+  if (replace) { items = []; itemId = 0; if (window.productSuggestUnlockAll) productSuggestUnlockAll('apj'); }
+  list.forEach(function (x) { var it = Object.assign({ id: ++itemId, notes: '' }, x); items.push(it);
+    if (window.productSuggestLock && Number(it.unitPrice) > 0) productSuggestLock('apj', it.id, Number(it.unitPrice)); });
   renderItems();
 };
 window.apj_gid = gid;
@@ -4455,7 +4457,7 @@ function apj_loadRecordAsNew(q) {
   gid('sign-name').value = q.sign?.name || '';
   gid('sign-designation').value = q.sign?.designation || '';
 
-  items = (q.items || []).map(i => ({ ...i }));
+  items = (q.items || []).map(i => ({ ...i })); if (window.productSuggestUnlockAll) productSuggestUnlockAll('apj');
   itemId = items.reduce((m, i) => Math.max(m, i.id || 0), 0);
   renderItems();
   apj_showSection('create');
@@ -5220,7 +5222,7 @@ function apj_applyLoaded(q) {
   if (sg.company) set('sign-company', sg.company);
   if (sg.name) set('sign-name', sg.name);
   if (sg.designation) set('sign-designation', sg.designation);
-  itemId = 0;
+  itemId = 0; if (window.productSuggestUnlockAll) productSuggestUnlockAll('apj');
   items = (q.items || []).map(i => ({
     id: ++itemId, productCode: i.productCode || '', spec: i.spec || '', moq: String(i.moq || ''),
     unitPrice: String(i.unitPrice || ''), discount: String(i.discount || ''), delivery: i.delivery || '', notes: i.notes || '',

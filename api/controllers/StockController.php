@@ -501,13 +501,13 @@ class StockController
     private static function headerMap(array $rows): ?array
     {
         $alias=[
-            'itemCode'=>['itemcode','item code','code','part no','part number','partno','item no','sku'],
-            'itemName'=>['itemname','item name','name','description','product','product name','item description'],
-            'qty'=>['instock','in stock','qty','quantity','stock','available','available stock','closing stock','balance'],
+            'itemCode'=>['itemcode','item code','code','part no','part number','partno','item no','sku','product code','order code','ordering code','article no','article number','edp','edp no','edp number','catalogue no','catalog no','cat no','material code','material','item id'],
+            'itemName'=>['itemname','item name','name','description','product','product name','item description','material description','specification','designation'],
+            'qty'=>['instock','in stock','qty','quantity','stock','available','available stock','closing stock','balance','free stock','stock qty','qty available','available qty','on hand','qty on hand','soh','closing qty','closing balance','current stock','physical stock','stock in hand'],
             'itemType'=>['item type','type'], 'productMaster'=>['product master'], 'productFamily'=>['product family','family'],
             'productSubfamily'=>['product subfamily','subfamily','sub family'], 'itemGroup'=>['item group','group'],
-            'categoryCode'=>['category','category code'], 'netPrice'=>['netprice','net price','price','rate'],
-            'xceedLp'=>['xceed-lp','xceed lp','list price','lp','mrp'], 'edd'=>['edd'], 'rad'=>['rad'], 'brand'=>['brand','make'],
+            'categoryCode'=>['category','category code'], 'netPrice'=>['netprice','net price','price','rate','unit price','dealer price','net rate','nlp'],
+            'xceedLp'=>['xceed-lp','xceed lp','list price','lp','mrp'], 'edd'=>['edd'], 'rad'=>['rad'], 'brand'=>['brand','make','manufacturer','mfr'],
             'min'=>['minimum stock','min stock','minimum','min','reorder level'],
             'location'=>['location (optional)','location','place','where','city','state','warehouse','branch'],
         ];

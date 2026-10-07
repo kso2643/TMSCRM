@@ -135,6 +135,7 @@
     });
   }
 
+  function fmtQty(v) { v = Number(v) || 0; return (Math.round(v * 100) / 100).toLocaleString('en-IN'); }
   function el(tag, attrs, kids) {
     var n = document.createElement(tag);
     attrs = attrs || {};
@@ -973,15 +974,24 @@
               var results = (res.data && res.data.results) || [];
               prodResults.innerHTML = '';
               results.forEach(function (p) {
+                var stk = p.stock;
                 prodResults.appendChild(el('button', {
-                  class: 'block w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800',
-                  text: p.productName + ' (' + p.itemCode + ')',
+                  class: 'block w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 ox-sugg',
                   onclick: function () {
-                    state.items.push({ productId: p.id, itemCode: p.itemCode, productName: p.productName, unit: p.unit, category: null, brand: null, quantity: 1 });
+                    state.items.push({ productId: p.id, itemCode: p.itemCode, productName: p.productName, unit: p.unit, category: p.category || null, brand: p.brand || null, quantity: 1,
+                                       specification: p.specification || null, grade: p.grade || null, stock: stk || null });
                     prodInput.value = ''; prodResults.innerHTML = '';
                     render();
                   }
-                }));
+                }, [
+                  el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
+                    el('b', { text: p.itemCode }),
+                    p.brand ? el('span', { class: 'badge badge-blue', text: p.brand }) : null,
+                    p.grade ? el('span', { class: 'badge badge-gray', text: 'Grade ' + p.grade }) : null,
+                    stk ? el('span', { class: 'badge ' + (stk.total > 0 ? 'badge-green' : 'badge-red'), text: 'Stock ' + fmtQty(stk.total) + (stk.hand ? ' · hand ' + fmtQty(stk.hand) : '') }) : el('span', { class: 'badge badge-gray', text: 'not in stock list' })
+                  ]),
+                  el('div', { class: 'text-xs text-muted', text: [p.specification, p.productName].filter(Boolean).join(' · ') })
+                ]));
               });
             }).catch(function () {});
           }, 300);
