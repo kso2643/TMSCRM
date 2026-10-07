@@ -264,7 +264,7 @@
     return { el: box, days: sortedDays, setStart: function (d) { picked = {}; picked[toDateStr(d)] = true; view = new Date(d.getFullYear(), d.getMonth(), 1); render(); } };
   }
 
-  function openApptDialog(existing, prefillDate, onSaved) {
+  function openApptDialog(existing, prefillDate, onSaved, prefillCustomer) {
     if (dialogOpen) return;
     dialogOpen = true;
     var me = currentUser();
@@ -302,7 +302,7 @@
     function fail(msg) { errP.textContent = msg; errP.classList.remove('hidden'); }
 
     // Customer picker
-    var picker = customerPicker(existing ? existing.customer : null);
+    var picker = customerPicker(existing ? existing.customer : (prefillCustomer || null));
 
     // Engineer select — defaults to "myself" (self-assign) unless editing
     var engSelect = el('select', { class: selectCls() + ' w-full' });
@@ -439,7 +439,7 @@
     var qDate = params.get('date');
 
     var state = {
-      view: qDate ? 'day' : 'month',
+      view: qDate ? 'day' : (function () { try { return localStorage.getItem('crm_appt_view') === 'planner' ? 'planner' : 'month'; } catch (e) { return 'month'; } })(),
       refDate: qDate ? parseDateStr(qDate) : new Date(),
       mineOnly: false,
       appointments: []
@@ -466,14 +466,14 @@
     }
 
     function loadAndRenderBody() {
-      var range = state.view === 'month' ? monthRange(state.refDate) : { from: toDateStr(state.refDate), to: toDateStr(state.refDate) };
+      var range = state.view !== 'day' ? monthRange(state.refDate) : { from: toDateStr(state.refDate), to: toDateStr(state.refDate) };
       var qs = '?from=' + range.from + '&to=' + range.to + (state.mineOnly ? '&mine=1' : '');
       bodySlot.innerHTML = '';
       bodySlot.appendChild(el('p', { class: 'text-xs text-muted', text: 'Loading\u2026' }));
       api('GET', '/appointments' + qs).then(function (res) {
         state.appointments = (res.data && res.data.appointments) || [];
         bodySlot.innerHTML = '';
-        bodySlot.appendChild(state.view === 'month' ? renderMonthGrid() : renderDayList());
+        bodySlot.appendChild(state.view === 'month' ? renderMonthGrid() : state.view === 'planner' ? renderPlanner() : renderDayList());
       }).catch(function (e) {
         bodySlot.innerHTML = '';
         bodySlot.appendChild(el('p', { class: 'text-xs text-red-600 dark:text-red-400', text: e.message }));
@@ -482,7 +482,7 @@
 
     function goToday() { state.refDate = new Date(); loadAndRenderBody(); renderHeaderOnly(); }
     function step(delta) {
-      if (state.view === 'month') {
+      if (state.view !== 'day') {
         state.refDate = new Date(state.refDate.getFullYear(), state.refDate.getMonth() + delta, 1);
       } else {
         state.refDate = new Date(state.refDate.getFullYear(), state.refDate.getMonth(), state.refDate.getDate() + delta);
@@ -491,12 +491,13 @@
     }
     function switchView(v, day) {
       state.view = v;
+      try { if (v !== 'day') localStorage.setItem('crm_appt_view', v); } catch (e) {}
       if (day) state.refDate = day;
       render();
     }
 
     function buildHeader() {
-      var label = state.view === 'month'
+      var label = state.view !== 'day'
         ? MONTHS[state.refDate.getMonth()] + ' ' + state.refDate.getFullYear()
         : state.refDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -510,6 +511,11 @@
           class: 'px-3 py-1.5 text-xs font-medium rounded-md ' +
             (state.view === 'day' ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300'),
           text: 'Day', onclick: function () { switchView('day', state.refDate); }
+        }),
+        el('button', {
+          class: 'px-3 py-1.5 text-xs font-medium rounded-md ' +
+            (state.view === 'planner' ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300'),
+          text: 'Planner', 'data-view': 'planner', onclick: function () { switchView('planner'); }
         })
       ]);
 
@@ -625,6 +631,65 @@
       return el('div', { class: 'space-y-3' }, [legend, el('div', { class: 'ap-scroll' }, [grid])]);
     }
 
+    // Planner: every date of the month across, companies down; each cell shows
+    // who visits that company that day. Empty cell → assign a visit there.
+    var extraCompanies = {};
+    function renderPlanner() {
+      injectCalendarCss();
+      var y = state.refDate.getFullYear(), m = state.refDate.getMonth(), n = new Date(y, m + 1, 0).getDate();
+      var today = toDateStr(new Date());
+      var rows = {};
+      state.appointments.forEach(function (a) {
+        var c = a.customer || {}; if (!c.id) return;
+        var r = rows[c.id] = rows[c.id] || { customer: c, byDay: {}, count: 0 };
+        (r.byDay[a.appointmentDate] = r.byDay[a.appointmentDate] || []).push(a); r.count++;
+      });
+      Object.keys(extraCompanies).forEach(function (id) { if (!rows[id]) rows[id] = { customer: extraCompanies[id], byDay: {}, count: 0 }; });
+      var list = Object.keys(rows).map(function (k) { return rows[k]; }).sort(function (a, b) { return (a.customer.companyName || '').localeCompare(b.customer.companyName || ''); });
+      var days = []; for (var d = 1; d <= n; d++) days.push(new Date(y, m, d));
+      var perDay = {}; state.appointments.forEach(function (a) { perDay[a.appointmentDate] = (perDay[a.appointmentDate] || 0) + 1; });
+
+      var head = el('tr', {}, [el('th', { class: 'ap-pl-co', text: 'Company' })].concat(days.map(function (dt) {
+        var ds = toDateStr(dt), we = dt.getDay() === 0 || dt.getDay() === 6;
+        return el('th', { class: 'ap-pl-d' + (we ? ' we' : '') + (ds === today ? ' today' : ''), title: dt.toDateString() }, [
+          el('div', { text: String(dt.getDate()) }), el('small', { text: WEEKDAYS[dt.getDay()].charAt(0) })]);
+      })).concat([el('th', { class: 'ap-pl-t', text: 'Visits' })]));
+      var body = el('tbody', {}, list.map(function (r) {
+        return el('tr', { 'data-company': r.customer.id }, [el('th', { class: 'ap-pl-co', title: r.customer.companyName }, [r.customer.companyName || '—'])].concat(days.map(function (dt) {
+          var ds = toDateStr(dt), list2 = r.byDay[ds] || [], we = dt.getDay() === 0 || dt.getDay() === 6;
+          var cell = el('td', { class: 'ap-pl-c' + (we ? ' we' : '') + (ds === today ? ' today' : '') + (list2.length ? ' has' : ''), 'data-date': ds,
+            title: list2.length ? list2.map(function (a) { return (a.assignedTo ? a.assignedTo.name : '') + ' · ' + a.title + (a.appointmentTime ? ' · ' + fmtTime12(a.appointmentTime) : '') + ' · ' + a.status; }).join('\n') : 'Assign a visit to ' + r.customer.companyName + ' on ' + dt.toDateString(),
+            onclick: function () {
+              if (list2.length) openApptDialog(list2[0], null, loadAndRenderBody);
+              else openApptDialog(null, dt, loadAndRenderBody, r.customer);
+            } });
+          list2.forEach(function (a) {
+            var who = a.assignedTo || a.user || {};
+            cell.appendChild(el('span', { class: 'ap-pl-dot ap-st-' + (a.status || 'SCHEDULED'), style: '--c:' + colorFor(who.id), text: (who.name || '?').split(' ').map(function (w) { return w.charAt(0); }).join('').slice(0, 2).toUpperCase() }));
+          });
+          return cell;
+        })).concat([el('td', { class: 'ap-pl-t', text: String(r.count) })]));
+      }));
+      var foot = el('tr', { class: 'ap-pl-foot' }, [el('th', { class: 'ap-pl-co', text: 'Visits per day' })].concat(days.map(function (dt) {
+        var c = perDay[toDateStr(dt)] || 0; return el('td', { class: 'ap-pl-c' + (c ? '' : ' zero'), text: c ? String(c) : '' });
+      })).concat([el('td', { class: 'ap-pl-t', text: String(state.appointments.length) })]));
+
+      // add a company row (to plan visits for a company with none yet)
+      var addPicker = customerPicker(null);
+      var addBtn = el('button', { class: 'btn-secondary', text: '+ Add company row', onclick: function () {
+        var c = addPicker.getValue(); if (!c) return;
+        extraCompanies[c.id] = c; bodySlot.innerHTML = ''; bodySlot.appendChild(renderPlanner());
+      } });
+      var people = {}; state.appointments.forEach(function (a) { var w = a.assignedTo || a.user || {}; if (w.id) people[w.id] = w.name; });
+      return el('div', { class: 'space-y-3' }, [
+        el('div', { class: 'ap-legend' }, [el('span', { class: 'ap-sum', text: list.length + ' companies · ' + state.appointments.length + ' visits in ' + MONTHS[m] + ' — click an empty box to assign a visit' })]
+          .concat(Object.keys(people).map(function (id) { return el('span', { class: 'ap-leg' }, [el('i', { style: 'background:' + colorFor(id) }), people[id]]); }))),
+        el('div', { class: 'ap-pl-wrap' }, [el('table', { class: 'ap-pl', id: 'ap-planner' }, [el('thead', {}, [head]), body, el('tfoot', {}, [foot])])]),
+        list.length ? null : el('p', { class: 'text-sm text-muted', text: 'No visits this month yet — add a company row below, then click a date.' }),
+        el('div', { class: 'flex items-end gap-2 flex-wrap ap-pl-add' }, [el('div', { style: 'min-width:280px;flex:1;max-width:420px' }, [addPicker.el]), addBtn])
+      ]);
+    }
+
     function injectCalendarCss() {
       if (document.getElementById('ap-calendar-css')) return;
       var st = document.createElement('style');
@@ -667,6 +732,19 @@
         '.ap-md-list{margin:.5rem 0 0;font-size:.75rem;color:#475569}.dark .ap-md-list{color:#cbd5e1}',
         '.ap-md-note{font-size:.72rem;color:#64748b;margin:0}',
         '.ap-series{font-size:.6rem;font-weight:700;padding:0 .3rem;border-radius:.25rem;background:color-mix(in srgb,var(--c) 25%,#fff);white-space:nowrap}',
+        '.ap-pl-wrap{overflow:auto;max-height:70vh;border:1px solid #e2e8f0;border-radius:.75rem}.dark .ap-pl-wrap{border-color:#334155}',
+        '.ap-pl{border-collapse:separate;border-spacing:0;font-size:.74rem;min-width:100%}',
+        '.ap-pl th,.ap-pl td{border-right:1px solid #f1f5f9;border-bottom:1px solid #f1f5f9;padding:0;text-align:center}.dark .ap-pl th,.dark .ap-pl td{border-color:#1e293b}',
+        '.ap-pl thead th{position:sticky;top:0;z-index:2;background:#f8fafc;padding:.3rem 0;color:#475569;font-weight:700}.dark .ap-pl thead th{background:#0f172a;color:#cbd5e1}',
+        '.ap-pl thead small{display:block;font-weight:500;color:#94a3b8;font-size:.62rem}',
+        '.ap-pl .ap-pl-co{position:sticky;left:0;z-index:1;background:#fff;text-align:left;padding:.35rem .6rem;min-width:180px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:#0f172a}',
+        '.dark .ap-pl .ap-pl-co{background:#020617;color:#f1f5f9}.ap-pl thead .ap-pl-co{z-index:3;background:#f8fafc}.dark .ap-pl thead .ap-pl-co{background:#0f172a}',
+        '.ap-pl-d{min-width:34px}.ap-pl .we{background:#fafafa}.dark .ap-pl .we{background:#0b1222}.ap-pl .today{box-shadow:inset 0 -2px 0 #1e3a5f}',
+        '.ap-pl-c{height:34px;cursor:pointer;vertical-align:middle}.ap-pl-c:hover{background:#eff6ff}.dark .ap-pl-c:hover{background:#172554}',
+        '.ap-pl-dot{display:inline-flex;align-items:center;justify-content:center;width:24px;height:20px;margin:1px;border-radius:5px;font-size:.6rem;font-weight:700;color:#fff;background:var(--c)}',
+        '.ap-pl-dot.ap-st-COMPLETED{opacity:.55}.ap-pl-dot.ap-st-CANCELLED{opacity:.3;text-decoration:line-through}',
+        '.ap-pl-t{min-width:48px;font-weight:700;background:#f8fafc}.dark .ap-pl-t{background:#0f172a}',
+        '.ap-pl-foot td,.ap-pl-foot th{font-weight:700;color:#475569;cursor:default;background:#f8fafc}.ap-pl-foot .zero{color:#cbd5e1}',
         '.ap-legend{display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center;font-size:.78rem;color:#475569}',
         '.dark .ap-legend{color:#cbd5e1}',
         '.ap-sum{font-weight:600;color:#0f172a;margin-right:.4rem}.dark .ap-sum{color:#f1f5f9}',

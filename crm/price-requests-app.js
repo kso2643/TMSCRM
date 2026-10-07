@@ -600,6 +600,7 @@
     function historyBox(h) {
       var det = el('details', { class: 'pr-hist' }, [el('summary', { text: 'Negotiation history (' + h.length + ')' })]);
       h.forEach(function (x) {
+        if (x.type === 'CODE_FIX') { det.appendChild(el('div', { class: 'pr-meta' }, [el('b', { text: 'Code corrected ' + (x.from || '') + ' → ' + x.to }), ' — ' + (x.by || '') + ', ' + when(x.at)])); return; }
         var what = x.type === 'ANSWER' ? (x.status === 'REJECTED' ? 'Rejected' : 'Approved ' + money(x.price) + (x.discount != null ? ' · ' + x.discount + '%' : ''))
           : (x.type === 'REVISION' ? 'Asked revised ' : 'Asked ') + money(x.price) + (x.discount != null ? ' · ' + x.discount + '%' : '');
         det.appendChild(el('div', { class: 'pr-meta' }, [el('b', { text: what }), (x.leadTime ? ' · ' + x.leadTime : '') + ' — ' + (x.by || '') + ', ' + when(x.at) + (x.note ? ' · “' + x.note + '”' : '')]));
@@ -644,11 +645,30 @@
               drawActions();
             } }));
           });
-          ansCell.appendChild(el('div', { class: 'pr-ans' }, [seg, price, disc, lead, note]));
+          // wrong product code? correct it here (product list suggestions)
+          var code = el('input', { class: 'pr-in full', placeholder: 'Correct product code (only if wrong)', 'aria-label': 'Correct product code for ' + it.productName, value: d.correctedCode || '', list: 'pr-codes-' + it.id, autocomplete: 'off', 'data-fix-code': it.id });
+          var codesDl = el('datalist', { id: 'pr-codes-' + it.id });
+          var codeInfo = el('div', { class: 'pr-meta' });
+          var ct;
+          code.addEventListener('input', function () {
+            d.correctedCode = code.value.trim();
+            clearTimeout(ct);
+            if (code.value.trim().length < 2) { codeInfo.textContent = ''; return; }
+            ct = setTimeout(function () {
+              api('GET', '/products/search?limit=10&q=' + encodeURIComponent(code.value.trim())).then(function (j) {
+                var r = j.data.results || []; clear(codesDl);
+                r.forEach(function (p) { codesDl.appendChild(el('option', { value: p.itemCode, text: [p.specification || p.productName, p.grade].filter(Boolean).join(' · ') })); });
+                var hit = r.filter(function (p) { return p.itemCode.toUpperCase() === code.value.trim().toUpperCase(); })[0];
+                codeInfo.textContent = hit ? '✓ ' + [hit.productName, hit.grade ? 'Grade ' + hit.grade : '', hit.brand].filter(Boolean).join(' · ') : 'Not in the product list — it will be saved as typed.';
+              }).catch(function () {});
+            }, 250);
+          });
+          ansCell.appendChild(el('div', { class: 'pr-ans' }, [seg, price, disc, lead, code, codesDl, codeInfo, note]));
         } else ansCell.appendChild(badge('PENDING'));
         tb.appendChild(el('tr', {}, [
           el('td', { class: 'pr-meta', text: String(i + 1) }),
-          el('td', {}, [el('div', { style: 'font-weight:600', text: it.productName }), it.itemCode ? el('div', { class: 'pr-meta', text: it.itemCode }) : null, it.notes ? el('div', { class: 'pr-meta', text: '“' + it.notes + '”' }) : null,
+          el('td', {}, [el('div', { style: 'font-weight:600', text: it.productName }), it.itemCode ? el('div', { class: 'pr-meta', text: it.itemCode }) : null,
+            it.originalItemCode && it.originalItemCode !== it.itemCode ? el('div', { class: 'pr-meta', style: 'color:#b45309', text: 'was ' + it.originalItemCode + ' (corrected by admin)' }) : null, it.notes ? el('div', { class: 'pr-meta', text: '“' + it.notes + '”' }) : null,
             it.revisionCount ? el('span', { class: 'pr-badge', style: '--c:#7c3aed;margin-top:.25rem', text: 'Revised ×' + it.revisionCount }) : null,
             it.history && it.history.length ? historyBox(it.history) : null]),
           el('td', {}, [it.category || '—', el('div', { class: 'pr-meta', text: it.brand || '' })]),
@@ -694,7 +714,7 @@
         var save = el('button', { class: 'pr-btn grn', type: 'button', text: chosen ? 'Save ' + chosen + ' answer' + (chosen === 1 ? '' : 's') : 'Choose Approve or Reject', disabled: !chosen });
         save.addEventListener('click', function () {
           var items = Object.keys(drafts).filter(function (k) { return drafts[k].status; }).map(function (k) {
-            var d = drafts[k]; return { id: k, status: d.status, approvedPrice: d.approvedPrice, approvedDiscount: d.approvedDiscount, approvedLeadTime: d.approvedLeadTime, responseNote: d.responseNote };
+            var d = drafts[k]; return { id: k, status: d.status, approvedPrice: d.approvedPrice, approvedDiscount: d.approvedDiscount, approvedLeadTime: d.approvedLeadTime, responseNote: d.responseNote, correctedCode: d.correctedCode || '' };
           });
           save.disabled = true; save.textContent = 'Saving…';
           api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/respond', { items: items }).then(function (r) {

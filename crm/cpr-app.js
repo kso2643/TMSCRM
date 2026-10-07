@@ -376,7 +376,7 @@
           el('td', { class: 'cp-sub', text: String(o.slNo) }),
           el('td', {}, [el('div', { style: 'font-weight:600', text: o.customerName }), el('div', { class: 'cp-sub', text: [o.region, canSeeAll() ? o.seName : null].filter(Boolean).join(' · ') })]),
           el('td', {}, [el('div', { class: 'cp-clip', text: o.opportunity || o.component || '—' }), el('div', { class: 'cp-sub', text: [o.edp, o.component].filter(Boolean).join(' · ') })]),
-          el('td', {}, [o.productGroup || '—', o.focusGroup ? el('div', { class: 'cp-sub', text: o.focusGroup }) : null]),
+          el('td', {}, [o.productGroup || '—', o.focusGroup || o.focusBrand ? el('div', { class: 'cp-sub', text: [o.focusBrand, o.focusGroup].filter(Boolean).join(' · ') }) : null]),
           el('td', { text: o.cpr || '—' }),
           el('td', { class: 'num', text: lakh(o.annualPotential) }),
           el('td', { class: 'num', text: lakh(o.expectedSale) }),
@@ -441,9 +441,22 @@
         var c;
         if (opts.type === 'textarea') c = el('textarea', { class: 'cp-in', id: 'cp-f-' + key, placeholder: opts.ph || '' });
         else if (opts.list) {
+          // no duplicates (case-insensitive), keep the first spelling
+          var seen = {}, list = opts.list.filter(function (x) { var k = String(x).trim().toLowerCase(); if (!k || seen[k]) return false; seen[k] = 1; return true; });
           c = el('select', { class: 'cp-in', id: 'cp-f-' + key }, [el('option', { value: '', text: '— Select —' })]);
-          opts.list.forEach(function (x) { c.appendChild(el('option', { value: x, text: x })); });
-          if (o[key] && opts.list.indexOf(o[key]) === -1) c.appendChild(el('option', { value: o[key], text: o[key] + ' (from sheet)' }));
+          list.forEach(function (x) { if (!(opts.other && /^others?$/i.test(x))) c.appendChild(el('option', { value: x, text: x })); });
+          if (o[key] && !seen[String(o[key]).trim().toLowerCase()]) c.appendChild(el('option', { value: o[key], text: o[key] + (opts.other ? '' : ' (from sheet)') }));
+          if (opts.other) {
+            // "Other" → type the value; the typed text is what gets saved
+            c.appendChild(el('option', { value: '__other', text: 'Other — type it…' }));
+            var sel = c, txt = el('input', { class: 'cp-in', id: 'cp-f-' + key + '-other', placeholder: 'Type the ' + label.toLowerCase(), style: 'display:none;margin-top:.35rem' });
+            sel.addEventListener('change', function () { txt.style.display = sel.value === '__other' ? '' : 'none'; if (sel.value === '__other') txt.focus(); });
+            var box = el('div', {}, [sel, txt]);
+            var val0 = o[key] == null ? (opts.def != null ? opts.def : null) : o[key];
+            if (val0 != null) sel.value = val0;
+            fields[key] = { get value() { return sel.value === '__other' ? txt.value : sel.value; } };
+            return el('div', { class: 'cp-f' + (opts.full ? ' full' : '') }, [el('label', { for: 'cp-f-' + key }, [label]), box, opts.hint ? el('div', { class: 'hint', text: opts.hint }) : null]);
+          }
         } else c = el('input', { class: 'cp-in', id: 'cp-f-' + key, type: opts.type || 'text', placeholder: opts.ph || '', step: opts.type === 'number' ? 'any' : null, min: opts.type === 'number' ? '0' : null, inputmode: opts.type === 'number' ? 'decimal' : null });
         var val = o[key];
         if (val == null && opts.def != null) val = opts.def;
@@ -524,7 +537,8 @@
         inp('edp', 'EDP', { ph: 'Item / EDP number' }),
         inp('competition', 'Competition', { ph: 'e.g. Mitsubishi, Guhring' }),
         inp('productGroup', 'Product group', { list: META.productGroups }),
-        inp('focusGroup', 'Focus product group', { list: META.focusGroups }),
+        inp('focusBrand', 'Focus brand', { list: META.focusBrands || [], other: true }),
+        inp('focusGroup', 'Focus product', { list: META.focusGroups, other: true }),
         seg('cpr', 'C / P / R', META.cpr),
         inp('objective', 'Objective', { type: 'textarea', full: true, ph: 'What needs to happen, e.g. consistency trial planned' })
       ])]));

@@ -74,6 +74,7 @@ class PriceRequestController
                     'approvedLeadTime' => 'VARCHAR(60) NULL',
                     'revisionCount'    => 'INT NOT NULL DEFAULT 0',
                     'history'          => 'TEXT NULL',
+                    'originalItemCode' => 'VARCHAR(255) NULL',
                 ],
             ],
             'PriceRequestBatch' => [
@@ -144,6 +145,7 @@ $tail",
             'approvedLeadTime' => $r['approvedLeadTime'] ?? null,
             'revisionCount'  => (int) ($r['revisionCount'] ?? 0),
             'history'        => !empty($r['history']) ? (json_decode($r['history'], true) ?: []) : [],
+            'originalItemCode' => $r['originalItemCode'] ?? null,
         ];
     }
 
@@ -535,12 +537,26 @@ $tail",
             } elseif (!$note) { $errs[] = $item['productName'] . ': give a reason for rejecting'; continue; }
             $lt = trim((string) ($e['approvedLeadTime'] ?? '')) ?: ($status === 'APPROVED' ? ($item['leadTime'] ?? null) : null);
             if ($lt !== null && is_numeric($lt)) $lt .= ' days';
-            $ok[] = [$status, $price, $disc, $note, $id, $lt ? mb_substr($lt, 0, 60) : null];
+            // Admin corrects a wrong product code (and name, if the code is in the product list).
+            $fix = null;
+            $newCode = strtoupper(trim((string) ($e['correctedCode'] ?? '')));
+            if ($newCode !== '' && $newCode !== strtoupper((string) $item['itemCode'])) {
+                $ps = db()->prepare('SELECT id, productName FROM `Product` WHERE itemCode=? LIMIT 1'); $ps->execute([$newCode]);
+                $prod = $ps->fetch() ?: null;
+                $newName = trim((string) ($e['correctedName'] ?? '')) ?: ($prod['productName'] ?? $item['productName']);
+                $fix = ['code' => mb_substr($newCode, 0, 100), 'name' => mb_substr($newName, 0, 255), 'productId' => $prod['id'] ?? null, 'old' => $item['itemCode'] ?: $item['productName']];
+                $msg = 'Product code corrected: ' . ($item['itemCode'] ?: '(none)') . ' → ' . $newCode;
+                $note = $note ? $msg . ' — ' . $note : $msg;
+            }
+            $ok[] = [$status, $price, $disc, $note, $id, $lt ? mb_substr($lt, 0, 60) : null, $fix];
         }
         if ($errs) sendError(implode(' · ', array_slice($errs, 0, 8)), 400);
         $u = db()->prepare('UPDATE `PriceRequest` SET status=?,approvedPrice=?,approvedDiscount=?,approvedLeadTime=?,responseNote=?,respondedById=?,respondedAt=?,updatedAt=?,history=? WHERE id=?');
-        foreach ($ok as [$st, $pr, $di, $no, $id, $lt]) {
+        $fixU = db()->prepare('UPDATE `PriceRequest` SET originalItemCode=COALESCE(originalItemCode, itemCode, productName), itemCode=?, productName=?, productId=COALESCE(?, productId) WHERE id=?');
+        foreach ($ok as [$st, $pr, $di, $no, $id, $lt, $fix]) {
+            if ($fix) $fixU->execute([$fix['code'], $fix['name'], $fix['productId'], $id]);
             $h = $this->historyOf($id);
+            if ($fix) $h[] = ['type' => 'CODE_FIX', 'at' => now_sql(), 'by' => $auth['name'], 'from' => $fix['old'], 'to' => $fix['code'], 'note' => $no];
             $h[] = ['type' => 'ANSWER', 'at' => now_sql(), 'by' => $auth['name'], 'status' => $st, 'price' => $pr, 'discount' => $di, 'leadTime' => $lt, 'note' => $no];
             $u->execute([$st, $pr, $di, $lt, $no, $auth['id'], now_sql(), now_sql(), json_encode($h, JSON_UNESCAPED_UNICODE), $id]);
         }

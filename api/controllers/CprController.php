@@ -23,8 +23,8 @@ class CprController
     public const CHANNELS = ['Channel', 'Direct'];
     public const PRODUCT_GROUPS = ['Endmills_SC', 'Endmills_HSS', 'Drills_SC', 'Drills_HSS', 'Taps_Hand', 'Taps_Machine', 'Turning Inserts',
         'Milling_Indexable', 'Drilling_Indexable', 'Systems', 'Others'];
-    public const FOCUS_GROUPS = ['Hand Taps', 'K2 and K2 Pro', 'SC Gen carbide Drill', 'M2 Jobber', 'Taper Shank M2 Drills', 'Dream Drill', 'Ti-Phoon',
-        'X-Power & X-Power Pro', 'X5070', '4G', 'V7 Group', 'SSK', 'Turning & P&G', 'Milling & I-Xmill', 'Drilling+Spade Drill+i-One', 'Others'];
+    // Focus product: pick one, or "Other" and type it (any text is kept).
+    public const FOCUS_GROUPS = ['Hi feed', 'Ceramic', 'CBN', 'Tap', 'EndMill', 'Other'];
     public const CPR = ['C', 'P', 'R'];
     public const STATUSES = ['Trial underway', 'Trial planned', 'Order awaited', 'Order received', 'Trial failed', 'Parked'];
     public const RAG = ['Red', 'Yellow', 'Green'];
@@ -45,7 +45,8 @@ class CprController
         'opportunity'       => ['Opportunity', 30],
         'edp'               => ['EDP', 14],
         'productGroup'      => ['Product Group', 14],
-        'focusGroup'        => ["Focus product group\n(Select from the drop down list)", 14],
+        'focusBrand'        => ["Focus brand\n(Select from the drop down list)", 13],
+        'focusGroup'        => ["Focus product\n(Select from the drop down list)", 14],
         'cpr'               => ['C/P/R', 6],
         'annualPotential'   => ['Annual Potential of the Opportunity in Lacs', 12],
         'objective'         => ['Objective', 30],
@@ -96,6 +97,21 @@ class CprController
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
             ],
         ], 'migration_cpr.sql');
+        ensure_schema(['CprOpportunity' => ['create' => '', 'columns' => ['focusBrand' => 'VARCHAR(80) NULL']]], 'CPR focus brand');
+    }
+
+    /** Brands for the Focus brand dropdown: stock + products + already used, no duplicates (case-insensitive). */
+    private function focusBrands(): array
+    {
+        $all = [];
+        foreach (["SELECT DISTINCT brand FROM `Stock` WHERE brand IS NOT NULL AND brand<>''",
+                  "SELECT DISTINCT brand FROM `Product` WHERE brand IS NOT NULL AND brand<>''",
+                  "SELECT DISTINCT focusBrand FROM `CprOpportunity` WHERE focusBrand IS NOT NULL AND focusBrand<>''"] as $q) {
+            try { foreach (db()->query($q)->fetchAll(PDO::FETCH_COLUMN) as $b) { $k = strtolower(trim($b)); if ($k !== '' && !isset($all[$k])) $all[$k] = trim($b); } }
+            catch (Throwable $e) {}
+        }
+        natcasesort($all);
+        return array_values($all);
     }
 
     /* ───────────────────────── helpers ───────────────────────── */
@@ -184,7 +200,7 @@ class CprController
     private function fields(array $b, bool $partial): array
     {
         $out = [];
-        $text = ['region' => 120, 'seName' => 120, 'distributor' => 150, 'customerName' => 255, 'materialSubGroup' => 150,
+        $text = ['focusBrand' => 80, 'region' => 120, 'seName' => 120, 'distributor' => 150, 'customerName' => 255, 'materialSubGroup' => 150,
                  'component' => 200, 'opportunity' => 5000, 'edp' => 100, 'objective' => 5000, 'competition' => 200,
                  'personResponsible' => 120, 'latestRemark' => 5000];
         foreach ($text as $k => $max) if (array_key_exists($k, $b)) { $v = trim((string) $b[$k]); $out[$k] = $v === '' ? null : mb_substr($v, 0, $max); }
@@ -220,7 +236,7 @@ class CprController
     {
         $auth = authenticate();
         sendSuccess([
-            'channels' => self::CHANNELS, 'productGroups' => self::PRODUCT_GROUPS, 'focusGroups' => self::FOCUS_GROUPS,
+            'channels' => self::CHANNELS, 'productGroups' => self::PRODUCT_GROUPS, 'focusGroups' => self::FOCUS_GROUPS, 'focusBrands' => $this->focusBrands(),
             'cpr' => self::CPR, 'statuses' => self::STATUSES, 'rag' => self::RAG, 'materials' => self::MATERIALS,
             'users' => $this->salesUsers(), 'canSeeAll' => $this->isAdmin($auth),
             'thisSaturday' => self::weekSaturday(date('Y-m-d')),
@@ -650,7 +666,7 @@ class CprController
             'region' => ['region'], 'seName' => ['^se$', 'sales engineer'], 'channel' => ['channel'], 'distributor' => ['distributor'],
             'customerName' => ['^customer'], 'materialSubGroup' => ['material sub'], 'materialGroup' => ['^material group', '^material$'],
             'capturedDate' => ['captured', 'mapped date'], 'component' => ['component'], 'opportunity' => ['^opportunity$'], 'edp' => ['^edp'],
-            'focusGroup' => ['focus'], 'productGroup' => ['^product group'], 'cpr' => ['c/p/r', '^cpr'], 'annualPotential' => ['annual potential', 'potential'],
+            'focusBrand' => ['focus brand'], 'focusGroup' => ['focus product', 'focus group', '^focus$'], 'productGroup' => ['^product group'], 'cpr' => ['c/p/r', '^cpr'], 'annualPotential' => ['annual potential', 'potential'],
             'objective' => ['objective'], 'competition' => ['competit'], 'personResponsible' => ['responsible'], 'timeline' => ['time line', 'timeline'],
             'expectedSale' => ['expected'], 'orderValue' => ['order received', 'value till', 'order value'], 'rag' => ['red/', 'rag', 'colour', 'color'],
             'status' => ['^status'],
