@@ -144,6 +144,7 @@
     var h = location.hash.replace(/^#\/?/, '').split('/');
     if (h[0] === 'inward') S.tab = 'inward';
     else if (h[0] === 'compare') S.tab = 'compare';
+    else if (h[0] === 'po') { S.tab = 'po'; S.po = h[1] ? decodeURIComponent(h[1]) : null; S.poVendor = h[2] ? decodeURIComponent(h[2]) : null; }
     else { S.tab = 'vendors'; S.current = h[0] === 'v' && h[1] ? decodeURIComponent(h[1]) : S.current; }
     render();
   }
@@ -154,7 +155,29 @@
     clear(body);
     if (S.tab === 'inward') return renderInwards();
     if (S.tab === 'compare') return renderCompare();
+    if (S.tab === 'po') return renderPOs();
     renderVendors();
+  }
+
+  // ── purchase orders (vendor-po-app.js) ───────────────────────────────
+  // #/po → list · #/po/new[/vendorId] → new PO · #/po/<id> → edit
+  var poPrefill = null;
+  function renderPOs() {
+    if (!window.VendorPO) { body.appendChild(el('div', { class: 'vd-card' }, [el('div', { class: 'vd-empty', text: 'Purchase orders script not loaded (vendor-po-app.js).' })])); return; }
+    var card = el('div', { class: S.po ? '' : 'vd-card', id: 'vd-po' });
+    body.appendChild(card);
+    if (S.po) {
+      var pre = poPrefill; poPrefill = null;
+      if (S.po === 'new') window.VendorPO.openEditor(card, null, pre || (S.poVendor ? { vendorId: S.poVendor } : null), function () { go('#/po'); });
+      else window.VendorPO.openEditor(card, S.po, null, function () { go('#/po'); });
+      return;
+    }
+    window.VendorPO.renderList(card, { onOpen: openPO });
+  }
+  function openPO(id, prefill) {
+    if (id) return go('#/po/' + encodeURIComponent(id));
+    poPrefill = prefill && !prefill.vendorId ? prefill : (prefill && prefill.vendorName ? prefill : null);
+    go('#/po/new' + (prefill && prefill.vendorId && !prefill.vendorName ? '/' + encodeURIComponent(prefill.vendorId) : ''));
   }
 
   // ── vendors ──────────────────────────────────────────────────────────
@@ -211,8 +234,8 @@
       notes: el('textarea', { id: 'vd-f-notes', value: (v && v.notes) || '' })
     };
     var dlg = modal(v ? 'Edit vendor' : 'Add vendor', el('div', { class: 'vd-grid' }, [
-      field('Vendor name *', f.name), field('Brands they supply', f.brands, 'wide'), field('Contact person', f.contactPerson), field('Phone', f.phone),
-      field('Email', f.email), field('GSTIN', f.gstin), field('City', f.city), field('Address', f.address, 'wide'), field('Notes', f.notes, 'wide')
+      field('Vendor name *', f.name), field('Brands they supply (master)', f.brands, 'wide'), field('Contact person', f.contactPerson), field('Phone', f.phone),
+      field('Email', f.email), field('GSTIN', f.gstin), field('City', f.city), field('Address (printed on purchase orders)', f.address, 'wide'), field('Notes', f.notes, 'wide')
     ]), v ? 'Save' : 'Add vendor', function (btn) {
       var b = {}; Object.keys(f).forEach(function (k) { b[k] = f[k].value; });
       btn.disabled = true;
@@ -241,6 +264,7 @@
       var head = el('div', { class: 'vd-card', id: 'vd-head' }, [
         el('h2', {}, [el('span', { text: v.name }), el('span', {}, [
           el('button', { class: 'vd-btn sm', type: 'button', text: 'Edit', onclick: function () { vendorDialog(v); } }), ' ',
+          el('button', { class: 'vd-btn sm pri', type: 'button', id: 'vd-raise-po', text: '📄 Raise PO', onclick: function () { go('#/po/new/' + encodeURIComponent(v.id)); } }), ' ',
           el('button', { class: 'vd-btn sm grn', type: 'button', text: '+ Inward from this vendor', onclick: function () { inwardDialog(v.id); } }), ' ',
           el('button', { class: 'vd-btn sm red', type: 'button', id: 'vd-del', text: 'Delete', onclick: function () {
             if (!confirm('Delete vendor "' + v.name + '" with its ' + j.data.itemCount + ' products and ' + j.data.files.length + ' files? Inward history is kept.')) return;
@@ -248,6 +272,7 @@
           } })
         ])]),
         el('div', {}, (v.brandList || []).map(function (b) { return el('span', { class: 'vd-chip', text: b }); })),
+        v.address ? el('div', { class: 'vd-meta', style: 'white-space:pre-line;margin-bottom:0', text: '🏢 ' + v.address }) : el('div', { class: 'vd-meta', style: 'color:#b45309', text: '🏢 No address yet — Edit to add it (it goes on the purchase orders)' }),
         el('div', { class: 'vd-meta' }, [v.contactPerson && '👤 ' + v.contactPerson, v.phone && '📞 ' + v.phone, v.email && '✉ ' + v.email, v.gstin && 'GSTIN ' + v.gstin, v.city && '📍 ' + v.city,
           j.data.itemCount + ' products · total vendor stock ' + num(j.data.stockQty)].filter(Boolean).map(function (t) { return el('span', { text: t }); })),
         v.notes ? el('div', { class: 'sub', style: 'font-size:.8rem;color:#64748b', text: v.notes }) : null
@@ -255,6 +280,13 @@
       box.appendChild(head);
       box.appendChild(itemsCard(v));
       box.appendChild(filesCard(v, j.data.files));
+      if (window.VendorPO) {
+        var poc = el('div', { class: 'vd-card', id: 'vd-vendor-pos' }, [el('h2', {}, [el('span', { text: 'Purchase orders to ' + v.name }),
+          el('button', { class: 'vd-btn sm pri', type: 'button', text: '+ Raise PO', onclick: function () { go('#/po/new/' + encodeURIComponent(v.id)); } })])]);
+        var pol = el('div', {}); poc.appendChild(pol);
+        window.VendorPO.renderList(pol, { vendorId: v.id, compact: true, onOpen: openPO });
+        box.appendChild(poc);
+      }
       box.appendChild(vendorInwardsCard(v));
     }).catch(function (e) { clear(box).appendChild(el('div', { class: 'vd-card' }, [el('div', { class: 'vd-empty', text: e.message })])); });
   }
@@ -626,7 +658,7 @@
     root = el('div', { class: 'vd-wrap' });
     root.appendChild(el('div', { class: 'vd-head' }, [el('div', {}, [el('h1', { text: 'Vendors' }),
       el('p', { text: 'Vendor-wise price lists, stock lists and catalogues · stock inward from suppliers' })])]));
-    root.appendChild(el('div', { class: 'vd-tabs' }, [['vendors', 'Vendors', '#/'], ['inward', 'Stock inward', '#/inward'], ['compare', 'Compare prices', '#/compare']].map(function (t) {
+    root.appendChild(el('div', { class: 'vd-tabs' }, [['vendors', 'Vendors', '#/'], ['po', 'Purchase orders', '#/po'], ['inward', 'Stock inward', '#/inward'], ['compare', 'Compare prices', '#/compare']].map(function (t) {
       return el('button', { class: 'vd-tab', type: 'button', 'data-tab': t[0], text: t[1], onclick: function () { go(t[2]); } });
     })));
     body = el('div', {});

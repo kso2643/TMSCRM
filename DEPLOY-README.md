@@ -1,3 +1,31 @@
+# Update — 7 Oct (e): purchase orders to vendors (quotation format), company letterhead, vendor master address
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `crm/vendor-po-app.js` and `api/controllers/PurchaseOrderController.php`.
+- **Database:** the new tables (`PurchaseOrder`, `PurchaseOrderItem`, `CompanyProfile`) are created automatically.
+
+- **Vendors → Purchase orders** (new tab), and **📄 Raise PO** on each vendor:
+  - **Layout:** the same as the quotations — TMS or APJ letterhead with its logo, "PURCHASE ORDER", a TO (vendor) box and a PO info box (PO no., date, vendor quote ref. and date, required by, kind attn).
+  - **Body:** subject bar, then items with item code, description, brand, qty, unit, rate, discount, net and amount, then total qty, sub total, GST % and grand total.
+  - **Footer:** terms (payment, delivery, freight, taxes, deliver-to, note) and the signatory.
+  - **Vendor master:** choosing the vendor fills the address, GSTIN, phone, e-mail and contact person, and suggests their brands.
+  - **Item codes:** suggested from that vendor's price list (with their price and discount) and the product list.
+  - **PO numbers:** automatic per company, TMS/PO/2026/0001 and APJ/PO/2026/0001.
+  - **Editing:** saved POs can be edited and deleted, and filtered by company, status (Draft / Sent / Received / Cancelled) or search.
+- **PDF:**
+  - **Save & download PDF** gives the PO in the quotation style.
+  - The PDF carries the PO inside it. **⤒ Upload PO PDF to edit** opens a downloaded PO again for editing; if it was deleted, saving brings it back.
+- **Company letterhead (TMS and APJ):**
+  - Name, address, phone, e-mail and GST are shown locked on the PO.
+  - Press **✎ Edit APJ details** (or TMS) to enter them. Once saved they stay the same on every PO until someone edits them again (Manager / Admin / Super Admin only).
+- **Vendor master:** the vendor's address is shown in the vendor header and printed on the POs, and "Brands they supply" is the vendor's brand master. A vendor without an address shows a reminder to add one.
+
+**Verification:**
+- API 22/22: numbering, totals, edit, company change, PDF, upload back, delete, letterhead lock, engineer blocked.
+- Browser 17/17. Vendors 21/21.
+
+---
+
 # Update — 7 Oct (d): meetings for today only, trial report no. automatic
 
 **Upload:** `api/` and `crm/` (including `crm/trial-sheet/index.html`), then press **Ctrl+Shift+R** once.

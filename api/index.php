@@ -82,6 +82,7 @@ require __DIR__ . '/controllers/AlertFeedController.php';
 require __DIR__ . '/controllers/ChatController.php';
 require __DIR__ . '/controllers/VendorController.php';
 require __DIR__ . '/controllers/RegularItemController.php';
+require __DIR__ . '/controllers/PurchaseOrderController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -461,6 +462,28 @@ try {
     }
 
     // ── Chat (admin ↔ users) ────────────────────────────────────────
+    elseif ($c0 === 'purchase-orders') {
+        $ctrl = new PurchaseOrderController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                  => $ctrl->index(),
+            $method === 'GET'    && $c1 === 'next-no'           => $ctrl->nextNo(),
+            $method === 'POST'   && $c1 === 'read-pdf'          => $ctrl->readPdf(),
+            $method === 'POST'   && $c1 === ''                  => $ctrl->create(),
+            $method === 'GET'    && $c1 !== '' && $c2 === 'pdf' => $ctrl->pdf($c1),
+            $method === 'GET'    && $c1 !== '' && $c2 === ''    => $ctrl->show($c1),
+            $method === 'PUT'    && $c1 !== '' && $c2 === ''    => $ctrl->update($c1),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''    => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'company-profiles') {
+        $ctrl = new PurchaseOrderController();
+        match (true) {
+            $method === 'GET' && $c1 === ''  => $ctrl->profiles(),
+            $method === 'PUT' && $c1 !== ''  => $ctrl->saveProfile($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
     elseif ($c0 === 'regular-items') {
         $ctrl = new RegularItemController();
         match (true) {

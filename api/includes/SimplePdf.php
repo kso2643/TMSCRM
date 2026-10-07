@@ -379,6 +379,17 @@ class SimplePdf
         );
     }
 
+    /** Data stored inside the PDF (read back with SimplePdf::readEmbedded()). */
+    public ?string $embeddedData = null;
+
+    /** The data stored by $embeddedData, from raw PDF bytes; null when there is none. */
+    public static function readEmbedded(string $bytes): ?string
+    {
+        if (!preg_match('#/Type /TMSCRMData /Length \d+ >>\s*stream\s*([A-Za-z0-9+/=]+)\s*endstream#', $bytes, $m)) return null;
+        $d = base64_decode($m[1], true);
+        return $d === false ? null : $d;
+    }
+
     /** Assembles the final PDF byte string from the accumulated pages. */
     public function output(): string
     {
@@ -408,6 +419,13 @@ class SimplePdf
             $imgObjNum = $nextObjNum++;
             $objects[$imgObjNum] = $this->buildImageObject($img['w'], $img['h'], 'DeviceRGB', $img['rgb'], $smaskObjNum);
             $imageObjNums[$idx] = $imgObjNum;
+        }
+
+        // Optional data payload (e.g. the purchase order JSON) so an uploaded PDF can be
+        // opened again for editing. An unreferenced object — viewers ignore it.
+        if ($this->embeddedData !== null) {
+            $payload = base64_encode($this->embeddedData);
+            $objects[$nextObjNum++] = "<< /Type /TMSCRMData /Length " . strlen($payload) . " >>\nstream\n" . $payload . "\nendstream";
         }
 
         $pageObjNums = [];
