@@ -213,7 +213,6 @@
       var v = vendorById(vid); if (!v) return;
       F.vendorId = v.id; F.vendorName = v.name; F.vendorAddress = [v.address, v.city && (v.address || '').indexOf(v.city) === -1 ? v.city : ''].filter(Boolean).join('\n');
       F.vendorGstin = v.gstin || ''; F.vendorPhone = v.phone || ''; F.vendorEmail = v.email || ''; F.kindAttn = v.contactPerson || '';
-      if (!F.brand && v.brandList && v.brandList.length === 1) F.brand = v.brandList[0];
     }
 
     function field(label, key, opts) {
@@ -275,18 +274,16 @@
       var vSel = el('select', { 'data-po': 'vendorId', id: 'po-vendor' }, [el('option', { value: '', text: '— choose the vendor —' })].concat(vendors.map(function (v) { return el('option', { value: v.id, text: v.name, selected: v.id === F.vendorId }); })));
       vSel.addEventListener('change', function () { fillVendor(vSel.value); render(); });
       var v = vendorById(F.vendorId);
-      var brandList = el('datalist', { id: 'po-brands' }, ((v && v.brandList) || []).map(function (b) { return el('option', { value: b }); }));
       sheet.appendChild(el('div', { class: 'po-two' }, [
         el('div', { class: 'po-box' }, [el('h4', { text: 'TO (VENDOR)' }), el('div', { class: 'po-g' }, [
           el('div', { class: 'po-f w' }, [el('label', { text: 'Vendor (from the vendor master)' }), vSel]),
           field('Address', 'vendorAddress', { type: 'textarea', w: true, ph: 'Filled from the vendor master — edit if needed' }),
-          field('GSTIN', 'vendorGstin'), field('Phone', 'vendorPhone'), field('E-mail', 'vendorEmail'), field('Kind attn', 'kindAttn'),
-          field('Brand', 'brand', { list: 'po-brands', ph: (v && v.brandList || []).join(', ') }), brandList
+          field('GSTIN', 'vendorGstin'), field('Phone', 'vendorPhone'), field('E-mail', 'vendorEmail'), field('Kind attn', 'kindAttn')
         ])]),
         el('div', { class: 'po-box' }, [el('h4', { text: 'PURCHASE ORDER INFO' }), el('div', { class: 'po-g' }, [
           field('PO no. (automatic)', 'poNumber', { readonly: true }), field('PO date', 'poDate', { type: 'date' }),
           field('Your quote ref.', 'quoteRef', { ph: 'Vendor quotation no.' }), field('Quote date', 'quoteDate', { type: 'date' }),
-          field('Required by', 'requiredBy', { type: 'date' }),
+          field('Expected delivery', 'requiredBy', { type: 'date' }),
           el('div', { class: 'po-f' }, [el('label', { text: 'Status' }), (function () {
             var s = el('select', { 'data-po': 'status' }, Object.keys(STATUS).map(function (k) { return el('option', { value: k, text: STATUS[k][0], selected: F.status === k }); }));
             s.onchange = function () { F.status = s.value; }; return s; })()])
@@ -326,7 +323,7 @@
         var code = inp('itemCode', 'c');
         suggest(code, it, function () { render(); });
         return el('tr', { 'data-line': idx }, [
-          el('td', { class: 'n', text: String(idx + 1) }), el('td', {}, [code]), el('td', {}, [inp('description', 'd')]), el('td', {}, [inp('brand', 'm')]),
+          el('td', { class: 'n', text: String(idx + 1) }), el('td', {}, [code]), el('td', {}, [inp('description', 'd')]),
           el('td', {}, [inp('quantity', 's', 'number')]), el('td', {}, [inp('unit', 's')]), el('td', {}, [inp('unitPrice', 'm', 'number')]), el('td', {}, [inp('discount', 's', 'number')]),
           netTd, amtTd, el('td', {}, [inp('delivery', 'm')]),
           el('td', {}, [el('button', { class: 'vd-btn sm red', type: 'button', title: 'Remove line', text: '✕', onclick: function () { F.items.splice(idx, 1); if (!F.items.length) F.items.push({ unit: 'Nos' }); render(); } })])
@@ -334,7 +331,7 @@
       }
       F.items.forEach(function (it, i) { tb.appendChild(line(it, i)); });
       sheet.appendChild(el('div', { class: 'po-tw' }, [el('table', { class: 'po-t' }, [el('thead', {}, [el('tr', {},
-        ['#', 'Item code', 'Description', 'Brand', 'Qty', 'Unit', 'Rate ₹', 'Disc %', 'Net ₹', 'Amount ₹', 'Delivery', ''].map(function (h) { return el('th', { text: h }); }))]), tb])]));
+        ['#', 'Item code', 'Description', 'Qty', 'Unit', 'Rate ₹', 'Disc %', 'Net ₹', 'Amount ₹', 'Expected delivery', ''].map(function (h) { return el('th', { text: h }); }))]), tb])]));
       sheet.appendChild(el('div', { style: 'margin-top:.4rem' }, [el('button', { class: 'vd-btn sm', type: 'button', id: 'po-add-line', text: '+ Add line', onclick: function () { F.items.push({ unit: 'Nos' }); render(); var r = wrap.querySelectorAll('#po-lines tr'); if (r.length) r[r.length - 1].querySelector('input').focus(); } })]));
       sheet.appendChild(totBox); totals();
       // terms + sign
@@ -397,7 +394,7 @@
             list.slice(0, 12).forEach(function (x) {
               box.appendChild(el('button', { type: 'button', onmousedown: function (e) {
                 e.preventDefault();
-                it.itemCode = x.code; if (!it.description) it.description = x.desc; if (!it.brand && x.brand) it.brand = x.brand;
+                it.itemCode = x.code; if (!it.description) it.description = x.desc;
                 if (x.price != null && (it.unitPrice === '' || it.unitPrice == null)) it.unitPrice = x.price;
                 if (x.disc != null && (it.discount === '' || it.discount == null)) it.discount = x.disc;
                 close(); after();

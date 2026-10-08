@@ -1,3 +1,16 @@
+# Update — 8 Oct (a): closing odometer at punch-out → fuel expense; PO "Expected delivery" instead of brand
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.
+
+- **Attendance:**
+  - After **Punch in**, the opening odometer box opens; after **Punch out**, the closing odometer box opens (reading, personal km, misc).
+  - It shows the official km, fuel cost and total claim live. **Save & finish** writes it to **Fuel expense**.
+  - The Today card shows the odometer status. If someone pressed *Later*, it has an **Enter closing reading** button.
+- **Vendor purchase orders:**
+  - The brand field is removed from the form and the PDF.
+  - **Expected delivery** (date) is now in the PO info box and appears on the PDF as "Expected Delivery".
+  - The line column is now "Exp. Delivery".
+
 # Update — 7 Oct (e): purchase orders to vendors (quotation format), company letterhead, vendor master address
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

@@ -360,8 +360,8 @@ class PurchaseOrderPdf
         $toW = $this->cw * 0.56; $mW = $this->cw * 0.40; $mX = self::ML + $this->cw - $mW; $top = $this->y;
         $toLines = [];
         foreach ($this->wrap((string) ($p['vendorAddress'] ?? ''), $toW - 6) as $w) $toLines[] = $w;
-        $extra = array_filter([$p['vendorGstin'] ? 'GSTIN: ' . $p['vendorGstin'] : '', trim(($p['vendorPhone'] ? 'Ph: ' . $p['vendorPhone'] : '') . ($p['vendorEmail'] ? '  ' . $p['vendorEmail'] : '')), $p['brand'] ? 'Brand: ' . $p['brand'] : '']);
-        $meta = [['PO No.', $p['poNumber']], ['PO Date', $this->d($p['poDate'])], ['Your Quote Ref.', $p['quoteRef'] ?: '—'], ['Quote Date', $this->d($p['quoteDate'])], ['Required By', $this->d($p['requiredBy'])], ['Kind Attn', $p['kindAttn'] ?: '—']];
+        $extra = array_filter([$p['vendorGstin'] ? 'GSTIN: ' . $p['vendorGstin'] : '', trim(($p['vendorPhone'] ? 'Ph: ' . $p['vendorPhone'] : '') . ($p['vendorEmail'] ? '  ' . $p['vendorEmail'] : ''))]);
+        $meta = [['PO No.', $p['poNumber']], ['PO Date', $this->d($p['poDate'])], ['Your Quote Ref.', $p['quoteRef'] ?: '—'], ['Quote Date', $this->d($p['quoteDate'])], ['Expected Delivery', $this->d($p['requiredBy'])], ['Kind Attn', $p['kindAttn'] ?: '—']];
         $boxH = max(36, 15 + 4 * (count($toLines) + count($extra)) + 2, 10 + 4.5 * count($meta) + 2);
         $this->box(self::ML, $top, $toW, $boxH, self::BOX);
         $this->font('Helvetica-Bold', 6.5, self::BLUE); $this->t('TO (VENDOR)', self::ML + 3, $top + 3);
@@ -390,7 +390,7 @@ class PurchaseOrderPdf
         $this->y += 6;
         // ── table ──
         $col = [8, 27, 52, 13, 19, 12, 19, 22, 18]; // 190
-        $hd = ['S.No', 'Item Code', 'Description', 'Qty', 'Rate', 'Disc%', 'Net Rate', 'Amount', 'Delivery'];
+        $hd = ['S.No', 'Item Code', 'Description', 'Qty', 'Rate', 'Disc%', 'Net Rate', 'Amount', 'Exp. Delivery'];
         $x = [self::ML]; for ($i = 1; $i < count($col); $i++) $x[] = $x[$i - 1] + $col[$i - 1];
         $head = function () use ($col, $hd, $x) {
             $this->pdf->rect($this->mm(self::ML), $this->mm($this->y), $this->mm($this->cw), $this->mm(7.5), self::BLUE);
@@ -400,7 +400,7 @@ class PurchaseOrderPdf
         };
         $head();
         foreach ($p['items'] as $n => $it) {
-            $desc = trim(($it['description'] ?? '') . ($it['brand'] ? ' (' . $it['brand'] . ')' : ''));
+            $desc = trim((string) ($it['description'] ?? ''));
             $this->font('Helvetica', 7.5, self::DARK);
             $dl = $this->wrap($desc ?: '—', $col[2] - 4);
             $this->font('Helvetica-Bold', 7.5, self::DARK);

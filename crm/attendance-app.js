@@ -236,6 +236,7 @@
     }).then(function (j) {
       toast(j.message || 'Punched in'); state.photo = null;
       try { localStorage.setItem('crm_punched_in', new Date().toDateString()); } catch (e) {}
+      meter('open');
       return load();
     }).catch(function (e) { locFail(e, 'in'); })
       .then(function () { state.busy = false; render(); });
@@ -244,9 +245,42 @@
     if (!confirm('Punch out now?')) return;
     var b = document.getElementById('at-out'); if (b) { b.disabled = true; b.textContent = 'Punching out…'; }
     getLocation().then(function (c) { return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy }); })
-      .then(function (j) { toast(j.message || 'Punched out'); return load(); })
+      .then(function (j) { toast(j.message || 'Punched out'); meter('close'); return load(); })
       .catch(function (e) { locFail(e, 'out'); render(); });
   }
+  // Odometer: starting reading after punch in, closing reading after punch out
+  // (the Fuel expense page works out the km and the claim from these).
+  function meter(mode) {
+    if (window.FuelExpense && window.FuelExpense.openMeterDialog) setTimeout(function () { window.FuelExpense.openMeterDialog(mode, function () { loadFuel(); }); }, 350);
+  }
+  var fuelBox = null;
+  function loadFuel() {
+    if (!fuelBox) return;
+    api('GET', '/fuel-expense/today').then(function (j) {
+      var d = j.data || {}, r = d.record;
+      clear(fuelBox);
+      if (!d.checkedIn) return;
+      var km = function (v) { return Number(v).toLocaleString('en-IN', { maximumFractionDigits: 1 }); };
+      var line = el('div', { class: 'at-msg info', id: 'at-odo' });
+      if (d.needsOpening) {
+        line.className = 'at-msg warn';
+        line.appendChild(el('span', { text: '🚗 Starting odometer reading not entered. ' }));
+        line.appendChild(el('button', { class: 'at-btn sm', type: 'button', id: 'at-odo-open', text: 'Enter starting reading', onclick: function () { meter('open'); } }));
+      } else if (d.needsClosing) {
+        line.className = 'at-msg warn';
+        line.appendChild(el('span', { text: '🚗 Started at ' + km(r.openingMeter) + ' km — enter the closing (finishing) odometer reading. ' }));
+        line.appendChild(el('button', { class: 'at-btn sm pri', type: 'button', id: 'at-odo-close', text: 'Enter closing reading', onclick: function () { meter('close'); } }));
+      } else if (r && r.status === 'CLOSED') {
+        line.className = 'at-msg ok';
+        line.textContent = '🚗 Odometer ' + km(r.openingMeter) + ' → ' + km(r.closingMeter) + ' km · official ' + km(r.officialKm) + ' km' +
+          (Number(r.totalAmount) ? ' · fuel claim ₹' + Number(r.totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '') + ' (in Fuel expense)';
+      } else if (r) {
+        line.textContent = '🚗 Starting odometer ' + km(r.openingMeter) + ' km — you will enter the closing reading when you punch out.';
+      } else return;
+      fuelBox.appendChild(line);
+    }).catch(function () {});
+  }
+
   // Location problems open the same "Turn on location" help as the rest of the CRM.
   function locFail(e, dir) {
     if (e && e.geo && window.CRMTracking && window.CRMTracking.help) window.CRMTracking.help(dir, e.geo);
@@ -338,7 +372,7 @@
       state.record = j.data.record; state.win = j.data.window;
       if (state.record) { try { localStorage.setItem('crm_punched_in', new Date().toDateString()); } catch (e) {} }
       if (!state.stream) render();
-      loadHistory();
+      loadHistory(); loadFuel();
     }).catch(function (e) { clear(punchBox).appendChild(el('div', { class: 'at-msg bad', text: e.message })); });
   }
 
@@ -349,6 +383,7 @@
       el('p', { text: 'Punch in with a photo and your location. On time until 9:30 AM, grace until 9:45 AM; after that send a request for approval.' })]));
     var pc = el('div', { class: 'at-card' }, [el('h2', { text: 'Today' })]);
     punchBox = el('div', { id: 'at-punch' }); pc.appendChild(punchBox);
+    fuelBox = el('div', { id: 'at-fuel' }); pc.appendChild(fuelBox);
     root.appendChild(pc);
     reqBox = el('div', { class: 'at-card at-f', id: 'at-request', style: 'display:none' });
     root.appendChild(reqBox);

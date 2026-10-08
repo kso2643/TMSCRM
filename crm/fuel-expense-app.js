@@ -123,10 +123,13 @@
     dialogOpen = true;
 
     var overlay = el('div', {
-      class: 'fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4'
+      class: 'fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4',
+      // inline too: the hand-coded pages don't ship every utility class the React build had
+      style: 'position:fixed;inset:0;z-index:2147483300;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.55);padding:16px'
     });
     var card = el('div', {
       class: 'card w-full sm:max-w-md p-5 rounded-b-none sm:rounded-xl max-h-[92vh] overflow-y-auto',
+      style: 'width:100%;max-width:28rem;max-height:92vh;overflow-y:auto;padding:1.25rem;border-radius:.9rem',
       role: 'dialog', 'aria-modal': 'true'
     });
     overlay.appendChild(card);
