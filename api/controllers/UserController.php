@@ -1,7 +1,7 @@
 <?php
 class UserController
 {
-    private const ROLES = ['SUPER_ADMIN','ADMIN','MANAGER','SALES_ENGINEER','SALES'];
+    private const ROLES = ['SUPER_ADMIN','ADMIN','MANAGER','SALES_ENGINEER','SALES','ACCOUNTS'];
 
     private const SAFE_COLS = 'id,name,email,role,phone,department,avatar,isActive,isLocked,
         twoFactorEnabled,lastLoginAt,sessionTimeout,

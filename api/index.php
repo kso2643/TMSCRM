@@ -83,6 +83,8 @@ require __DIR__ . '/controllers/ChatController.php';
 require __DIR__ . '/controllers/VendorController.php';
 require __DIR__ . '/controllers/RegularItemController.php';
 require __DIR__ . '/controllers/PurchaseOrderController.php';
+require __DIR__ . '/controllers/MdDeskController.php';
+require __DIR__ . '/controllers/AccountsController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -473,6 +475,39 @@ try {
             $method === 'GET'    && $c1 !== '' && $c2 === ''    => $ctrl->show($c1),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''    => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''    => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'md-desk') {
+        $ctrl = new MdDeskController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                    => $ctrl->index(),
+            $method === 'GET'    && $c1 === 'recipients'          => $ctrl->recipients(),
+            $method === 'GET'    && $c1 === 'quotations'          => $ctrl->quotations(),
+            $method === 'POST'   && $c1 === ''                    => $ctrl->create(),
+            $method === 'GET'    && $c1 !== '' && $c2 === ''      => $ctrl->show($c1),
+            $method === 'POST'   && $c1 !== '' && $c2 === 'reply' => $ctrl->reply($c1),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === ''      => $ctrl->update($c1),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''      => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'accounts') {
+        $ctrl = new AccountsController();
+        match (true) {
+            $method === 'GET'    && $c1 === 'summary'                               => $ctrl->summary(),
+            $method === 'GET'    && $c1 === 'entries' && $c2 === ''                 => $ctrl->index(),
+            $method === 'POST'   && $c1 === 'entries' && $c2 === ''                 => $ctrl->create(),
+            $method === 'PUT'    && $c1 === 'entries' && $c2 !== '' && $c3 === ''   => $ctrl->update($c2),
+            $method === 'DELETE' && $c1 === 'entries' && $c2 !== '' && $c3 === ''   => $ctrl->delete($c2),
+            $method === 'PATCH'  && $c1 === 'entries' && $c2 !== '' && $c3 === 'tally' => $ctrl->setTally($c2),
+            $method === 'POST'   && $c1 === 'entries' && $c2 !== '' && $c3 === 'file'  => $ctrl->uploadFile($c2),
+            $method === 'GET'    && $c1 === 'entries' && $c2 !== '' && $c3 === 'file'  => $ctrl->file($c2),
+            $method === 'GET'    && $c1 === 'tally'                                 => $ctrl->tally(),
+            $method === 'GET'    && $c1 === 'parties'                               => $ctrl->parties(),
+            $method === 'GET'    && $c1 === 'orders'                                => $ctrl->orders(),
+            $method === 'GET'    && $c1 === 'claims'                                => $ctrl->claims(),
+            $method === 'GET'    && $c1 === 'export'                                => $ctrl->export(),
             default => sendError('Route not found', 404),
         };
     }

@@ -21,6 +21,8 @@
  *   STATIONARY             someone stayed 30+ min in one place and said it wasn't a break,
  *                          or didn't answer the prompt (Super Admin)
  *   LOCATION_OFF           someone punched in has location turned off (Super Admin)
+ *   MD_DESK_NEW / _REPLY / _DONE  MD desk items between the Super Admin and Admins
+ *   INVOICE_OVERDUE / BILL_DUE     accounts reminders (accounts team + Super Admin)
  *
  * GET /api/alerts-feed/history?days=30 returns the same events over the
  * last N days (max 60) for the Alerts & reminders page.
@@ -188,6 +190,50 @@ class AlertFeedController
             $add('trial-decided-' . $r['id'] . '-' . $r['decidedAt'], 'TRIAL_DECIDED', $rej ? 'Trial request rejected' : 'Trial request approved',
                 $r['trialNo'] . ($rej && $r['approvalNote'] ? ' — ' . mb_substr($r['approvalNote'], 0, 80) : ($rej ? '' : ' — you can run the trial now')),
                 '/trials/#/t/' . rawurlencode($r['id']), $r['decidedAt']);
+        }
+
+        // MD desk (Super Admin ↔ Admins): new items to me, replies, done
+        if (in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true)) {
+            try { ensure_schema(MdDeskController::schema(), 'MD desk'); } catch (Throwable $e) {}
+            $kinds = ['MESSAGE' => 'Message', 'TASK' => 'Important task', 'PRICE' => 'Price given', 'QUOTATION' => 'New quotation given'];
+            foreach (self::rows(
+                "SELECT i.id, i.type, i.title, i.priority, i.dueDate, i.createdAt, f.name AS fromName FROM `MdDeskItem` i LEFT JOIN `User` f ON f.id=i.fromId
+                 WHERE i.createdAt>? AND i.fromId<>? AND (i.toId=? OR i.toId IS NULL) ORDER BY i.createdAt DESC LIMIT $per", [$since, $me, $me]) as $r) {
+                $add('md-new-' . $r['id'], 'MD_DESK_NEW', ($r['priority'] === 'URGENT' ? '🔴 URGENT · ' : ($r['priority'] === 'HIGH' ? 'High priority · ' : '')) . ($kinds[$r['type']] ?? 'Message') . ' from ' . ($r['fromName'] ?: 'MD'),
+                    $r['title'] . ($r['dueDate'] ? ' · due ' . date('j M', strtotime($r['dueDate'])) : ''), '/md-desk/#' . rawurlencode($r['id']), $r['createdAt']);
+            }
+            foreach (self::rows(
+                "SELECT r.id, r.body, r.createdAt, r.itemId, i.title, u.name AS byName FROM `MdDeskReply` r JOIN `MdDeskItem` i ON i.id=r.itemId LEFT JOIN `User` u ON u.id=r.userId
+                 WHERE r.createdAt>? AND r.userId<>? AND (i.fromId=? OR i.toId=? OR (i.toId IS NULL AND EXISTS (SELECT 1 FROM `MdDeskReply` x WHERE x.itemId=i.id AND x.userId=?)))
+                 ORDER BY r.createdAt DESC LIMIT $per", [$since, $me, $me, $me, $me]) as $r) {
+                $add('md-reply-' . $r['id'], 'MD_DESK_REPLY', 'Reply from ' . ($r['byName'] ?: 'someone') . ' · ' . mb_substr($r['title'], 0, 60), mb_substr($r['body'], 0, 140),
+                    '/md-desk/#' . rawurlencode($r['itemId']), $r['createdAt']);
+            }
+            foreach (self::rows(
+                "SELECT i.id, i.title, i.doneAt, d.name AS byName FROM `MdDeskItem` i LEFT JOIN `User` d ON d.id=i.doneById
+                 WHERE i.fromId=? AND i.status='DONE' AND i.doneAt>? AND i.doneById<>? ORDER BY i.doneAt DESC LIMIT $per", [$me, $since, $me]) as $r) {
+                $add('md-done-' . $r['id'] . '-' . $r['doneAt'], 'MD_DESK_DONE', 'Done: ' . mb_substr($r['title'], 0, 70), 'Marked done by ' . ($r['byName'] ?: '—'),
+                    '/md-desk/#' . rawurlencode($r['id']), $r['doneAt']);
+            }
+        }
+
+        // Accounts: invoices that went overdue, vendor bills falling due (accounts team + Super Admin)
+        if (in_array($auth['role'], ['SUPER_ADMIN', 'ACCOUNTS'], true)) {
+            $sinceDay = substr($since, 0, 10);
+            foreach (self::rows(
+                "SELECT e.id, e.kind, e.docNo, e.partyName, e.amount, e.dueDate,
+                        e.amount - COALESCE((SELECT SUM(p.amount) FROM `AccEntry` p WHERE p.linkId=e.id), 0) AS balance
+                 FROM `AccEntry` e WHERE e.kind IN ('INVOICE','BILL') AND e.dueDate IS NOT NULL
+                   AND ((e.kind='INVOICE' AND e.dueDate >= DATE_SUB(?, INTERVAL 1 DAY) AND e.dueDate < CURDATE())
+                     OR (e.kind='BILL' AND e.dueDate >= ? AND e.dueDate <= CURDATE()))
+                 ORDER BY e.dueDate LIMIT $per", [$sinceDay, $sinceDay]) as $r) {
+                if ((float) $r['balance'] <= 0) continue;
+                $inv = $r['kind'] === 'INVOICE';
+                $at = $inv ? date('Y-m-d', strtotime($r['dueDate'] . ' +1 day')) . ' 09:00:00' : $r['dueDate'] . ' 09:00:00';
+                if ($at <= $since || $at > now_sql()) continue;
+                $add('acc-due-' . $r['id'] . '-' . $r['dueDate'], $inv ? 'INVOICE_OVERDUE' : 'BILL_DUE', $inv ? 'Invoice overdue · ' . $r['docNo'] : 'Vendor bill due today · ' . $r['docNo'],
+                    ($r['partyName'] ?: '') . ' — balance ₹' . number_format((float) $r['balance'], 2), $inv ? '/accounts/#/invoices' : '/accounts/#/bills', $at);
+            }
         }
 
         // Chat messages to me

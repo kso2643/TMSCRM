@@ -1,3 +1,49 @@
+# Update — 9 Oct (b): MD desk (Super Admin ↔ Admins) and Accounts pages, new "Accounts" user role
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:**
+  - `api/controllers/MdDeskController.php`, `api/controllers/AccountsController.php`
+  - `crm/md-desk/`, `crm/md-desk-app.js`, `crm/accounts/`, `crm/accounts-app.js`
+  - new React sidebar file `layout-7612b4a732636738.js` and Users page file `page-55c7b43b32394684.js` (fresh names so browsers load the new menu; the old files stay too)
+- **Database:** new tables `MdDeskItem`, `MdDeskReply` and `AccEntry` are created automatically.
+- **Accounts staff:** in **Admin → Users**, create or edit the accounts staff and pick the new role **ACCOUNTS**.
+
+**MD desk** (Admin menu; Super Admin and Admins only)
+- Send a direct **Message**, an **Important task** (priority + due date), a **Price given** (customer, item code, product, price, discount) or a **New quotation given**.
+  - For quotations you can pick one from the Quotations page; it fills in the number, customer and value.
+- Send it to one Admin or to all Admins. Admins can also send items up to the MD.
+- **Inbox / Sent / All** tabs (All is Super Admin only), with filters by type, open/done and search.
+- Each item has a reply thread and **Mark done / Reopen**. Opening an item marks it "Seen".
+- Alerts with sound arrive for new items (🔴 urgent ones use the urgent sound), replies and items marked done.
+
+**Accounts** (Admin menu; Accounts role, Admins and Super Admin)
+- **Overview:**
+  - this month's invoiced and received;
+  - amount to receive, with how much is overdue and receivables by days overdue (1–30, 31–60, 61–90, 90+);
+  - amount to pay vendors;
+  - Tally pending count;
+  - customers with the most outstanding and vendor bills to pay;
+  - the last 6 months.
+- **Invoices:** invoice no., date, due date, customer and GSTIN, order no., customer PO, taxable value, GST % (total worked out).
+  - Shows paid, balance and status (Paid / Part paid / Unpaid / Overdue with days).
+  - **+ Receipt** records a payment against an invoice.
+- **Receipts:** money received, against an invoice or "on account"; mode (NEFT, UPI, cheque…) and UTR / cheque no.
+- **Vendor bills** and **Vendor payments:** the same, for purchases.
+- **Tally works:** every entry not yet entered in Tally, shown as its Tally voucher type (Sales, Receipt, Purchase, Payment, Journal…).
+  - Type the Tally voucher no. and press **Entered**, or tick several and mark them together.
+  - **Excel to enter in Tally** downloads the list.
+- **Vouchers:** journal, contra, credit / debit note, expense, salary.
+- **Staff claims:** each employee's fuel / travel claim for the month, from the Fuel expense page.
+- **Attachments and exports:**
+  - Attach the bill / invoice copy (PDF or photo) to any entry.
+  - Excel export on every tab, plus an Outstanding (receivables and payables) Excel.
+- **Alerts:** the Accounts team and the MD get alerts when an invoice becomes overdue and when a vendor bill is due today.
+- **Safety checks:**
+  - duplicate invoice / bill numbers are blocked;
+  - a receipt cannot be more than the invoice balance;
+  - an invoice with receipts against it cannot be deleted;
+  - Accounts users can delete only their own entries and not ones already entered in Tally (Admins can).
+
 # Update — 9 Oct (a): punch-out photo + location; all employees' punch locations for admin
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

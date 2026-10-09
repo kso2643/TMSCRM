@@ -12,6 +12,7 @@ define('ROLE_LEVELS', [
     'MANAGER'        => 3,
     'SALES_ENGINEER' => 2,
     'SALES'          => 1,
+    'ACCOUNTS'       => 1,   // accounts team: Accounts page + the everyday pages, no admin rights
 ]);
 
 /** Reads the Authorization header across Apache / PHP-FPM / built-in server. */
