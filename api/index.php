@@ -58,6 +58,7 @@ require __DIR__ . '/includes/JWT.php';
 require __DIR__ . '/includes/Auth.php';
 require __DIR__ . '/includes/ActivityLogger.php';
 require __DIR__ . '/includes/SchemaGuard.php';
+require __DIR__ . '/includes/ColumnGuess.php';
 require __DIR__ . '/includes/XlsxWriter.php';
 require __DIR__ . '/includes/XlsxReader.php';
 require __DIR__ . '/includes/StyledXlsxWriter.php';
@@ -85,6 +86,7 @@ require __DIR__ . '/controllers/RegularItemController.php';
 require __DIR__ . '/controllers/PurchaseOrderController.php';
 require __DIR__ . '/controllers/MdDeskController.php';
 require __DIR__ . '/controllers/AccountsController.php';
+require __DIR__ . '/controllers/SupplierQuoteController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -396,6 +398,10 @@ try {
         $ctrl = new PriceRequestController();
         match (true) {
             $method === 'GET'   && $c1 === 'by-no' && $c2 !== ''       => $ctrl->byNumber($c2),
+            $method === 'GET'   && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->index($c2),
+            $method === 'POST'  && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->ask($c2),
+            $method === 'PUT'   && $c1 === 'supplier' && $c2 !== ''      => (new SupplierQuoteController())->update($c2),
+            $method === 'DELETE'&& $c1 === 'supplier' && $c2 !== ''      => (new SupplierQuoteController())->delete($c2),
             $method === 'POST'  && $c1 === 'batch' && $c3 === 'remind' => $ctrl->remind($c2),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'revise'      => $ctrl->revise($c1),
             $method === 'GET'   && $c1 === 'batches'                   => $ctrl->batches(),
@@ -484,6 +490,8 @@ try {
             $method === 'GET'    && $c1 === ''                    => $ctrl->index(),
             $method === 'GET'    && $c1 === 'recipients'          => $ctrl->recipients(),
             $method === 'GET'    && $c1 === 'quotations'          => $ctrl->quotations(),
+            $method === 'GET'    && $c1 === 'unread'              => $ctrl->unread(),
+            $method === 'POST'   && $c1 !== '' && $c2 === 'ack'   => $ctrl->ack($c1),
             $method === 'POST'   && $c1 === ''                    => $ctrl->create(),
             $method === 'GET'    && $c1 !== '' && $c2 === ''      => $ctrl->show($c1),
             $method === 'POST'   && $c1 !== '' && $c2 === 'reply' => $ctrl->reply($c1),
@@ -634,6 +642,9 @@ try {
             $method === 'GET'   && $c1 === ''        => $ctrl->index(),
             $method === 'POST'  && $c1 === ''        => $ctrl->create(),
             $method === 'PATCH' && $c2 === 'approve' => $ctrl->approve($c1),
+            $method === 'PATCH' && $c2 === 'convert' => $ctrl->convert($c1),
+            $method === 'POST'  && $c1 === 'assign'  => $ctrl->assign(),
+            $method === 'GET'   && $c1 === 'calendar'=> $ctrl->calendar(),
             default => sendError("Route /api/leaves/$c1 not found", 404),
         };
     }

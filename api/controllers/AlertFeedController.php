@@ -192,13 +192,14 @@ class AlertFeedController
                 '/trials/#/t/' . rawurlencode($r['id']), $r['decidedAt']);
         }
 
-        // MD desk (Super Admin ↔ Admins): new items to me, replies, done
-        if (in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true)) {
+        // MD desk: new items to me (directly or to my group), replies, done
+        if (true) {
             try { ensure_schema(MdDeskController::schema(), 'MD desk'); } catch (Throwable $e) {}
+            [$toMe, $toMeP] = MdDeskController::toMeSql($auth);
             $kinds = ['MESSAGE' => 'Message', 'TASK' => 'Important task', 'PRICE' => 'Price given', 'QUOTATION' => 'New quotation given'];
             foreach (self::rows(
                 "SELECT i.id, i.type, i.title, i.priority, i.dueDate, i.createdAt, f.name AS fromName FROM `MdDeskItem` i LEFT JOIN `User` f ON f.id=i.fromId
-                 WHERE i.createdAt>? AND i.fromId<>? AND (i.toId=? OR i.toId IS NULL) ORDER BY i.createdAt DESC LIMIT $per", [$since, $me, $me]) as $r) {
+                 WHERE i.createdAt>? AND $toMe ORDER BY i.createdAt DESC LIMIT $per", array_merge([$since], $toMeP)) as $r) {
                 $add('md-new-' . $r['id'], 'MD_DESK_NEW', ($r['priority'] === 'URGENT' ? '🔴 URGENT · ' : ($r['priority'] === 'HIGH' ? 'High priority · ' : '')) . ($kinds[$r['type']] ?? 'Message') . ' from ' . ($r['fromName'] ?: 'MD'),
                     $r['title'] . ($r['dueDate'] ? ' · due ' . date('j M', strtotime($r['dueDate'])) : ''), '/md-desk/#' . rawurlencode($r['id']), $r['createdAt']);
             }

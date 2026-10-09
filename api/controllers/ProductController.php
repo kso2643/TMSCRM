@@ -282,38 +282,43 @@ class ProductController
         $auth = authenticate(); require_admin($auth);
         if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) sendError('Please choose the filled-in Excel (.xlsx) or CSV file.', 400);
         $tmp = $_FILES['file']['tmp_name']; $name = $_FILES['file']['name'] ?? '';
-        $rows = [];
+        $sheets = [];
         if (preg_match('/\.csv$/i', $name)) {
-            if (($fh = fopen($tmp, 'r')) !== false) { while (($r = fgetcsv($fh)) !== false) $rows[] = $r; fclose($fh); }
+            $rr = [];
+            if (($fh = fopen($tmp, 'r')) !== false) { while (($r = fgetcsv($fh)) !== false) $rr[] = $r; fclose($fh); }
+            $sheets[] = ['rows' => $rr];
         } elseif (preg_match('/\.xlsx$/i', $name)) {
             // Catalogues often have several sheets (inserts, cutters, drills…): read them all.
-            try {
-                $rows = [];
-                foreach (XlsxReader::readAllSheets($tmp) as $sh) {
-                    $hr = self::headerRow($sh['rows']);
-                    if ($hr === null) continue;
-                    $body = array_slice($sh['rows'], $hr);
-                    if (!$rows) { $rows = $body; continue; }
-                    // later sheets: re-map their columns onto the first sheet's header order
-                    $rows = array_merge($rows, self::remap($rows[0], $body));
-                }
-            } catch (\Exception $e) { sendError('Could not read the Excel file: ' . $e->getMessage(), 400); }
+            try { $sheets = XlsxReader::readAllSheets($tmp); }
+            catch (\Exception $e) { sendError('Could not read the Excel file: ' . $e->getMessage(), 400); }
         } else {
             sendError('Upload an .xlsx (Excel) or .csv file. Old .xls files: open in Excel and "Save As" .xlsx first.', 400);
         }
-        if (count($rows) < 2) sendError('The file has no product rows under the header.', 400);
-
-        // Map headers -> fields
-        $norm = fn($h) => self::normHeader($h);
-        $map = [];
-        foreach ($rows[0] as $i => $h) {
-            $h = $norm($h);
-            foreach (self::IMPORT_COLUMNS as $field => $aliases) {
-                if (!isset($map[$field]) && in_array($h, $aliases, true)) { $map[$field] = $i; break; }
+        // Any layout: each sheet's columns are recognised by name (exact, then by keywords —
+        // ColumnGuess) and copied into one table in our field order. Only a product code and a
+        // name / description are needed; unrecognised columns are kept in the description.
+        $fields = array_keys(self::IMPORT_COLUMNS);
+        $map = array_flip($fields); $map['extra'] = count($fields);
+        $rows = [array_merge($fields, ['extra'])];
+        $g = ColumnGuess::productRules();
+        $fuzzy = ['itemCode' => $g['itemCode'], 'standardPrice' => $g['price'], 'brand' => $g['brand'], 'unit' => $g['unit'], 'category' => $g['group'],
+                  'hsnCode' => $g['hsn'], 'grade' => $g['grade'], 'productName' => [['product name', 'item name', 'name', 'particular', 'particulars', 'product', 'goods', 'material'], ['code', 'no', 'group', 'type', 'brand', 'hsn']],
+                  'description' => [['description', 'desc', 'details', 'remarks'], ['code']], 'specification' => [['specification', 'spec', 'designation', 'size', 'geometry'], []]];
+        $noName = false;
+        foreach ($sheets as $sh) {
+            $hit = ColumnGuess::find($sh['rows'], self::IMPORT_COLUMNS, $fuzzy, 'itemCode', 15);
+            if (!$hit) continue;
+            if (!isset($hit['map']['productName']) && !isset($hit['map']['specification']) && !isset($hit['map']['description'])) { $noName = true; continue; }
+            foreach (array_slice($sh['rows'], $hit['row'] + 1) as $r) {
+                $out = [];
+                foreach ($fields as $f) $out[] = isset($hit['map'][$f]) ? ($r[$hit['map'][$f]] ?? '') : '';
+                $out[] = ColumnGuess::extraText($r, $hit['extra']) ?? '';
+                $rows[] = $out;
             }
         }
-        if (!isset($map['itemCode']) || (!isset($map['productName']) && !isset($map['specification']))) {
-            sendError('The header row must have an item / product code column and a "Product Name" or "Specification" column — download the template to see the layout.', 400);
+        if (count($rows) < 2) {
+            sendError($noName ? 'Found the product code column but no description / name column — add one (e.g. "Description").'
+                : 'Could not find a product / item code column. The sheet needs a product code column and a description (any other columns are optional).', 400);
         }
 
         $cats = [];
@@ -327,6 +332,7 @@ class ProductController
             $get = function ($f) use ($r, $map) { return isset($map[$f]) ? trim((string) ($r[$map[$f]] ?? '')) : ''; };
             $code = strtoupper($get('itemCode'));
             $pname = $get('productName');
+            if ($pname === '' && $get('specification') === '') $pname = $get('description');
             if ($code === '' && $pname === '') continue; // blank line
             $line = $i + 1;
             if ($code === '') { $errors[] = "Row $line: item code is missing."; $skipped++; continue; }
@@ -345,6 +351,7 @@ class ProductController
                 'revisionNumber' => $get('revisionNumber'), 'productRef' => $get('productRef'), 'isActive' => $active,
                 'brand' => $get('brand'), 'productType' => $get('productType'), 'specification' => $get('specification'), 'grade' => $get('grade'),
             ];
+            if ($get('extra') !== '') $vals['description'] = trim($vals['description'] . ($vals['description'] !== '' ? ' · ' : '') . $get('extra'));
             // The Products page lists the description: show the catalogue details there when none is given.
             if ($vals['description'] === '' && ($vals['specification'] !== '' || $vals['grade'] !== '')) {
                 $vals['description'] = implode(' · ', array_filter([$vals['specification'], $vals['grade'] !== '' ? 'Grade ' . $vals['grade'] : '', $vals['brand']]));

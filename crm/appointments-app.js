@@ -473,7 +473,7 @@
       api('GET', '/appointments' + qs).then(function (res) {
         state.appointments = (res.data && res.data.appointments) || [];
         bodySlot.innerHTML = '';
-        bodySlot.appendChild(state.view === 'month' ? renderMonthGrid() : state.view === 'planner' ? renderPlanner() : renderDayList());
+        bodySlot.appendChild(state.view === 'month' ? renderMonthGrid() : state.view === 'planner' ? renderPlannerView() : renderDayList());
       }).catch(function (e) {
         bodySlot.innerHTML = '';
         bodySlot.appendChild(el('p', { class: 'text-xs text-red-600 dark:text-red-400', text: e.message }));
@@ -634,6 +634,58 @@
     // Planner: every date of the month across, companies down; each cell shows
     // who visits that company that day. Empty cell → assign a visit there.
     var extraCompanies = {};
+    // Planner: "Days" board (default) — every day of the month across the top and,
+    // under each day, the companies assigned that day; or the "Company grid"
+    // (companies down the side, days across).
+    var plannerMode = (function () { try { return localStorage.getItem('crm_appt_planner') === 'grid' ? 'grid' : 'days'; } catch (e) { return 'days'; } })();
+    function renderPlannerView() {
+      var sw = el('div', { class: 'ap-pl-switch', role: 'tablist' }, [['days', 'Days → companies'], ['grid', 'Company grid']].map(function (o) {
+        return el('button', { type: 'button', class: plannerMode === o[0] ? 'on' : '', 'data-pmode': o[0], text: o[1], onclick: function () {
+          plannerMode = o[0]; try { localStorage.setItem('crm_appt_planner', o[0]); } catch (e) {}
+          bodySlot.innerHTML = ''; bodySlot.appendChild(renderPlannerView());
+        } });
+      }));
+      var body = plannerMode === 'grid' ? renderPlanner() : renderDayBoard();
+      return el('div', { class: 'space-y-3' }, [sw, body]);
+    }
+
+    function renderDayBoard() {
+      injectCalendarCss();
+      var y = state.refDate.getFullYear(), m = state.refDate.getMonth(), n = new Date(y, m + 1, 0).getDate();
+      var today = toDateStr(new Date());
+      var byDay = {};
+      state.appointments.forEach(function (a) { (byDay[a.appointmentDate] = byDay[a.appointmentDate] || []).push(a); });
+      var cols = [], todayCol = null, companies = {};
+      for (var d = 1; d <= n; d++) {
+        (function (dt) {
+          var ds = toDateStr(dt), we = dt.getDay() === 0, list = (byDay[ds] || []).slice().sort(function (a, b) { return String(a.appointmentTime || '99').localeCompare(String(b.appointmentTime || '99')); });
+          var col = el('div', { class: 'ap-bd-col' + (we ? ' we' : '') + (ds === today ? ' today' : ''), 'data-date': ds }, [
+            el('div', { class: 'ap-bd-h' }, [el('b', { text: WEEKDAYS[dt.getDay()].slice(0, 3) + ' ' + dt.getDate() }), el('small', { text: list.length ? list.length + (list.length === 1 ? ' company' : ' companies') : '—' })])
+          ]);
+          list.forEach(function (a) {
+            var c = a.customer || {}, who = a.assignedTo || a.user || {};
+            if (c.id) companies[c.id] = 1;
+            col.appendChild(el('button', { type: 'button', class: 'ap-bd-card ap-st-' + (a.status || 'SCHEDULED'), style: '--c:' + colorFor(who.id), title: a.title || '',
+              onclick: function () { openApptDialog(a, null, loadAndRenderBody); } }, [
+              el('b', { text: c.companyName || a.title || '—' }),
+              el('span', { text: [who.name, a.appointmentTime ? fmtTime12(a.appointmentTime) : null, a.status && a.status !== 'SCHEDULED' ? a.status.toLowerCase() : null].filter(Boolean).join(' · ') })
+            ]));
+          });
+          col.appendChild(el('button', { type: 'button', class: 'ap-bd-add', text: '+ Assign', title: 'Assign a company visit on ' + dt.toDateString(), onclick: function () { openApptDialog(null, dt, loadAndRenderBody); } }));
+          if (ds === today) todayCol = col;
+          cols.push(col);
+        })(new Date(y, m, d));
+      }
+      var wrap = el('div', { class: 'ap-bd-wrap', id: 'ap-dayboard' }, [el('div', { class: 'ap-bd' }, cols)]);
+      if (todayCol) setTimeout(function () { wrap.scrollLeft = Math.max(0, todayCol.offsetLeft - 8); }, 0);
+      var people = {}; state.appointments.forEach(function (a) { var w = a.assignedTo || a.user || {}; if (w.id) people[w.id] = w.name; });
+      return el('div', { class: 'space-y-3' }, [
+        el('div', { class: 'ap-legend' }, [el('span', { class: 'ap-sum', text: Object.keys(companies).length + ' companies · ' + state.appointments.length + ' visits in ' + MONTHS[m] + ' — “+ Assign” under a day to add a visit' })]
+          .concat(Object.keys(people).map(function (id) { return el('span', { class: 'ap-leg' }, [el('i', { style: 'background:' + colorFor(id) }), people[id]]); }))),
+        wrap
+      ]);
+    }
+
     function renderPlanner() {
       injectCalendarCss();
       var y = state.refDate.getFullYear(), m = state.refDate.getMonth(), n = new Date(y, m + 1, 0).getDate();
@@ -678,7 +730,7 @@
       var addPicker = customerPicker(null);
       var addBtn = el('button', { class: 'btn-secondary', text: '+ Add company row', onclick: function () {
         var c = addPicker.getValue(); if (!c) return;
-        extraCompanies[c.id] = c; bodySlot.innerHTML = ''; bodySlot.appendChild(renderPlanner());
+        extraCompanies[c.id] = c; bodySlot.innerHTML = ''; bodySlot.appendChild(renderPlannerView());
       } });
       var people = {}; state.appointments.forEach(function (a) { var w = a.assignedTo || a.user || {}; if (w.id) people[w.id] = w.name; });
       return el('div', { class: 'space-y-3' }, [
@@ -733,6 +785,19 @@
         '.ap-md-note{font-size:.72rem;color:#64748b;margin:0}',
         '.ap-series{font-size:.6rem;font-weight:700;padding:0 .3rem;border-radius:.25rem;background:color-mix(in srgb,var(--c) 25%,#fff);white-space:nowrap}',
         '.ap-pl-wrap{overflow:auto;max-height:70vh;border:1px solid #e2e8f0;border-radius:.75rem}.dark .ap-pl-wrap{border-color:#334155}',
+        '.ap-pl-switch{display:inline-flex;border:1px solid #e2e8f0;border-radius:.6rem;overflow:hidden}.dark .ap-pl-switch{border-color:#334155}',
+        '.ap-pl-switch button{padding:.35rem .8rem;font-size:.8rem;font-weight:600;border:0;background:none;color:#475569;cursor:pointer}.ap-pl-switch button.on{background:#1e3a5f;color:#fff}.dark .ap-pl-switch button{color:#cbd5e1}',
+        '.ap-bd-wrap{position:relative;overflow-x:auto;border:1px solid #e2e8f0;border-radius:.75rem;background:#f8fafc}.dark .ap-bd-wrap{border-color:#334155;background:#0b1222}',
+        '.ap-bd{display:flex;align-items:stretch;min-height:60vh}',
+        '.ap-bd-col{flex:0 0 172px;border-right:1px solid #e2e8f0;padding:0 .4rem .5rem;display:flex;flex-direction:column;gap:.35rem;background:#fff}.dark .ap-bd-col{background:#020617;border-color:#1e293b}',
+        '.ap-bd-col.we{background:#f8fafc}.dark .ap-bd-col.we{background:#0b1222}.ap-bd-col.today{box-shadow:inset 0 3px 0 #1e3a5f;background:#eff6ff}.dark .ap-bd-col.today{background:#172554}',
+        '.ap-bd-h{position:sticky;top:0;display:flex;justify-content:space-between;align-items:baseline;padding:.5rem .15rem .4rem;border-bottom:1px solid #e2e8f0;font-size:.8rem;background:inherit}.dark .ap-bd-h{border-color:#1e293b}',
+        '.ap-bd-h small{font-size:.66rem;color:#64748b}',
+        '.ap-bd-card{display:block;width:100%;text-align:left;border:0;border-left:3px solid var(--c);border-radius:.4rem;padding:.35rem .45rem;background:color-mix(in srgb,var(--c) 10%,#fff);cursor:pointer;color:#0f172a}',
+        '.dark .ap-bd-card{background:color-mix(in srgb,var(--c) 22%,#020617);color:#f1f5f9}.ap-bd-card:hover{filter:brightness(.96)}',
+        '.ap-bd-card b{display:block;font-size:.76rem;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ap-bd-card span{display:block;font-size:.66rem;color:#475569;margin-top:.1rem}.dark .ap-bd-card span{color:#94a3b8}',
+        '.ap-bd-card.ap-st-COMPLETED{opacity:.65}.ap-bd-card.ap-st-CANCELLED{opacity:.4;text-decoration:line-through}',
+        '.ap-bd-add{margin-top:auto;border:1px dashed #cbd5e1;border-radius:.4rem;background:none;font-size:.72rem;color:#64748b;padding:.3rem;cursor:pointer}.ap-bd-add:hover{border-color:#1e3a5f;color:#1e3a5f}',
         '.ap-pl{border-collapse:separate;border-spacing:0;font-size:.74rem;min-width:100%}',
         '.ap-pl th,.ap-pl td{border-right:1px solid #f1f5f9;border-bottom:1px solid #f1f5f9;padding:0;text-align:center}.dark .ap-pl th,.dark .ap-pl td{border-color:#1e293b}',
         '.ap-pl thead th{position:sticky;top:0;z-index:2;background:#f8fafc;padding:.3rem 0;color:#475569;font-weight:700}.dark .ap-pl thead th{background:#0f172a;color:#cbd5e1}',

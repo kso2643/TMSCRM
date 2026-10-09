@@ -2,10 +2,9 @@
    Tasks — admin-assigned work queue with a timer.
 
    Tabs:
-     My tasks        — the signed-in person's queue. The current task shows
-                       a live timer (Start / Pause / Resume / Complete).
-                       Tasks are worked in order: completing one unlocks
-                       the next ("Complete & start next" does both).
+     My tasks        — the signed-in person's tasks. Add your own, start any
+                       of them — several can run at once, each with its own
+                       live timer (Start / Pause / Resume / Complete).
      Team live       — admin-tier (incl. Manager): one card per person with
                        what they're working on right now and its live timer,
                        running / paused / waiting / idle, and today's totals.
@@ -321,8 +320,8 @@
 
   // ── My tasks ─────────────────────────────────────────────────────────
   function myTasksTab(p) {
-    var open = [], done = [], err = '', busy = false, completing = false, note = '';
-    // Kept across re-renders so its note / state survive. Starting it pauses a running task, so reload the queue too.
+    var open = [], done = [], err = '', busy = false, completing = null, note = '';
+    // Kept across re-renders so its note / state survive.
     var general = generalTimerCard(function () { load(true); });
 
     function load(skipGeneral) {
@@ -339,60 +338,51 @@
       if (busy) return;
       busy = true; err = ''; render();
       api('PATCH', '/tasks/' + task.id + '/' + action, body || {}).then(function () {
-        busy = false; completing = false; note = '';
+        busy = false; completing = null; note = '';
         load();
       }).catch(function (e) { busy = false; err = e.message; render(); });
     }
 
     function render() {
       p.innerHTML = '';
-      var current = open.filter(function (t) { return t.status === 'IN_PROGRESS' || t.status === 'PAUSED'; })[0] || null;
+      // Several tasks can run at the same time, each with its own timer.
+      var active = open.filter(function (t) { return t.status === 'IN_PROGRESS' || t.status === 'PAUSED'; })
+        .sort(function (a, b) { return (a.status === 'IN_PROGRESS' ? 0 : 1) - (b.status === 'IN_PROGRESS' ? 0 : 1); });
       var queue = open.filter(function (t) { return t.status === 'QUEUED'; });
       var left = el('div', { class: 'space-y-4' });
       var right = el('div', { class: 'space-y-4' });
 
-      // Current task / next up
-      if (current) {
-        left.appendChild(currentCard(current, queue.length));
-      } else if (queue.length) {
-        var head = queue[0];
-        left.appendChild(el('div', { class: 'card p-5 space-y-3 tx-current' }, [
-          el('p', { class: 'text-xs font-semibold uppercase text-muted', text: 'Up next' }),
-          el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
-            el('h2', { class: 'text-lg font-semibold text-slate-900 dark:text-slate-100', text: head.title }),
-            el('span', { class: 'badge ' + PRIORITY_BADGE[head.priority], text: labelOf(PRIORITIES, head.priority) })
-          ]),
-          el('p', { class: 'text-xs text-muted', text: taskMeta(head, false) }),
-          dueEl(head),
-          head.description ? el('p', { class: 'text-sm whitespace-pre-wrap', text: head.description }) : null,
-          err ? el('p', { class: 'text-xs text-red-600', text: err }) : null,
-          el('button', { class: 'btn-primary' + (busy ? ' tx-disabled' : ''), text: '▶ Start task & timer', onclick: function () { act(head, 'start'); } })
-        ]));
-      } else {
+      left.appendChild(quickAdd());
+      var nRun = active.filter(function (t) { return t.status === 'IN_PROGRESS'; }).length;
+      if (active.length) {
+        left.appendChild(el('p', { class: 'text-xs font-semibold uppercase text-muted', id: 'tx-running-head', text: nRun + ' running' + (active.length - nRun ? ' · ' + (active.length - nRun) + ' paused' : '') }));
+        active.forEach(function (t) { left.appendChild(currentCard(t, queue.length)); });
+      } else if (!queue.length) {
         left.appendChild(el('div', { class: 'card p-10 text-center' }, [
           el('p', { class: 'text-lg font-semibold text-slate-900 dark:text-slate-100', text: 'You’re all caught up' }),
-          el('p', { class: 'text-sm text-muted mt-1', text: 'New tasks assigned to you will appear here.' })
+          el('p', { class: 'text-sm text-muted mt-1', text: 'Add your own task above, or tasks assigned to you will appear here.' })
         ]));
       }
+      if (err && !active.length) left.appendChild(el('p', { class: 'text-xs text-red-600', text: err }));
 
-      // Queue
-      var rest = current ? queue : queue.slice(1);
-      var qCard = el('div', { class: 'card overflow-hidden' }, [
+      // To do — start any of them; several can run together.
+      var qCard = el('div', { class: 'card overflow-hidden', id: 'tx-queue' }, [
         el('div', { class: 'px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between' }, [
-          el('span', { class: 'text-sm font-semibold', text: 'Queue' }),
-          el('span', { class: 'text-xs text-muted', text: rest.length + ' waiting' })
+          el('span', { class: 'text-sm font-semibold', text: 'To do' }),
+          el('span', { class: 'text-xs text-muted', text: queue.length + ' waiting' })
         ])
       ]);
-      if (!rest.length) qCard.appendChild(el('p', { class: 'px-4 py-6 text-sm text-muted text-center', text: 'Nothing else in your queue.' }));
-      rest.forEach(function (t, i) {
-        qCard.appendChild(el('div', { class: 'tx-row' }, [
-          el('span', { class: 'tx-pos', text: String(i + (current ? 1 : 2)) }),
+      if (!queue.length) qCard.appendChild(el('p', { class: 'px-4 py-6 text-sm text-muted text-center', text: 'Nothing waiting.' }));
+      queue.forEach(function (t, i) {
+        qCard.appendChild(el('div', { class: 'tx-row', 'data-task': t.id }, [
+          el('span', { class: 'tx-pos', text: String(i + 1) }),
           el('div', { class: 'flex-1 min-w-0' }, [
             el('p', { class: 'text-sm font-medium truncate', text: t.title }),
             el('p', { class: 'text-xs text-muted truncate', text: taskMeta(t, false) })
           ]),
           dueEl(t),
-          el('span', { class: 'badge ' + PRIORITY_BADGE[t.priority], text: labelOf(PRIORITIES, t.priority) })
+          el('span', { class: 'badge ' + PRIORITY_BADGE[t.priority], text: labelOf(PRIORITIES, t.priority) }),
+          el('button', { class: 'btn-primary tx-nowrap' + (busy ? ' tx-disabled' : ''), style: 'padding:.3rem .7rem;font-size:.8rem', 'data-start': t.id, text: '▶ Start', onclick: function () { act(t, 'start'); } })
         ]));
       });
       left.appendChild(qCard);
@@ -418,9 +408,38 @@
       p.appendChild(el('div', { class: 'tx-grid' }, [left, right]));
     }
 
+    // Add a task for yourself (title + priority + optional due date), optionally starting it right away.
+    var qa = { title: '', priority: 'NORMAL', due: '' };
+    function quickAdd() {
+      var me = currentUser() || {};
+      var title = el('input', { class: INPUT, id: 'tx-qa-title', placeholder: 'Add my task — e.g. Prepare Sakthi Auto quotation', value: qa.title });
+      title.addEventListener('input', function () { qa.title = title.value; });
+      var pr = el('select', { class: INPUT, id: 'tx-qa-prio', style: 'width:auto' }, PRIORITIES.map(function (x) { return el('option', { value: x[0], text: x[1] }); }));
+      pr.value = qa.priority; pr.addEventListener('change', function () { qa.priority = pr.value; });
+      var due = el('input', { class: INPUT, type: 'date', id: 'tx-qa-due', style: 'width:auto', title: 'Due date (optional)', value: qa.due });
+      due.addEventListener('change', function () { qa.due = due.value; });
+      function add(startNow) {
+        if (!title.value.trim()) { title.focus(); return; }
+        if (busy) return;
+        busy = true;
+        api('POST', '/tasks', { title: title.value.trim(), priority: pr.value, dueDate: due.value, assignedToId: me.id }).then(function (j) {
+          qa = { title: '', priority: 'NORMAL', due: '' };
+          if (startNow && j.data && j.data.task) return api('PATCH', '/tasks/' + j.data.task.id + '/start', {});
+        }).then(function () { busy = false; load(); }).catch(function (e) { busy = false; err = e.message; render(); });
+      }
+      title.addEventListener('keydown', function (e) { if (e.key === 'Enter') add(false); });
+      return el('div', { class: 'card p-4 space-y-2', id: 'tx-quick-add' }, [
+        el('div', { class: 'flex gap-2 flex-wrap items-center' }, [
+          el('div', { style: 'flex:1;min-width:220px' }, [title]), pr, due,
+          el('button', { class: 'btn-secondary', id: 'tx-qa-add', text: '+ Add', onclick: function () { add(false); } }),
+          el('button', { class: 'btn-primary', id: 'tx-qa-start', text: '▶ Add & start', onclick: function () { add(true); } })
+        ])
+      ]);
+    }
+
     function currentCard(t, queued) {
       var running = t.status === 'IN_PROGRESS';
-      var card = el('div', { class: 'card p-5 space-y-4 tx-current' }, [
+      var card = el('div', { class: 'card p-5 space-y-4 tx-current', 'data-active': t.id }, [
         el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
           el('span', { class: 'flex items-center gap-2 text-xs font-semibold uppercase text-muted' }, [
             el('span', { class: 'tx-dot ' + (running ? 'tx-dot-run' : 'tx-dot-pause') }),
@@ -440,14 +459,14 @@
       if (err) card.appendChild(el('p', { class: 'text-xs text-red-600', text: err }));
       var dis = busy ? ' tx-disabled' : '';
 
-      if (completing) {
+      if (completing === t.id) {
         var ta = el('textarea', { class: INPUT, rows: '2', placeholder: 'Completion note (optional)' });
         ta.value = note;
         ta.addEventListener('input', function () { note = ta.value; });
         card.appendChild(el('div', { class: 'space-y-2' }, [
           ta,
           el('div', { class: 'flex gap-2 flex-wrap justify-end' }, [
-            el('button', { class: 'btn-secondary', text: 'Cancel', onclick: function () { completing = false; render(); } }),
+            el('button', { class: 'btn-secondary', text: 'Cancel', onclick: function () { completing = null; render(); } }),
             el('button', { class: 'btn-primary' + dis, text: '✓ Complete', onclick: function () { act(t, 'complete', { note: note }); } }),
             queued ? el('button', { class: 'btn-primary' + dis, text: '✓ Complete & start next', onclick: function () { act(t, 'complete', { note: note, startNext: true }); } }) : null
           ])
@@ -457,7 +476,7 @@
           running
             ? el('button', { class: 'btn-secondary' + dis, text: '❚❚ Pause', onclick: function () { act(t, 'pause'); } })
             : el('button', { class: 'btn-secondary' + dis, text: '▶ Resume', onclick: function () { act(t, 'resume'); } }),
-          el('button', { class: 'btn-primary' + dis, text: '✓ Complete…', onclick: function () { completing = true; render(); } })
+          el('button', { class: 'btn-primary' + dis, text: '✓ Complete…', onclick: function () { completing = t.id; render(); } })
         ]));
       }
       return card;
@@ -487,7 +506,7 @@
       var run = data && data.running;
       node.appendChild(el('div', { class: 'flex items-center justify-between gap-2' }, [
         el('span', { class: 'flex items-center gap-2 text-sm font-semibold' }, [run ? el('span', { class: 'tx-dot tx-dot-run' }) : null, 'General timer']),
-        el('span', { class: 'text-xs text-muted', text: 'work not on a task · pauses your task timer' })
+        el('span', { class: 'text-xs text-muted', text: 'work not on a task · runs alongside your task timers' })
       ]));
       if (!data) { node.appendChild(el('p', { class: 'text-sm text-muted', text: err || 'Loading…' })); return; }
       node.appendChild(el('div', { class: 'flex items-end justify-between gap-3 flex-wrap' }, [
@@ -661,20 +680,25 @@
           ])
         ]));
       }
-      if (c) {
-        card.appendChild(el('div', { class: 'tx-muted-box' }, [
-          el('p', { class: 'text-xs text-muted', text: c.running ? 'Current task' : 'Paused task' }),
-          el('p', { class: 'text-sm font-medium truncate', text: c.title }),
+      // Every task this person has running (several can run together), then paused ones.
+      var acts = (x.runningTasks || []).concat(x.pausedTasks || []);
+      if (!acts.length && c) acts = [c];
+      acts.forEach(function (t) {
+        card.appendChild(el('div', { class: 'tx-muted-box', 'data-running': t.running ? '1' : '0' }, [
+          el('p', { class: 'text-xs text-muted', text: t.running ? '▶ Running' : '❚❚ Paused' }),
+          el('p', { class: 'text-sm font-medium truncate', text: t.title }),
           el('div', { class: 'flex items-end justify-between gap-2 mt-1' }, [
-            timerEl(c, 'tx-timer-mid'),
-            el('span', { class: 'text-xs text-muted', text: 'since ' + fmtDateTime(c.startedAt) })
+            timerEl(t, 'tx-timer-mid'),
+            el('span', { class: 'text-xs text-muted', text: 'since ' + fmtDateTime(t.startedAt) })
           ])
         ]));
-      } else if (!x.general) {
+      });
+      if (!acts.length && !x.general) {
         card.appendChild(el('div', { class: 'tx-muted-box text-sm text-muted', text: x.queuedCount ? 'Has tasks waiting but hasn’t started one.' : 'Nothing assigned right now.' }));
       }
 
       var todayTimer = timerEl({ elapsedSeconds: x.secondsToday, running: !!(c && c.running) }, 'text-sm font-semibold');
+      if ((x.runningTasks || []).length > 1) todayTimer.removeAttribute('data-tx-run'); // several clocks add up faster than 1 s/s — refreshed on reload
       var genTimer = timerEl({ elapsedSeconds: x.generalSecondsToday || 0, running: !!x.general }, 'text-sm font-semibold');
       card.appendChild(el('div', { class: 'grid grid-cols-4 gap-2 text-center' }, [
         miniStat('Task time today', todayTimer),

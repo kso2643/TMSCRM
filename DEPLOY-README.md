@@ -1,3 +1,39 @@
+# Update — 9 Oct (c): MD desk for everyone, supplier prices, several task timers, appointment days board, CPR without R/Y/G, any-format stock upload, leave → half/full day
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `api/includes/ColumnGuess.php`, `api/controllers/SupplierQuoteController.php`, React sidebar file `layout-2e9123d9af9081e5.js`.
+- **Database:** new tables `MdDeskRead` and `SupplierQuote`, plus new columns on `MdDeskItem`, `Stock` and `Leave`. All are added automatically.
+
+1. **MD desk:**
+   - The "To" list now has **every user**, grouped by role, plus **All admins** and **Everyone**.
+   - Items sent to someone **pop up on every page** for them, with Open / OK, noted, until they open or acknowledge them.
+   - Every user now has MD desk in the menu. Engineers can reply, or send to the MD / admins.
+2. **Price requests:**
+   - **✎ Edit answer** on already-answered items (admin).
+   - **🏭 Get price from supplier** inside each request:
+     - pick a vendor (or type a name) and the items, and a ready message is made (Copy / WhatsApp / E-mail);
+     - type the supplier's price, discount and lead time when they reply (editable, or mark "No quote");
+     - the best supplier net price shows under each item's answer box;
+     - prices already on vendor price lists show straight away.
+3. **Tasks:**
+   - Several tasks can run at the same time, each with its own timer, alongside the general timer. Any task can be started (no forced queue order).
+   - Anyone can **add their own task** (Add / Add & start).
+   - Team live shows every running task per person.
+4. **Appointments → Planner:**
+   - New **"Days → companies"** board: all the days across the top, and under each day the companies assigned (engineer, time, status), with **+ Assign** under every day.
+   - The old company grid is still available as a toggle.
+5. **CPR:** the Red / Yellow / Green rating is removed from the page. The Excel layout is unchanged.
+6. **Stock and Products upload accept any Excel layout:**
+   - Only a product code and a description are needed. Headings like "Product Code No.", "Description of Goods", "Closing Qty (Nos)" and "Rate / Unit" are recognised, and title rows above the table are fine.
+   - Other columns are kept as the item's details and are searchable.
+   - A single-sheet stock file with no place goes to Hand stock.
+7. **Leave:**
+   - Admins can **Count as…** on any request. A permission that ran over becomes a **Half day**, **Full day** or **Leave (n days)**, paid or **Loss of pay**.
+   - **+ Mark leave for employee** records leave directly.
+   - These count in the payroll working days: "Fill present days" also fills the LOP days.
+   - The payslip shows them as "(from permission)" / "LOP", with an "of which loss of pay" line.
+   - New **Calendar** tab: month view of everyone's leave by day.
+
 # Update — 9 Oct (b): MD desk (Super Admin ↔ Admins) and Accounts pages, new "Accounts" user role
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

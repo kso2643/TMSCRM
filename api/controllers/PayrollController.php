@@ -317,11 +317,11 @@ class PayrollController
     {
         $types = ['CASUAL', 'SICK', 'PERSONAL', 'HALF_DAY', 'PERMISSION'];
         $blank = fn() => array_fill_keys($types, ['days' => 0.0, 'hours' => 0.0, 'count' => 0]);
-        $out = ['month' => $blank(), 'year' => $blank(), 'items' => []];
+        $out = ['month' => $blank(), 'year' => $blank(), 'items' => [], 'monthLopDays' => 0.0, 'yearLopDays' => 0.0];
         try {
             new LeaveController(); // makes sure the permission columns exist
             $m0 = sprintf('%04d-%02d-01', $year, $month); $m1 = date('Y-m-t', strtotime($m0)); $y0 = "$year-01-01";
-            $s = db()->prepare("SELECT leaveType, fromDate, toDate, totalDays, hours, fromTime, toTime, reason FROM `Leave`
+            $s = db()->prepare("SELECT leaveType, fromDate, toDate, totalDays, hours, fromTime, toTime, reason, isLop, originalType FROM `Leave`
                                 WHERE userId=? AND status='APPROVED' AND DATE(toDate)>=? AND DATE(fromDate)<=? ORDER BY fromDate");
             $s->execute([$userId, $y0, $m1]);
             foreach ($s->fetchAll() as $r) {
@@ -332,16 +332,18 @@ class PayrollController
                     if ($to < $a || $from > $b) continue;
                     $o = &$out[$k][$t];
                     $o['count']++;
+                    $d = $t === 'PERMISSION' ? 0 : ($t === 'HALF_DAY' ? 0.5 : $days($a, $b));
                     if ($t === 'PERMISSION') $o['hours'] += (float) $r['hours'];
-                    elseif ($t === 'HALF_DAY') $o['days'] += 0.5;
-                    else $o['days'] += $days($a, $b);
+                    else $o['days'] += $d;
+                    if (!empty($r['isLop'])) $out[$k . 'LopDays'] += $d;
                     unset($o);
                 }
                 if ($to >= $m0 && $from <= $m1) $out['items'][] = [
-                    'type' => $t, 'label' => LeaveController::LABELS[$t] ?? $t, 'from' => $from, 'to' => $to,
+                    'type' => $t, 'from' => $from, 'to' => $to, 'lop' => !empty($r['isLop']),
+                    'label' => (LeaveController::LABELS[$t] ?? $t) . ($r['originalType'] === 'PERMISSION' ? ' (from permission)' : '') . (!empty($r['isLop']) ? ' · LOP' : ''),
                     'days' => $t === 'PERMISSION' ? 0 : ($t === 'HALF_DAY' ? 0.5 : $days($m0, $m1)),
                     'hours' => $t === 'PERMISSION' ? (float) $r['hours'] : null,
-                    'time' => $t === 'PERMISSION' ? $r['fromTime'] . '–' . $r['toTime'] : null, 'reason' => $r['reason'],
+                    'time' => $t === 'PERMISSION' || $r['originalType'] === 'PERMISSION' ? ($r['fromTime'] ? $r['fromTime'] . '–' . $r['toTime'] : null) : null, 'reason' => $r['reason'],
                 ];
             }
         } catch (Throwable $e) { error_log('leaveSummary: ' . $e->getMessage()); }
@@ -468,6 +470,14 @@ class PayrollController
             $pdf->text(rtrim(rtrim(number_format($L['monthLeaveDays'], 1), '0'), '.') ?: '0', $cols[1], $y + 5);
             $pdf->text(rtrim(rtrim(number_format($L['yearLeaveDays'], 1), '0'), '.') ?: '0', $cols[2], $y + 5);
             $y += 20;
+            if ($L['monthLopDays'] > 0 || $L['yearLopDays'] > 0) {
+                $pdf->setFont('Helvetica', 8.5); $pdf->setFillColor('#B91C1C');
+                $pdf->text('of which loss of pay (LOP)', $cols[0] + 8, $y - 4);
+                $pdf->text(rtrim(rtrim(number_format($L['monthLopDays'], 1), '0'), '.') ?: '0', $cols[1], $y - 4);
+                $pdf->text(rtrim(rtrim(number_format($L['yearLopDays'], 1), '0'), '.') ?: '0', $cols[2], $y - 4);
+                $pdf->setFillColor('#111827');
+                $y += 12;
+            }
             if ($L['items']) {
                 $pdf->setFont('Helvetica', 7.5); $pdf->setFillColor('#4B5563');
                 $list = implode('   ·   ', array_map(fn($it) => $it['label'] . ' ' . date('d M', strtotime($it['from'])) . ($it['to'] !== $it['from'] ? '–' . date('d M', strtotime($it['to'])) : '') . ($it['time'] ? ' ' . $it['time'] : ''), array_slice($L['items'], 0, 12)));

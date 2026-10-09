@@ -98,7 +98,8 @@
     { label: 'Appointments',          href: '/appointments/',   icon: 'appts',     section: 'Operations' },
     { label: 'Tasks',                 href: '/tasks/',          icon: 'timer',     section: 'Operations' },
     { label: 'Leave',                 href: '/leaves/',         icon: 'calendar',  section: 'Operations' },
-    { label: 'Chat',                  href: '/chat/',           icon: 'chat',      section: 'Operations' }
+    { label: 'Chat',                  href: '/chat/',           icon: 'chat',      section: 'Operations' },
+    { label: 'MD desk',               href: '/md-desk/',        icon: 'brief',     section: 'Operations' }
   ];
   var ADMIN_NAV = [
     { label: 'Live tracking', href: '/admin/live-tracking/', icon: 'nav',      roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
@@ -107,7 +108,6 @@
     { label: 'Users',         href: '/admin/users/',         icon: 'users',    roles: ADMIN_ROLES },
     { label: 'HR',            href: '/hr/',                  icon: 'idcard',   roles: ADMIN_ROLES },
     { label: 'Payroll',       href: '/payroll/',              icon: 'file',    roles: ADMIN_ROLES },
-    { label: 'MD desk',       href: '/md-desk/',             icon: 'brief',    roles: ['SUPER_ADMIN','ADMIN'] },
     { label: 'Accounts',      href: '/accounts/',            icon: 'calc',     roles: ['SUPER_ADMIN','ADMIN','ACCOUNTS'] },
     { label: 'Vendors',       href: '/vendors/',             icon: 'truck',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
     { label: 'Reports',       href: '/admin/reports/',       icon: 'chart',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },

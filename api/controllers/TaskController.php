@@ -9,10 +9,10 @@
  *                          │                                        │
  *                          └───────────────complete─────────────────┘──▶ COMPLETED
  *
- * Only the task at the head of the queue can be started, and only while the
- * person has nothing else in progress/paused — so completing one task is
- * what unlocks the next. `complete` can optionally start the next queued
- * task straight away (startNext=true).
+ * Any queued task can be started, and several tasks (and the general timer)
+ * can run at the same time — each has its own timer. `complete` can
+ * optionally start the next queued task straight away (startNext=true).
+ * Anyone can add tasks for themselves; assigning to others needs ADMIN.
  *
  * The timer is server-side: workedSeconds holds time from finished
  * segments, lastResumedAt marks when the running segment began. The
@@ -141,13 +141,6 @@ $tail",
         if (self::runningGeneral($auth['id'])) sendError('Your general timer is already running.', 400);
         $b = request_body();
         $note = mb_substr(trim((string) ($b['note'] ?? '')), 0, 255) ?: null;
-        // One clock at a time: a running task timer is paused (resume it later from My tasks).
-        $act = $this->activeTask($auth['id']);
-        if ($act && $act['status'] === 'IN_PROGRESS') {
-            db()->prepare("UPDATE `AdminTask` SET status='PAUSED',workedSeconds=?,lastResumedAt=NULL,updatedAt=? WHERE id=?")
-                ->execute([(int) $act['workedSeconds'] + self::secondsSince($act['lastResumedAt']), now_sql(), $act['id']]);
-            log_activity($auth['id'], 'TASK_PAUSED', 'AdminTask', $act['id'], ['reason' => 'general timer started']);
-        }
         db()->prepare('INSERT INTO `GeneralTimer` (id,userId,note,startedAt) VALUES (?,?,?,?)')->execute([gen_id(), $auth['id'], $note, now_sql()]);
         log_activity($auth['id'], 'GENERAL_TIMER_STARTED', 'GeneralTimer', null, ['note' => $note]);
         $this->general();
@@ -306,7 +299,12 @@ $tail",
              LEFT JOIN `Customer` c ON c.id = t.customerId
              WHERE t.status IN ('IN_PROGRESS','PAUSED')"
         );
-        foreach ($s->fetchAll() as $r) $active[$r['assignedToId']] = $this->shape($r);
+        $runningBy = []; $pausedBy = [];
+        foreach ($s->fetchAll() as $r) {
+            $t = $this->shape($r);
+            if ($t['running']) $runningBy[$r['assignedToId']][] = $t; else $pausedBy[$r['assignedToId']][] = $t;
+        }
+        foreach ($runningBy + $pausedBy as $uid => $_) $active[$uid] = ($runningBy[$uid] ?? [])[0] ?? $pausedBy[$uid][0];
 
         $queued = [];
         foreach (db()->query("SELECT assignedToId, COUNT(*) AS n FROM `AdminTask` WHERE status='QUEUED' GROUP BY assignedToId")->fetchAll() as $r) {
@@ -340,7 +338,9 @@ $tail",
                 'queuedCount'        => $queued[$u['id']] ?? 0,
                 'completedToday'     => $done[$u['id']]['n'] ?? 0,
                 // Time on tasks finished today plus the current task's timer so far.
-                'secondsToday'       => ($done[$u['id']]['secs'] ?? 0) + ($cur ? $cur['elapsedSeconds'] : 0),
+                'secondsToday'       => ($done[$u['id']]['secs'] ?? 0) + array_sum(array_map(fn($t) => $t['elapsedSeconds'], array_merge($runningBy[$u['id']] ?? [], $pausedBy[$u['id']] ?? []))),
+                'runningTasks'       => $runningBy[$u['id']] ?? [],
+                'pausedTasks'        => $pausedBy[$u['id']] ?? [],
                 'general'            => $genRun[$u['id']] ?? null,
                 'generalSecondsToday'=> $genToday[$u['id']] ?? 0,
             ];
@@ -441,13 +441,14 @@ $tail",
     public function create(): void
     {
         $auth = authenticate();
-        require_admin($auth);
         $b = request_body();
 
         $title = trim((string) ($b['title'] ?? ''));
         if ($title === '') sendError('Please give the task a title.', 400);
         $assignedToId = trim((string) ($b['assignedToId'] ?? ''));
         if ($assignedToId === '') sendError('Please choose who this task is for.', 400);
+        // Anyone can add tasks for themselves; assigning to someone else needs ADMIN.
+        if ($assignedToId !== $auth['id']) require_admin($auth);
         $this->validatedAssignee($assignedToId);
         $priority = strtoupper(trim((string) ($b['priority'] ?? 'NORMAL')));
         if (!in_array($priority, self::PRIORITIES, true)) sendError('priority must be one of: ' . implode(', ', self::PRIORITIES), 400);
@@ -462,7 +463,7 @@ $tail",
         ]);
 
         log_activity($auth['id'], 'TASK_ASSIGNED', 'AdminTask', $id, ['title' => $title, 'assignedToId' => $assignedToId]);
-        $this->send($id, 'Task assigned', 201);
+        $this->send($id, $assignedToId === $auth['id'] ? 'Task added' : 'Task assigned', 201);
     }
 
     // PUT /api/tasks/:id  (admin) — edit details; reassigning moves it to the end of the new person's queue
@@ -554,15 +555,10 @@ $tail",
     private function startRow(array $row): void
     {
         if ($row['status'] !== 'QUEUED') sendError('This task has already been started.', 400);
-        $active = $this->activeTask($row['assignedToId']);
-        if ($active) sendError('Finish "' . $active['title'] . '" first — only one task can be in progress at a time.', 400);
-        $head = $this->headOfQueue($row['assignedToId']);
-        if ($head && $head['id'] !== $row['id']) sendError('Tasks are worked in queue order — "' . $head['title'] . '" is next.', 400);
 
         $now = now_sql();
         db()->prepare("UPDATE `AdminTask` SET status='IN_PROGRESS',startedAt=?,lastResumedAt=?,queuePosition=0,updatedAt=? WHERE id=?")
             ->execute([$now, $now, $now, $row['id']]);
-        self::stopGeneral($row['assignedToId']);
     }
 
     // PATCH /api/tasks/:id/pause
@@ -592,7 +588,6 @@ $tail",
 
         $now = now_sql();
         db()->prepare("UPDATE `AdminTask` SET status='IN_PROGRESS',lastResumedAt=?,updatedAt=? WHERE id=?")->execute([$now, $now, $id]);
-        self::stopGeneral($row['assignedToId']);
         log_activity($auth['id'], 'TASK_RESUMED', 'AdminTask', $id, []);
         $this->send($id, 'Task resumed');
     }

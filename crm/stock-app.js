@@ -223,7 +223,7 @@
     var d = dialog('Upload stock', 'Multi-page Excel: every sheet is read and the sheet name says where its stock is (Hand stock, Local - Mumbai, Karnataka…). Or pick one place for the whole file. The quantity replaces the old quantity at that place only.',
       el('div', {}, [
         el('div', { class: 'st-grid' }, [field('Brand (for rows with no Brand column)', el('div', {}, [brand, dl]))].concat(loc.nodes).concat([field('Excel / CSV file', file, true, true)])),
-        el('p', { class: 'hint', style: 'margin-top:.6rem' }, ['Use the ', el('a', { href: '#', style: 'text-decoration:underline', text: 'stock template', onclick: function (e) { e.preventDefault(); download('/products/stock/template', 'stock-upload-template.xlsx').catch(function (er) { toast(er.message, 'err'); }); } }), ' — one sheet per place: Hand stock, Local - Mumbai, Local - Hyderabad, Local - Bangalore, a state… Add or rename sheets as you need.']),
+        el('p', { class: 'hint', style: 'margin-top:.6rem' }, ['Use the ', el('a', { href: '#', style: 'text-decoration:underline', text: 'stock template', onclick: function (e) { e.preventDefault(); download('/products/stock/template', 'stock-upload-template.xlsx').catch(function (er) { toast(er.message, 'err'); }); } }), ' — one sheet per place: Hand stock, Local - Mumbai, Local - Hyderabad, Local - Bangalore, a state… Add or rename sheets as you need. Any other Excel works too (supplier stock list, Tally export…): only a product code column and a description are needed — quantity, price and brand are picked up when present, other columns are kept as the item’s details, and a single-sheet file goes to the place you pick (Hand stock if none).']),
         msg
       ]),
       [el('button', { class: 'st-btn', text: 'Close', onclick: function () { d.close(); } }), go]);
@@ -498,7 +498,7 @@
         canEdit ? el('button', { class: 'st-btn sm ico', title: 'Edit item', 'aria-label': 'Edit ' + it.itemCode, text: '✎', onclick: function () { itemDialog(it); } }) : null
       ]);
       return el('tr', { 'data-code': it.itemCode }, [
-        el('td', { class: 'l item' }, [el('div', { style: 'font-weight:600', text: it.itemCode }), el('div', { class: 'sub', text: it.itemName + (it.itemGroup ? ' · ' + it.itemGroup : '') })]),
+        el('td', { class: 'l item' }, [el('div', { style: 'font-weight:600', text: it.itemCode }), el('div', { class: 'sub', text: it.itemName + (it.itemGroup ? ' · ' + it.itemGroup : '') }), it.extraInfo ? el('div', { class: 'sub', style: 'font-size:.7rem;max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis', title: it.extraInfo, text: it.extraInfo }) : null]),
         el('td', { class: 'l' }, [el('span', { class: 'st-brand' + (it.brand ? '' : ' none'), text: it.brand || '—' })]),
         num(it.handStock, 'loc')
       ].concat(locals.map(function (c) { return num((it.localByCity || {})[c], 'loc'); })).concat(states.map(function (s) { return num((it.stateStock || {})[s], 'loc'); })).concat([

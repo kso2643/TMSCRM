@@ -337,7 +337,6 @@
     filters.appendChild(search);
     if (canSeeAll()) filters.appendChild(seSelect(f.seId, function (v) { f.seId = v; f.page = 1; load(); }));
     filters.appendChild(listSelect(META.statuses, f.status, 'All statuses', function (v) { f.status = v; f.page = 1; load(); }));
-    filters.appendChild(listSelect(META.rag, f.rag, 'Any colour', function (v) { f.rag = v; f.page = 1; load(); }));
     filters.appendChild(listSelect(META.cpr, f.cpr, 'C / P / R', function (v) { f.cpr = v; f.page = 1; load(); }));
     filters.appendChild(listSelect(META.productGroups, f.productGroup, 'All product groups', function (v) { f.productGroup = v; f.page = 1; load(); }));
     var sort = el('select', { class: 'cp-in', 'aria-label': 'Sort', onchange: function () { f.sort = sort.value; load(); } }, [
@@ -396,7 +395,7 @@
           el('td', { class: 'num', text: lakh(o.annualPotential) }),
           el('td', { class: 'num', text: lakh(o.expectedSale) }),
           el('td', { class: 'num', text: lakh(o.orderValue) }),
-          el('td', { style: 'white-space:nowrap' }, [ragDot(o.rag), ' ', statusBadge(o.status)]),
+          el('td', { style: 'white-space:nowrap' }, [statusBadge(o.status)]),
           el('td', { style: 'max-width:280px' }, [o.latestRemark ? el('div', { class: 'cp-clip', text: o.latestRemark }) : el('span', { class: 'cp-sub', text: '—' }),
             o.lastReviewDate ? el('div', { class: 'cp-sub', text: dmy(o.lastReviewDate) }) : null])
         ]));
@@ -406,7 +405,7 @@
       var mob = el('div', { class: 'cp-mob' });
       d.items.forEach(function (o) {
         mob.appendChild(el('div', { class: 'cp-mcard', onclick: function () { openForm(o.id); } }, [
-          el('div', { class: 't' }, [el('b', { text: o.customerName }), el('span', {}, [ragDot(o.rag), ' ', statusBadge(o.status)])]),
+          el('div', { class: 't' }, [el('b', { text: o.customerName }), el('span', {}, [statusBadge(o.status)])]),
           el('div', { class: 'cp-sub cp-clip', text: (o.opportunity || '') + (o.edp ? ' · ' + o.edp : '') }),
           el('div', { class: 'cp-sub', text: 'Potential ' + lakh(o.annualPotential) + ' L · Expected ' + lakh(o.expectedSale) + ' L' + (o.productGroup ? ' · ' + o.productGroup : '') })
         ]));
@@ -565,8 +564,7 @@
         inp('personResponsible', 'Person responsible', { ph: 'Defaults to the SE' })
       ])]));
       b.appendChild(el('div', { class: 'cp-sec' }, [el('h3', { text: 'Status' }), el('div', { class: 'cp-grid' }, [
-        inp('status', 'Status of the opportunity', { list: META.statuses, def: 'Trial planned' }),
-        seg('rag', 'Red / Yellow / Green', META.rag, 'rag')
+        inp('status', 'Status of the opportunity', { list: META.statuses, def: 'Trial planned' })
       ])]));
       if (fields.status && fields.status.tagName === 'SELECT') paintStatus(fields.status);
       if (id) {
@@ -576,7 +574,6 @@
           hist.appendChild(el('div', { class: 'h' }, [
             el('b', { text: 'Remarks as on ' + dmy(rv.reviewDate) }), ' ',
             rv.status && rv.prevStatus && rv.status !== rv.prevStatus ? el('span', { class: 'cp-sub', text: rv.prevStatus + ' → ' + rv.status }) : null,
-            rv.rag ? el('span', {}, [' ', ragDot(rv.rag)]) : null,
             el('div', { text: rv.remark || '(status / values updated)' }),
             rv.reviewedByName ? el('div', { class: 'cp-sub', text: 'by ' + rv.reviewedByName }) : null
           ]));
@@ -769,7 +766,6 @@
     tl.addEventListener('change', function () { mark('timeline', tl.value); });
     card.appendChild(el('div', { class: 'cp-rgrid' }, [
       el('div', { class: 'cp-f' }, [el('label', { text: 'Status' }), st]),
-      el('div', { class: 'cp-f' }, [el('label', { text: 'R / Y / G' }), rag]),
       num('expectedSale', 'Expected (L)', o.expectedSale),
       num('orderValue', 'Order value (L)', o.orderValue),
       el('div', { class: 'cp-f' }, [el('label', { text: 'Time line' }), tl])

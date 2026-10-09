@@ -137,7 +137,7 @@
   .payroll-nav a:hover{color:#fff;}
   .payroll-nav a.active{color:#fff;border-bottom-color:var(--accent);}
 </style>
-<script src="/fuel-expense-app.js?v=20261009b" defer></script><script src="/attendance-all-app.js?v=20261009b" defer></script><script src="/appointments-reminder-app.js?v=20261009b" defer></script><script src="/crm-global.js?v=20261009b" defer></script><link rel="stylesheet" href="/motion.css?v=20261009b"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/><link rel="stylesheet" href="/payroll/payroll-fix.css?v=20261009b"/></head>
+<script src="/fuel-expense-app.js?v=20261009c" defer></script><script src="/attendance-all-app.js?v=20261009c" defer></script><script src="/appointments-reminder-app.js?v=20261009c" defer></script><script src="/crm-global.js?v=20261009c" defer></script><link rel="stylesheet" href="/motion.css?v=20261009c"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/><link rel="stylesheet" href="/payroll/payroll-fix.css?v=20261009c"/></head>
 <body>
 
   <!-- ============ ACCESS GATE ============ -->
@@ -752,13 +752,15 @@
       const parts = Object.keys(lab).map(t => { const v = L.month[t]; if (!v.count) return null;
         return t === "PERMISSION" ? `${lab[t]} ${v.hours} h (${v.count})` : t === "HALF_DAY" ? `${lab[t]} ×${v.count}` : `${lab[t]} ${v.days} day${v.days == 1 ? "" : "s"}`; }).filter(Boolean);
       box.innerHTML = parts.length
-        ? `<b>Approved leave in ${MONTHS[month-1]} ${year}:</b> ${escapeHtml(parts.join(" · "))} — <b>${L.monthLeaveDays}</b> leave day${L.monthLeaveDays == 1 ? "" : "s"}. <button type="button" class="link-btn" id="f-leave-fill">Fill present days</button><span class="leave-sub">Shown on the payslip “with leave details”. Year so far: ${L.yearLeaveDays} day${L.yearLeaveDays == 1 ? "" : "s"}.</span>`
+        ? `<b>Approved leave in ${MONTHS[month-1]} ${year}:</b> ${escapeHtml(parts.join(" · "))} — <b>${L.monthLeaveDays}</b> leave day${L.monthLeaveDays == 1 ? "" : "s"}${L.monthLopDays ? ` (<b>${L.monthLopDays}</b> loss of pay)` : ""}. <button type="button" class="link-btn" id="f-leave-fill">Fill present days</button><span class="leave-sub">Shown on the payslip “with leave details”. Year so far: ${L.yearLeaveDays} day${L.yearLeaveDays == 1 ? "" : "s"}.</span>`
         : `<b>No approved leave in ${MONTHS[month-1]} ${year}.</b> <span class="leave-sub">Year so far: ${L.yearLeaveDays} day${L.yearLeaveDays == 1 ? "" : "s"}.</span>`;
       const fill = document.getElementById("f-leave-fill");
       if (fill) fill.addEventListener("click", () => {
         const wd = parseFloat(document.getElementById("f-workdays").value);
         if (isNaN(wd)) { showToast("Enter working days first.", true); return; }
-        setVal("f-presentdays", Math.max(0, wd - L.monthLeaveDays)); computePreview();
+        setVal("f-presentdays", Math.max(0, wd - L.monthLeaveDays));
+        if (L.monthLopDays) setVal("f-lop", L.monthLopDays);
+        computePreview();
       });
     } catch(err){ box.textContent = "Could not load leave: " + err.message; }
   }

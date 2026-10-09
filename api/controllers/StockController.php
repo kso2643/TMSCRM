@@ -27,7 +27,7 @@ class StockLedger
         self::$ready = true;
         $tail = ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
         ensure_schema([
-            'Stock' => ['create' => '', 'columns' => ['brand' => 'VARCHAR(100) NULL']],
+            'Stock' => ['create' => '', 'columns' => ['brand' => 'VARCHAR(100) NULL', 'extraInfo' => 'TEXT NULL']],
             'StockLevel' => ['create' => "CREATE TABLE IF NOT EXISTS `StockLevel` (
   `id`        VARCHAR(30)   NOT NULL,
   `stockId`   VARCHAR(30)   NOT NULL,
@@ -294,7 +294,7 @@ class StockController
         $itemGroup = qp('itemGroup',''); $inStockOnly = qp('inStockOnly',''); $status = qp('status',''); $loc = qp('loc','');
 
         $where=['s.isActive=1']; $params=[];
-        if($search){$like="%$search%";$where[]='(s.itemCode LIKE ? OR s.itemName LIKE ? OR s.itemGroup LIKE ? OR s.brand LIKE ?)';$params=array_merge($params,[$like,$like,$like,$like]);}
+        if($search){$like="%$search%";$where[]='(s.itemCode LIKE ? OR s.itemName LIKE ? OR s.itemGroup LIKE ? OR s.brand LIKE ? OR s.extraInfo LIKE ?)';$params=array_merge($params,[$like,$like,$like,$like,$like]);}
         if($categoryId){$where[]='s.categoryId=?';$params[]=$categoryId;}
         if($itemGroup){$where[]='s.itemGroup=?';$params[]=$itemGroup;}
         if($brand==='__none'){$where[]="(s.brand IS NULL OR s.brand='')";}
@@ -514,16 +514,14 @@ class StockController
             'min'=>['minimum stock','min stock','minimum','min','reorder level'],
             'location'=>['location (optional)','location','place','where','city','state','warehouse','branch'],
         ];
-        foreach(array_slice($rows,0,6,true) as $ri=>$row){
-            $map=[];
-            foreach($row as $ci=>$h){
-                $h=strtolower(trim(preg_replace('/\s+/',' ',str_replace(['*','.'],'',(string)$h))));
-                if($h==='') continue;
-                foreach($alias as $k=>$names) if(!isset($map[$k])&&in_array($h,$names,true)){ $map[$k]=$ci; break; }
-            }
-            if(isset($map['itemCode'])) return ['row'=>$ri,'map'=>$map];
-        }
-        return null;
+        // Any layout: exact names first, then keyword guesses (ColumnGuess) — only the
+        // product code is required; description / qty / price / brand are used when found
+        // and every other column is kept as the item's extra details.
+        $r=ColumnGuess::productRules();
+        $fuzzy=['itemCode'=>$r['itemCode'],'qty'=>$r['qty'],'netPrice'=>$r['price'],'brand'=>$r['brand'],'itemGroup'=>$r['group'],
+                'min'=>[['min','reorder'],[]],'location'=>[['location','place','warehouse','branch','godown'],[]],'itemName'=>$r['name']];
+        $hit=ColumnGuess::find($rows,$alias,$fuzzy,'itemCode',15);
+        return $hit?['row'=>$hit['row'],'map'=>$hit['map'],'extra'=>$hit['extra']]:null;
     }
 
     // POST /api/products/stock/import — multipart: file, locType (AUTO|HAND|LOCAL|STATE), state (state or city), brand
@@ -550,12 +548,16 @@ class StockController
         $note='Upload '.mb_substr($origName,0,80);
         $num=function($v){ $v=trim(str_replace([',','₹'],'',(string)$v)); return $v===''?null:(is_numeric($v)?(float)$v:null); };
         $seen=[]; // itemCode => true, so an item listed on several sheets is counted once
+        // A workbook with one sheet of items whose name is not a place goes to hand stock
+        // (any supplier / Tally sheet can be uploaded as it is).
+        $dataSheets=count(array_filter($sheets,fn($sh)=>self::headerMap($sh['rows'])!==null));
 
         foreach($sheets as $sheet){
             $sname=trim($sheet['name']);
             $hm=self::headerMap($sheet['rows']);
-            if(!$hm){ $sheetReport[]=['sheet'=>$sname,'status'=>'skipped','reason'=>'no ItemCode column']; continue; }
+            if(!$hm){ $sheetReport[]=['sheet'=>$sname,'status'=>'skipped','reason'=>'no product / item code column found']; continue; }
             $sheetPlace=$fixed?:StockLedger::parsePlace($sname);
+            if(!$sheetPlace&&$dataSheets===1&&!isset($hm['map']['location'])) $sheetPlace=['HAND',''];
             $map=$hm['map']; $rowsIn=0; $badPlace=0;
             $get=fn($row,$k)=>isset($map[$k])?trim((string)($row[$map[$k]]??'')):'';
             foreach($sheet['rows'] as $i=>$row){
@@ -580,6 +582,7 @@ class StockController
                     $set('edd',$get($row,'edd')); $set('rad',$get($row,'rad'));
                     $brand=$get($row,'brand')?:$pickedBrand; if($brand!=='') $data['brand']=mb_substr($brand,0,100);
                     $set('minimumStock',$num($get($row,'min')));
+                    $set('extraInfo',ColumnGuess::extraText($row,$hm['extra']??[]));
                     if($ex){
                         $sid=$ex['id'];
                         $sets=[];$ps=[];foreach($data as $k=>$v){$sets[]="$k=?";$ps[]=$v;}

@@ -87,6 +87,13 @@ class LeaveController
             'fromTime' => 'VARCHAR(5) NULL',
             'toTime'   => 'VARCHAR(5) NULL',
             'hours'    => 'DECIMAL(5,2) NULL',
+            // Admin can turn a permission (e.g. one that ran over) into a half day / full day /
+            // leave of n days, paid or loss of pay; the original type is kept for the record.
+            'isLop'        => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'originalType' => 'VARCHAR(12) NULL',
+            'convertedById'=> 'VARCHAR(30) NULL',
+            'convertedAt'  => 'DATETIME NULL',
+            'convertNote'  => 'TEXT NULL',
         ]]], 'Leave permission-hours columns');
     }
 
@@ -98,7 +105,101 @@ class LeaveController
         $r['totalDays'] = $r['totalDays'] === null ? null : (float) $r['totalDays'];
         $r['hours'] = isset($r['hours']) && $r['hours'] !== null ? (float) $r['hours'] : null;
         $r['typeLabel'] = self::LABELS[$r['leaveType']] ?? $r['leaveType'];
+        $r['isLop'] = !empty($r['isLop']);
+        $r['dayKind'] = self::dayKind($r);
         return $r;
+    }
+
+    /** What a leave row counts as: HALF_DAY, FULL_DAY (one day), LEAVE (several days) or PERMISSION. */
+    public static function dayKind(array $r): string
+    {
+        if ($r['leaveType'] === 'PERMISSION') return 'PERMISSION';
+        if ($r['leaveType'] === 'HALF_DAY') return 'HALF_DAY';
+        return (float) ($r['totalDays'] ?? 1) > 1 ? 'LEAVE' : 'FULL_DAY';
+    }
+
+    private function fetchOne(string $id): array
+    {
+        $s = db()->prepare('SELECT l.*, u.id AS u_id, u.name AS u_name, u.department, a.name AS a_name FROM `Leave` l LEFT JOIN `User` u ON u.id=l.userId LEFT JOIN `User` a ON a.id=l.approvedById WHERE l.id=? LIMIT 1');
+        $s->execute([$id]);
+        $r = $s->fetch();
+        if (!$r) sendError('Leave request not found.', 404);
+        return $this->shape($r);
+    }
+
+    /** [leaveType, totalDays, toDate] for a half day / full day / n-day leave starting $from. */
+    private static function kindToRow(string $kind, string $from, $days, string $paidType): array
+    {
+        if ($kind === 'HALF_DAY') return ['HALF_DAY', 0.5, $from];
+        if ($kind === 'FULL_DAY') return [$paidType, 1, $from];
+        $n = (int) $days;
+        if ($n < 1 || $n > 60) sendError('Enter the number of leave days (1–60).', 400);
+        return [$paidType, $n, date('Y-m-d', strtotime("$from +" . ($n - 1) . ' days'))];
+    }
+
+    // PATCH /api/leaves/:id/convert — { to: HALF_DAY|FULL_DAY|LEAVE, days?, lop?, leaveType?, note? } (Admin)
+    // Typically: the engineer took longer than the permission → count it as a half day / full day / leave.
+    public function convert(string $id): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        $r = $this->fetchOne($id);
+        $b = request_body();
+        $kind = strtoupper((string) ($b['to'] ?? ''));
+        if (!in_array($kind, ['HALF_DAY', 'FULL_DAY', 'LEAVE'], true)) sendError('Choose half day, full day or leave.', 400);
+        $paidType = in_array(strtoupper((string) ($b['leaveType'] ?? 'CASUAL')), ['CASUAL', 'SICK', 'PERSONAL'], true) ? strtoupper((string) ($b['leaveType'] ?? 'CASUAL')) : 'CASUAL';
+        $from = substr($r['fromDate'], 0, 10);
+        [$type, $days, $to] = self::kindToRow($kind, $from, $b['days'] ?? 1, $paidType);
+        $lop = !empty($b['lop']) ? 1 : 0;
+        $note = trim((string) ($b['note'] ?? ''));
+        db()->prepare("UPDATE `Leave` SET originalType=COALESCE(originalType, leaveType), leaveType=?, totalDays=?, toDate=?, isLop=?,
+                       status='APPROVED', approvedById=COALESCE(approvedById, ?), approvedAt=COALESCE(approvedAt, ?),
+                       convertedById=?, convertedAt=?, convertNote=?, updatedAt=? WHERE id=?")
+            ->execute([$type, $days, $to . ' 00:00:00', $lop, $auth['id'], now_sql(), $auth['id'], now_sql(), $note ?: null, now_sql(), $id]);
+        log_activity($auth['id'], 'LEAVE_CONVERTED', 'Leave', $id, ['from' => $r['leaveType'], 'to' => $kind, 'days' => $days, 'lop' => $lop]);
+        $label = ['HALF_DAY' => 'a half day', 'FULL_DAY' => 'a full day', 'LEAVE' => "$days days leave"][$kind];
+        sendSuccess(['leave' => $this->fetchOne($id)], 'Counted as ' . $label . ($lop ? ' (loss of pay)' : ''));
+    }
+
+    // POST /api/leaves/assign — { userId, to: HALF_DAY|FULL_DAY|LEAVE, fromDate, days?, lop?, leaveType?, reason } (Admin)
+    // Mark leave for an employee directly (approved straight away).
+    public function assign(): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        $b = request_body();
+        $uid = trim((string) ($b['userId'] ?? ''));
+        $s = db()->prepare('SELECT id FROM `User` WHERE id=? AND isActive=1'); $s->execute([$uid]);
+        if (!$s->fetch()) sendError('Choose the employee.', 400);
+        $from = substr((string) ($b['fromDate'] ?? ''), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) sendError('Choose the date.', 400);
+        $kind = strtoupper((string) ($b['to'] ?? ''));
+        if (!in_array($kind, ['HALF_DAY', 'FULL_DAY', 'LEAVE'], true)) sendError('Choose half day, full day or leave.', 400);
+        $paidType = in_array(strtoupper((string) ($b['leaveType'] ?? 'CASUAL')), ['CASUAL', 'SICK', 'PERSONAL'], true) ? strtoupper((string) ($b['leaveType'] ?? 'CASUAL')) : 'CASUAL';
+        [$type, $days, $to] = self::kindToRow($kind, $from, $b['days'] ?? 1, $paidType);
+        $reason = trim((string) ($b['reason'] ?? '')) ?: 'Marked by admin';
+        $ov = db()->prepare("SELECT id FROM `Leave` WHERE userId=? AND status IN ('PENDING','APPROVED') AND leaveType<>'PERMISSION' AND DATE(fromDate)<=? AND DATE(toDate)>=? LIMIT 1");
+        $ov->execute([$uid, $to, $from]);
+        if ($ov->fetch()) sendError('This employee already has leave on those dates — convert or edit that one instead.', 400);
+        $id = gen_id();
+        db()->prepare("INSERT INTO `Leave` (id,userId,leaveType,fromDate,toDate,totalDays,reason,status,approvedById,approvedAt,isLop,convertedById,convertedAt,createdAt,updatedAt)
+                       VALUES (?,?,?,?,?,?,?,'APPROVED',?,?,?,?,?,?,?)")
+            ->execute([$id, $uid, $type, $from . ' 00:00:00', $to . ' 00:00:00', $days, mb_substr($reason, 0, 2000), $auth['id'], now_sql(), !empty($b['lop']) ? 1 : 0, $auth['id'], now_sql(), now_sql(), now_sql()]);
+        log_activity($auth['id'], 'LEAVE_ASSIGNED', 'Leave', $id, ['userId' => $uid, 'kind' => $kind, 'days' => $days]);
+        sendSuccess(['leave' => $this->fetchOne($id)], 'Leave marked', 201);
+    }
+
+    // GET /api/leaves/calendar?month=&year=&userId= — approved + pending leave for the month (Admin tier: everyone)
+    public function calendar(): void
+    {
+        $auth = authenticate();
+        $m = max(1, min(12, (int) qp('month', date('n')))); $y = (int) qp('year', date('Y'));
+        $m0 = sprintf('%04d-%02d-01', $y, $m); $m1 = date('Y-m-t', strtotime($m0));
+        $where = ["l.status IN ('PENDING','APPROVED')", 'DATE(l.fromDate)<=?', 'DATE(l.toDate)>=?']; $p = [$m1, $m0];
+        if (!is_admin_tier($auth['role'])) { $where[] = 'l.userId=?'; $p[] = $auth['id']; }
+        elseif (qp('userId')) { $where[] = 'l.userId=?'; $p[] = qp('userId'); }
+        $s = db()->prepare('SELECT l.*, u.id AS u_id, u.name AS u_name, u.department, a.name AS a_name FROM `Leave` l LEFT JOIN `User` u ON u.id=l.userId LEFT JOIN `User` a ON a.id=l.approvedById
+                            WHERE ' . implode(' AND ', $where) . ' ORDER BY u.name, l.fromDate');
+        $s->execute($p);
+        sendSuccess(['month' => $m, 'year' => $y, 'leaves' => array_map([$this, 'shape'], $s->fetchAll())]);
     }
 
     // GET /api/leaves?status=&userId=&type=&year=

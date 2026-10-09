@@ -5,6 +5,12 @@
    Types: Casual leave, Sick leave, Personal leave, Half day and
    Permission (hourly) — permission takes a time from / to on one day and
    the hours are worked out for you (at most 8 hours).
+
+   Admin: "Count as…" turns a permission that ran over (or any request) into
+   a half day, a full day or a leave of n days, paid or loss of pay — it then
+   counts in the payroll working days and shows on the payslip. "Mark leave"
+   records leave for an employee directly. The Calendar tab shows everyone's
+   leave by day.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -20,6 +26,7 @@
   function token() { try { return localStorage.getItem('crm_token'); } catch (e) { return null; } }
   function me() { try { return JSON.parse(localStorage.getItem('crm_user') || 'null') || {}; } catch (e) { return {}; } }
   var isAdminTier = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(me().role) !== -1;
+  var isAdmin = ['SUPER_ADMIN', 'ADMIN'].indexOf(me().role) !== -1; // convert / mark leave (require_admin in the API)
   function api(method, path, body) {
     return fetch(API + '/api' + path, {
       method: method, headers: { Authorization: 'Bearer ' + (token() || ''), 'Content-Type': 'application/json' },
@@ -130,6 +137,21 @@
       '.lv-type{display:inline-block;padding:.1rem .5rem;border-radius:.4rem;font-size:.74rem;font-weight:600;background:#eef2ff;color:#3730a3}',
       '.lv-type.t-permission{background:#ecfeff;color:#0e7490}.lv-type.t-personal{background:#fdf4ff;color:#a21caf}.lv-type.t-sick{background:#fef2f2;color:#b91c1c}.lv-type.t-half_day{background:#fffbeb;color:#b45309}',
       '.lv-empty{padding:2rem;text-align:center;color:#64748b;font-size:.9rem}',
+      '.lv-modal{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:2147483400;display:flex;align-items:flex-start;justify-content:center;padding:6vh 1rem;overflow:auto}',
+      '.lv-dlg{background:#fff;border-radius:1rem;max-width:620px;width:100%;padding:1.1rem;box-shadow:0 20px 50px rgba(0,0,0,.3)}.dark .lv-dlg{background:#1e293b}.lv-dlg h2{font-size:1.05rem;font-weight:700;margin:0 0 .8rem}',
+      '.lv-dlg .lv-f{margin-bottom:.6rem}',
+      '.lv-seg{display:flex;gap:.35rem;flex-wrap:wrap}.lv-seg button{flex:1;min-width:110px;padding:.55rem .6rem;border:1px solid #cbd5e1;border-radius:.55rem;background:#fff;font-weight:600;font-size:.85rem;cursor:pointer;color:inherit}',
+      '.lv-seg button.on{background:#1e3a8a;border-color:#1e3a8a;color:#fff}.dark .lv-seg button{background:#0f172a;border-color:#334155}.dark .lv-seg button.on{background:#2563eb}',
+      '.lv-cal-head{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem}.lv-cal-head b{min-width:9rem;text-align:center}',
+      '.lv-cal-leg{display:flex;gap:.7rem;flex-wrap:wrap;margin-left:auto;font-size:.74rem;color:#64748b}.lv-cal-leg i{display:inline-block;width:.7rem;height:.7rem;border-radius:.2rem;margin-right:.25rem;vertical-align:-1px}',
+      '.lv-cal{display:grid;grid-template-columns:repeat(7,minmax(110px,1fr));gap:1px;background:#e2e8f0;border:1px solid #e2e8f0;border-radius:.7rem;overflow:hidden;min-width:780px}.dark .lv-cal{background:#334155;border-color:#334155}',
+      '.lv-cal-wd{background:#f8fafc;padding:.4rem;text-align:center;font-size:.7rem;font-weight:700;text-transform:uppercase;color:#64748b}.dark .lv-cal-wd{background:#0f172a}',
+      '.lv-cal-c{background:#fff;min-height:96px;padding:.3rem .35rem;display:flex;flex-direction:column;gap:2px}.dark .lv-cal-c{background:#020617}',
+      '.lv-cal-c.out{background:#f8fafc}.dark .lv-cal-c.out{background:#0b1222}.lv-cal-c.sun{background:#fafafa}.lv-cal-c.today{box-shadow:inset 0 0 0 2px #1e3a8a}',
+      '.lv-cal-n{display:flex;justify-content:space-between;font-size:.76rem;font-weight:700;color:#334155}.dark .lv-cal-n{color:#cbd5e1}.lv-cal-n em{font-style:normal;font-size:.64rem;background:#eef2ff;color:#3730a3;border-radius:999px;padding:0 .35rem}',
+      '.lv-cal-ev{font-size:.68rem;line-height:1.3;padding:.1rem .3rem;border-radius:.3rem;border-left:3px solid var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#0f172a}',
+      '.dark .lv-cal-ev{background:color-mix(in srgb,var(--c) 25%,#020617);color:#f1f5f9}.lv-cal-ev.pend{background:#fff;border:1px dashed var(--c);border-left-width:3px}.lv-cal-ev.lop{box-shadow:inset -3px 0 0 #dc2626}',
+      '.lv-cal-more{font-size:.64rem;color:#64748b;padding-left:.3rem}',
       '.lv-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;box-shadow:0 10px 25px rgba(0,0,0,.2);transition:opacity .25s,transform .25s;max-width:calc(100vw - 32px)}',
       '.lv-toast.in{opacity:1;transform:translate(-50%,0)}.lv-toast.err{background:#b91c1c}',
       '@media (max-width:640px){.lv-table thead{display:none}.lv-table tr{display:block;border-bottom:1px solid #e2e8f0;padding:.5rem 0}.lv-table td{display:block;border:none;padding:.2rem 0}}'
@@ -215,7 +237,9 @@
     var same = String(r.toDate || '').slice(0, 10) === String(r.fromDate).slice(0, 10);
     var main = dmy(r.fromDate) + (same ? '' : ' – ' + dmy(r.toDate));
     var sub = r.leaveType === 'PERMISSION' ? (r.fromTime + ' – ' + r.toTime + ' · ' + hrs(r.hours)) : r.leaveType === 'HALF_DAY' ? 'Half day' : (r.totalDays + ' day' + (r.totalDays == 1 ? '' : 's'));
-    return el('td', {}, [el('div', { text: main }), el('div', { class: 'sub', text: sub })]);
+    var conv = r.originalType && r.originalType !== r.leaveType
+      ? el('div', { class: 'sub', style: 'color:#b45309', text: 'Was ' + (LABEL[r.originalType] || r.originalType).toLowerCase() + (r.originalType === 'PERMISSION' && r.fromTime ? ' ' + r.fromTime + '–' + r.toTime : '') + (r.convertNote ? ' — ' + r.convertNote : '') }) : null;
+    return el('td', {}, [el('div', { text: main }), el('div', { class: 'sub', text: sub }), r.isLop ? el('span', { class: 'lv-badge', style: '--c:#dc2626', text: 'Loss of pay' }) : null, conv]);
   }
 
   function decide(r, status, btn) {
@@ -239,6 +263,9 @@
         var no = el('button', { class: 'lv-btn sm red', 'data-reject': r.id, text: 'Reject' }); no.onclick = function () { decide(r, 'REJECTED', no); };
         acts.appendChild(ok); acts.appendChild(no);
       }
+      if (isAdmin && state.tab === 'all' && r.status !== 'REJECTED') {
+        acts.appendChild(el('button', { class: 'lv-btn sm', 'data-convert': r.id, text: r.leaveType === 'PERMISSION' ? 'Count as…' : 'Change…', title: 'Count this as a half day, full day or leave (paid or loss of pay)', onclick: function () { countAs(r); } }));
+      }
       if (r.status === 'PENDING' && mine) {
         var wd = el('button', { class: 'lv-btn sm', 'data-withdraw': r.id, text: 'Withdraw' });
         wd.onclick = function () {
@@ -259,20 +286,129 @@
     return el('div', { class: 'lv-tw' }, [el('table', { class: 'lv-table' }, [el('thead', {}, [head]), el('tbody', {}, rows)])]);
   }
 
+  // ── admin: count a permission as half day / full day / leave, or mark leave directly ──
+  function modal(title, bodyKids, onOk, okText) {
+    var err = el('div', { class: 'lv-hours bad', style: 'display:none' });
+    var ok = el('button', { class: 'lv-btn pri', id: 'lv-dlg-ok', text: okText || 'Save' });
+    var dlg = el('div', { class: 'lv-dlg', id: 'lv-dlg' }, [el('h2', { text: title })].concat(bodyKids).concat([err,
+      el('div', { class: 'lv-actions' }, [el('button', { class: 'lv-btn', text: 'Cancel', onclick: function () { m.remove(); } }), ok])]));
+    var m = el('div', { class: 'lv-modal' }, [dlg]);
+    m.addEventListener('click', function (e) { if (e.target === m) m.remove(); });
+    ok.onclick = function () {
+      ok.disabled = true; err.style.display = 'none';
+      onOk().then(function (j) { m.remove(); toast(j.message || 'Saved'); load(); })
+        .catch(function (e) { ok.disabled = false; err.textContent = e.message; err.style.display = ''; });
+    };
+    document.body.appendChild(m);
+    return m;
+  }
+  function kindPicker(def) {
+    var st = { to: def || 'HALF_DAY' };
+    var days = el('input', { type: 'number', min: '1', max: '60', value: '2', id: 'lv-c-days', style: 'width:5rem' });
+    var seg = el('div', { class: 'lv-seg' });
+    [['HALF_DAY', '½ Half day'], ['FULL_DAY', '1 Full day'], ['LEAVE', 'Leave (days)']].forEach(function (o) {
+      seg.appendChild(el('button', { type: 'button', 'data-kind': o[0], class: st.to === o[0] ? 'on' : '', text: o[1], onclick: function () {
+        st.to = o[0]; Array.prototype.forEach.call(seg.children, function (b) { b.classList.toggle('on', b.getAttribute('data-kind') === st.to); });
+        daysF.style.display = st.to === 'LEAVE' ? '' : 'none';
+      } }));
+    });
+    var daysF = field('Number of days', days); daysF.style.display = st.to === 'LEAVE' ? '' : 'none';
+    var lt = el('select', { id: 'lv-c-type' }, [['CASUAL', 'Casual leave'], ['SICK', 'Sick leave'], ['PERSONAL', 'Personal leave']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+    var lop = el('input', { type: 'checkbox', id: 'lv-c-lop', style: 'width:auto' });
+    var note = el('input', { id: 'lv-c-note', placeholder: 'e.g. went 10–12 but came back at 4 PM' });
+    return {
+      nodes: [field('Count as', seg, true), el('div', { class: 'lv-grid' }, [daysF, field('Leave type (for full day / leave)', lt),
+        el('div', { class: 'lv-f' }, [el('label', { style: 'display:flex;gap:.4rem;align-items:center;margin-top:1.4rem;cursor:pointer' }, [lop, 'Loss of pay (LOP) — deduct from salary'])]),
+        field('Note', note)])],
+      value: function () { return { to: st.to, days: days.value, leaveType: lt.value, lop: lop.checked, note: note.value.trim() }; }
+    };
+  }
+  function countAs(r) {
+    var k = kindPicker(r.leaveType === 'HALF_DAY' ? 'HALF_DAY' : r.leaveType === 'PERMISSION' ? 'HALF_DAY' : 'FULL_DAY');
+    var who = (r.user && r.user.name) || '';
+    modal('Count ' + who + '’s ' + (LABEL[r.leaveType] || 'request').toLowerCase() + ' on ' + dmy(r.fromDate) + ' as…',
+      [r.leaveType === 'PERMISSION' ? el('p', { class: 'sub', style: 'margin:-.4rem 0 .6rem;color:#64748b;font-size:.82rem', text: 'Permission ' + r.fromTime + '–' + r.toTime + ' (' + hrs(r.hours) + '). If they took more time, count it as a half day, a full day or leave — it is then counted in the working days and shown on the payslip.' }) : null].concat(k.nodes),
+      function () { return api('PATCH', '/leaves/' + r.id + '/convert', k.value()); }, 'Save');
+  }
+  var users = null;
+  function markLeave() {
+    var who = el('select', { id: 'lv-m-user' }, [el('option', { value: '', text: 'Loading…' })]);
+    var from = el('input', { type: 'date', id: 'lv-m-date', value: today() });
+    var reason = el('input', { id: 'lv-m-reason', placeholder: 'e.g. Absent without informing' });
+    var k = kindPicker('FULL_DAY');
+    (users ? Promise.resolve(users) : api('GET', '/md-desk/recipients').then(function (j) { return (users = j.data.users || []); })).then(function (list) {
+      clear(who).appendChild(el('option', { value: '', text: 'Choose employee…' }));
+      list.forEach(function (u) { who.appendChild(el('option', { value: u.id, text: u.name + (u.department ? ' · ' + u.department : '') })); });
+    }).catch(function () {});
+    modal('Mark leave for an employee', [el('div', { class: 'lv-grid' }, [field('Employee', who, true), field('Date (from)', from, true)])].concat(k.nodes).concat([field('Reason', reason)]),
+      function () { var v = k.value(); v.userId = who.value; v.fromDate = from.value; v.reason = reason.value.trim() || v.note; return api('POST', '/leaves/assign', v); }, 'Mark leave');
+  }
+
+  // ── calendar ─────────────────────────────────────────────────────────
+  var cal = { y: new Date().getFullYear(), m: new Date().getMonth() + 1, leaves: [] };
+  var KIND_C = { HALF_DAY: '#d97706', FULL_DAY: '#2563eb', LEAVE: '#7c3aed', PERMISSION: '#0e7490' };
+  function calendarCard() {
+    var box = el('div', { id: 'lv-cal' }, [el('div', { class: 'lv-empty', text: 'Loading…' })]);
+    function draw() {
+      var first = new Date(cal.y, cal.m - 1, 1), n = new Date(cal.y, cal.m, 0).getDate(), lead = first.getDay();
+      var byDay = {};
+      cal.leaves.forEach(function (r) {
+        var a = String(r.fromDate).slice(0, 10), b = String(r.toDate || r.fromDate).slice(0, 10);
+        for (var d = 1; d <= n; d++) {
+          var ds = cal.y + '-' + String(cal.m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+          if (ds >= a && ds <= b) (byDay[ds] = byDay[ds] || []).push(r);
+        }
+      });
+      var grid = el('div', { class: 'lv-cal' }, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(function (w) { return el('div', { class: 'lv-cal-wd', text: w }); }));
+      for (var i = 0; i < lead; i++) grid.appendChild(el('div', { class: 'lv-cal-c out' }));
+      var td = today();
+      for (var d = 1; d <= n; d++) {
+        var ds = cal.y + '-' + String(cal.m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        var list = byDay[ds] || [], sun = new Date(cal.y, cal.m - 1, d).getDay() === 0;
+        var c = el('div', { class: 'lv-cal-c' + (sun ? ' sun' : '') + (ds === td ? ' today' : ''), 'data-date': ds }, [el('div', { class: 'lv-cal-n' }, [String(d), list.length ? el('em', { text: String(list.length) }) : null])]);
+        list.slice(0, 4).forEach(function (r) {
+          var k = r.dayKind || 'FULL_DAY';
+          c.appendChild(el('div', { class: 'lv-cal-ev' + (r.status === 'PENDING' ? ' pend' : '') + (r.isLop ? ' lop' : ''), style: '--c:' + (KIND_C[k] || '#2563eb'),
+            title: ((r.user && r.user.name) || '') + ' · ' + (LABEL[r.leaveType] || r.leaveType) + (k === 'PERMISSION' ? ' ' + r.fromTime + '–' + r.toTime : '') + (r.isLop ? ' · loss of pay' : '') + (r.status === 'PENDING' ? ' · pending' : '') + (r.reason ? '\n' + r.reason : '') },
+            [el('b', { text: isAdminTier ? ((r.user && r.user.name) || '').split(' ')[0] : (LABEL[r.leaveType] || '') }), ' ' + (k === 'HALF_DAY' ? '½' : k === 'PERMISSION' ? hrs(r.hours) : (isAdminTier ? (k === 'LEAVE' ? 'leave' : 'day') : ''))]));
+        });
+        if (list.length > 4) c.appendChild(el('div', { class: 'lv-cal-more', text: '+' + (list.length - 4) + ' more' }));
+        grid.appendChild(c);
+      }
+      var title = new Date(cal.y, cal.m - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+      clear(box).appendChild(el('div', { class: 'lv-cal-head' }, [
+        el('button', { class: 'lv-btn sm', text: '‹', 'aria-label': 'Previous month', onclick: function () { cal.m--; if (cal.m < 1) { cal.m = 12; cal.y--; } loadCal(); } }),
+        el('b', { text: title }),
+        el('button', { class: 'lv-btn sm', text: '›', 'aria-label': 'Next month', onclick: function () { cal.m++; if (cal.m > 12) { cal.m = 1; cal.y++; } loadCal(); } }),
+        el('span', { class: 'lv-cal-leg' }, [['HALF_DAY', 'Half day'], ['FULL_DAY', 'Full day'], ['LEAVE', 'Leave (days)'], ['PERMISSION', 'Permission']].map(function (o) { return el('span', {}, [el('i', { style: 'background:' + KIND_C[o[0]] }), o[1]]); })
+          .concat([el('span', {}, [el('i', { style: 'background:#fff;border:1.5px dashed #94a3b8' }), 'Pending']), el('span', {}, [el('i', { style: 'background:#dc2626' }), 'Loss of pay'])]))
+      ]));
+      box.appendChild(el('div', { class: 'lv-tw' }, [grid]));
+    }
+    function loadCal() {
+      api('GET', '/leaves/calendar?month=' + cal.m + '&year=' + cal.y).then(function (j) { cal.leaves = j.data.leaves || []; draw(); })
+        .catch(function (e) { clear(box).appendChild(el('div', { class: 'lv-empty', text: e.message })); });
+    }
+    loadCal();
+    return box;
+  }
+
   function listCard() {
     var tabs = el('div', { class: 'lv-tabs' });
-    [['mine', 'My requests'], isAdminTier ? ['all', 'All requests'] : null].forEach(function (t) {
+    [['mine', 'My requests'], isAdminTier ? ['all', 'All requests'] : null, ['calendar', 'Calendar']].forEach(function (t) {
       if (!t) return;
       var b = el('button', { class: 'lv-tab' + (state.tab === t[0] ? ' on' : ''), 'data-tab': t[0] }, [t[1],
         t[0] === 'all' && state.summary && state.summary.pending ? el('span', { class: 'n', text: String(state.summary.pending) }) : null]);
-      b.onclick = function () { state.tab = t[0]; load(); };
+      b.onclick = function () { state.tab = t[0]; if (t[0] === 'calendar') render(); else load(); };
       tabs.appendChild(b);
     });
     var st = el('select', { id: 'lv-fstatus' }, [['', 'All statuses'], ['PENDING', 'Pending'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
     st.value = state.status; st.onchange = function () { state.status = st.value; load(); };
     var ty = el('select', { id: 'lv-ftype' }, [el('option', { value: '', text: 'All types' })].concat(TYPES.map(function (t) { return el('option', { value: t.value, text: t.label }); })));
     ty.value = state.type; ty.onchange = function () { state.type = ty.value; load(); };
-    return el('div', { class: 'lv-card' }, [tabs, el('div', { class: 'lv-filters' }, [st, ty]), el('div', { id: 'lv-list' }, [table()])]);
+    if (state.tab === 'calendar') return el('div', { class: 'lv-card' }, [tabs, calendarCard()]);
+    var mark = isAdmin && state.tab === 'all' ? el('button', { class: 'lv-btn sm pri', id: 'lv-mark', style: 'margin-left:auto', text: '+ Mark leave for employee', onclick: markLeave }) : null;
+    return el('div', { class: 'lv-card' }, [tabs, el('div', { class: 'lv-filters' }, [st, ty, mark]), el('div', { id: 'lv-list' }, [table()])]);
   }
 
   function render() {

@@ -801,8 +801,66 @@
       }).catch(function () {});
   }
 
+  // ── 7. MD desk: unread items addressed to me stay on screen on every page ─
+  // until opened or acknowledged (GET /md-desk/unread, POST /md-desk/:id/ack).
+  var mdHost = null, mdBusy = false;
+  function mdPoll() {
+    if (mdBusy || /^\/md-desk\/?$/.test(location.pathname)) { if (mdHost) mdHost.remove(); return; }
+    mdBusy = true;
+    fetch(API + '/api/md-desk/unread', { headers: { Authorization: 'Bearer ' + (token() || '') } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { mdShow((j && j.data && j.data.items) || []); })
+      .catch(function () {}).then(function () { mdBusy = false; });
+  }
+  function mdShow(items) {
+    if (!items.length) { if (mdHost) { mdHost.remove(); mdHost = null; } return; }
+    if (!mdHost) {
+      mdHost = document.createElement('div'); mdHost.id = 'crm-md-pop';
+      mdHost.attachShadow({ mode: 'open' });
+    }
+    if (!mdHost.isConnected) document.body.appendChild(mdHost);
+    var sh = mdHost.shadowRoot, ICON = { MESSAGE: '💬', TASK: '📌', PRICE: '₹', QUOTATION: '📄' }, LABEL = { MESSAGE: 'Message', TASK: 'Important task', PRICE: 'Price given', QUOTATION: 'New quotation' };
+    sh.innerHTML = '';
+    var st = document.createElement('style');
+    st.textContent = ':host{all:initial}.w{position:fixed;top:72px;right:16px;z-index:2147483100;width:min(380px,calc(100vw - 32px));font:14px/1.4 Inter,system-ui,-apple-system,Segoe UI,sans-serif;' +
+      'background:#fff;color:#0f172a;border:1px solid #c7d2fe;border-top:4px solid #1e3a8a;border-radius:12px;box-shadow:0 16px 40px rgba(15,23,42,.25);animation:in .25s ease-out}' +
+      '@keyframes in{from{transform:translateY(-10px);opacity:0}to{transform:none;opacity:1}}' +
+      '.h{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;font-weight:700;font-size:13px;color:#1e3a8a;border-bottom:1px solid #e2e8f0}' +
+      '.i{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid #f1f5f9}.i:last-child{border-bottom:0}.ic{flex:none;width:30px;height:30px;border-radius:8px;background:#eef2ff;display:flex;align-items:center;justify-content:center;font-weight:700;color:#1e3a8a}' +
+      '.t{font-weight:600}.s{font-size:12px;color:#64748b}.u{color:#dc2626;font-weight:700}.b{display:flex;gap:6px;margin-top:6px}' +
+      'button{font:600 12px/1 inherit;font-family:inherit;border-radius:7px;padding:6px 10px;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#0f172a}button.p{background:#1e3a8a;border-color:#1e3a8a;color:#fff}';
+    var w = document.createElement('div'); w.className = 'w'; w.setAttribute('role', 'alert');
+    var h = document.createElement('div'); h.className = 'h';
+    h.appendChild(document.createTextNode('📣 From the MD desk' + (items.length > 1 ? ' (' + items.length + ')' : '')));
+    w.appendChild(h);
+    items.slice(0, 3).forEach(function (it) {
+      var row = document.createElement('div'); row.className = 'i';
+      var ic = document.createElement('div'); ic.className = 'ic'; ic.textContent = ICON[it.type] || '💬';
+      var col = document.createElement('div'); col.style.flex = '1'; col.style.minWidth = '0';
+      var t = document.createElement('div'); t.className = 't'; t.textContent = it.title;
+      var sub = document.createElement('div'); sub.className = 's';
+      if (it.priority === 'URGENT') { var u = document.createElement('span'); u.className = 'u'; u.textContent = 'URGENT · '; sub.appendChild(u); }
+      sub.appendChild(document.createTextNode((LABEL[it.type] || 'Message') + ' from ' + (it.fromName || 'MD') + (it.dueDate ? ' · due ' + new Date(it.dueDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')));
+      var b = document.createElement('div'); b.className = 'b';
+      var open = document.createElement('button'); open.className = 'p'; open.textContent = 'Open';
+      open.onclick = function () { location.assign('/md-desk/#' + encodeURIComponent(it.id)); };
+      var ok = document.createElement('button'); ok.textContent = 'OK, noted';
+      ok.onclick = function () {
+        row.remove();
+        fetch(API + '/api/md-desk/' + encodeURIComponent(it.id) + '/ack', { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || '') } }).then(mdPoll, mdPoll);
+      };
+      b.appendChild(open); b.appendChild(ok);
+      col.appendChild(t); col.appendChild(sub); col.appendChild(b);
+      row.appendChild(ic); row.appendChild(col); w.appendChild(row);
+    });
+    sh.appendChild(st); sh.appendChild(w);
+  }
+
   function start() {
     keepOverlays();
+    setTimeout(mdPoll, 2500);
+    setInterval(function () { if (document.visibilityState === 'visible') mdPoll(); }, 60000);
+    window.addEventListener('crm-alert', function (e) { var ev = (e && e.detail) || []; if ([].concat(ev.events || ev).some(function (x) { return x && /^MD_DESK/.test(x.type); })) mdPoll(); });
     setTimeout(punchReminder, 4000);
     setInterval(punchReminder, 60000);
     hardLinks();

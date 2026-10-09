@@ -7,15 +7,21 @@
  *   TASK       an important task (priority + due date)
  *   PRICE      a price given to a customer (customer, item, price, discount)
  *   QUOTATION  a new quotation given (customer, quotation no, value)
- * sent to one Admin / Super Admin, or to all of them (toId NULL).
+ * sent to one person (any user), to all Admins (toId NULL, toGroup ADMINS)
+ * or to everyone (toId NULL, toGroup EVERYONE). The Super Admin and Admins
+ * can send to anyone; other users can send to the Super Admin / Admins.
  * Each item has a reply thread and a status: OPEN → SEEN → DONE.
  *
- * Super Admin sees every item; an Admin sees what they sent, what was sent
- * to them, and what was sent to everyone. New items, replies and "done"
- * show up as alerts (AlertFeedController).
+ * Super Admin sees every item; everyone else sees what they sent, what was
+ * sent to them and what was sent to their group. New items, replies and
+ * "done" show up as alerts (AlertFeedController), and unread items addressed
+ * to you pop up on every page until you open or acknowledge them
+ * (crm-global.js → GET /md-desk/unread, POST /md-desk/:id/ack).
  *
  *   GET    /api/md-desk                  items visible to me
- *   GET    /api/md-desk/recipients       Super Admins + Admins (not me)
+ *   GET    /api/md-desk/recipients       who I can send to
+ *   GET    /api/md-desk/unread           unread items to me (for the pop-up on every page)
+ *   POST   /api/md-desk/:id/ack          mark read without opening
  *   GET    /api/md-desk/quotations?q=    recent quotations to pick from
  *   POST   /api/md-desk                  new item
  *   GET    /api/md-desk/:id              item + replies (marks it seen)
@@ -37,10 +43,14 @@ class MdDeskController
   `priority` VARCHAR(10) NOT NULL DEFAULT 'NORMAL', `dueDate` DATE NULL,
   `customerName` VARCHAR(255) NULL, `itemCode` VARCHAR(120) NULL, `productName` VARCHAR(255) NULL,
   `price` DECIMAL(14,2) NULL, `discount` DECIMAL(6,2) NULL, `quotationId` VARCHAR(30) NULL, `quotationNo` VARCHAR(80) NULL, `amount` DECIMAL(14,2) NULL,
-  `fromId` VARCHAR(30) NOT NULL, `toId` VARCHAR(30) NULL,
+  `fromId` VARCHAR(30) NOT NULL, `toId` VARCHAR(30) NULL, `toGroup` VARCHAR(10) NOT NULL DEFAULT 'ADMINS',
   `status` VARCHAR(10) NOT NULL DEFAULT 'OPEN', `seenAt` DATETIME NULL, `doneAt` DATETIME NULL, `doneById` VARCHAR(30) NULL,
   `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `updatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `MdDeskItem_to_idx` (`toId`), KEY `MdDeskItem_from_idx` (`fromId`), KEY `MdDeskItem_created_idx` (`createdAt`)
+$tail", 'columns' => ['toGroup' => "VARCHAR(10) NOT NULL DEFAULT 'ADMINS'"]],
+            'MdDeskRead' => ['create' => "CREATE TABLE IF NOT EXISTS `MdDeskRead` (
+  `itemId` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `readAt` DATETIME NOT NULL,
+  PRIMARY KEY (`itemId`, `userId`)
 $tail"],
             'MdDeskReply' => ['create' => "CREATE TABLE IF NOT EXISTS `MdDeskReply` (
   `id` VARCHAR(30) NOT NULL, `itemId` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `body` TEXT NOT NULL,
@@ -57,16 +67,32 @@ $tail"],
 
     private static function auth(): array
     {
-        $auth = authenticate();
-        if (!in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true)) sendError('The MD desk is for the Super Admin and Admins.', 403);
-        return $auth;
+        return authenticate();
+    }
+
+    private static function isAdmin(array $auth): bool
+    {
+        return in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true);
+    }
+
+    /** SQL condition (alias i) for the items addressed to $auth (directly or through a group). */
+    public static function toMeSql(array $auth): array
+    {
+        $groups = self::isAdmin($auth) ? "'ADMINS','EVERYONE'" : "'EVERYONE'";
+        return ["(i.toId=? OR (i.toId IS NULL AND i.toGroup IN ($groups) AND i.fromId<>?))", [$auth['id'], $auth['id']]];
     }
 
     /** SQL condition (alias i) for the items $auth may see. */
     private static function visible(array $auth): array
     {
         if ($auth['role'] === 'SUPER_ADMIN') return ['1=1', []];
-        return ['(i.fromId=? OR i.toId=? OR i.toId IS NULL)', [$auth['id'], $auth['id']]];
+        [$w, $p] = self::toMeSql($auth);
+        return ["(i.fromId=? OR $w)", array_merge([$auth['id']], $p)];
+    }
+
+    private static function markRead(string $id, string $userId): void
+    {
+        db()->prepare('INSERT IGNORE INTO `MdDeskRead` (itemId,userId,readAt) VALUES (?,?,?)')->execute([$id, $userId, now_sql()]);
     }
 
     private static function load(array $auth, string $id): array
@@ -100,22 +126,50 @@ $tail"],
             FROM `MdDeskItem` i LEFT JOIN `User` f ON f.id=i.fromId LEFT JOIN `User` t ON t.id=i.toId LEFT JOIN `User` d ON d.id=i.doneById
             WHERE $w ORDER BY (i.status='DONE'), FIELD(i.priority,'URGENT','HIGH','NORMAL'), i.createdAt DESC LIMIT 500");
         $s->execute($p);
-        $items = array_map(function ($r) use ($auth) {
+        $rd = db()->prepare('SELECT itemId FROM `MdDeskRead` WHERE userId=?'); $rd->execute([$auth['id']]);
+        $read = array_flip($rd->fetchAll(PDO::FETCH_COLUMN));
+        $admin = self::isAdmin($auth);
+        $items = array_map(function ($r) use ($auth, $read, $admin) {
             $r['mine'] = $r['fromId'] === $auth['id'];
-            $r['toMe'] = $r['toId'] === $auth['id'] || ($r['toId'] === null && $r['fromId'] !== $auth['id']);
+            $r['toMe'] = $r['toId'] === $auth['id'] || ($r['toId'] === null && $r['fromId'] !== $auth['id'] && ($r['toGroup'] === 'EVERYONE' || $admin));
+            $r['unread'] = $r['toMe'] && !isset($read[$r['id']]) && $r['status'] !== 'DONE';
             $r['overdue'] = $r['type'] === 'TASK' && $r['status'] !== 'DONE' && $r['dueDate'] && $r['dueDate'] < date('Y-m-d');
             return $r;
         }, $s->fetchAll());
         sendSuccess(['items' => $items, 'me' => $auth['id'], 'role' => $auth['role']]);
     }
 
+    // GET /api/md-desk/unread — for the pop-up on every page
+    public function unread(): void
+    {
+        $auth = self::auth();
+        [$w, $p] = self::toMeSql($auth);
+        $s = db()->prepare("SELECT i.id, i.type, i.title, i.priority, i.dueDate, i.createdAt, f.name AS fromName
+            FROM `MdDeskItem` i LEFT JOIN `User` f ON f.id=i.fromId
+            WHERE $w AND i.status<>'DONE' AND NOT EXISTS (SELECT 1 FROM `MdDeskRead` r WHERE r.itemId=i.id AND r.userId=?)
+            ORDER BY FIELD(i.priority,'URGENT','HIGH','NORMAL'), i.createdAt DESC LIMIT 5");
+        $s->execute(array_merge($p, [$auth['id']]));
+        sendSuccess(['items' => $s->fetchAll()]);
+    }
+
+    // POST /api/md-desk/:id/ack
+    public function ack(string $id): void
+    {
+        $auth = self::auth();
+        self::load($auth, $id);
+        self::markRead($id, $auth['id']);
+        sendSuccess([], 'OK');
+    }
+
     // GET /api/md-desk/recipients
     public function recipients(): void
     {
         $auth = self::auth();
-        $s = db()->prepare("SELECT id, name, role, department FROM `User` WHERE role IN ('SUPER_ADMIN','ADMIN') AND isActive=1 AND id<>? ORDER BY role='ADMIN' DESC, name");
+        $only = self::isAdmin($auth) ? '' : "role IN ('SUPER_ADMIN','ADMIN') AND ";
+        $s = db()->prepare("SELECT id, name, role, department FROM `User` WHERE {$only}isActive=1 AND id<>?
+            ORDER BY FIELD(role,'SUPER_ADMIN','ADMIN','MANAGER','ACCOUNTS','SALES_ENGINEER','SALES'), name");
         $s->execute([$auth['id']]);
-        sendSuccess(['users' => $s->fetchAll()]);
+        sendSuccess(['users' => $s->fetchAll(), 'canSendToGroups' => self::isAdmin($auth)]);
     }
 
     // GET /api/md-desk/quotations?q=
@@ -146,11 +200,17 @@ $tail"],
         $prio = strtoupper(trim((string) ($b['priority'] ?? 'NORMAL')));
         if (!in_array($prio, self::PRIORITIES, true)) $prio = 'NORMAL';
         $toId = trim((string) ($b['toId'] ?? ''));
+        $group = strtoupper(trim((string) ($b['toGroup'] ?? 'ADMINS')));
+        if (!in_array($group, ['ADMINS', 'EVERYONE'], true)) $group = 'ADMINS';
         if ($toId !== '') {
-            $s = db()->prepare("SELECT id FROM `User` WHERE id=? AND role IN ('SUPER_ADMIN','ADMIN') AND isActive=1");
+            $s = db()->prepare('SELECT id, role FROM `User` WHERE id=? AND isActive=1');
             $s->execute([$toId]);
-            if (!$s->fetch()) sendError('Send to a Super Admin or an Admin.', 400);
+            $u = $s->fetch();
+            if (!$u) sendError('Pick who to send it to.', 400);
             if ($toId === $auth['id']) sendError('Pick someone other than yourself.', 400);
+            if (!self::isAdmin($auth) && !in_array($u['role'], ['SUPER_ADMIN', 'ADMIN'], true)) sendError('You can send to the MD or an Admin.', 403);
+        } elseif (!self::isAdmin($auth)) {
+            sendError('Pick the MD or an Admin to send it to.', 400);
         }
         $title = trim((string) ($b['title'] ?? ''));
         $details = trim((string) ($b['details'] ?? ''));
@@ -180,10 +240,10 @@ $tail"],
             if ($title === '') $title = mb_substr(preg_replace('/\s+/', ' ', $details), 0, 80);
         }
         $id = gen_id(); $now = now_sql();
-        db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,itemCode,productName,price,discount,quotationId,quotationNo,amount,fromId,toId,status,createdAt,updatedAt)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?)')
+        db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,itemCode,productName,price,discount,quotationId,quotationNo,amount,fromId,toId,toGroup,status,createdAt,updatedAt)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?)')
             ->execute([$id, $type, mb_substr($title, 0, 255), $details ?: null, $prio, $type === 'TASK' ? $due : null, $cust ?: null, $code ?: null, $prod ?: null,
-                $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $auth['id'], $toId ?: null, $now, $now]);
+                $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $auth['id'], $toId ?: null, $toId ? 'ADMINS' : $group, $now, $now]);
         log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $id, ['type' => $type, 'title' => $title]);
         sendSuccess(['item' => self::load($auth, $id)], 'Sent', 201);
     }
@@ -193,6 +253,7 @@ $tail"],
     {
         $auth = self::auth();
         $item = self::load($auth, $id);
+        if ($item['fromId'] !== $auth['id']) self::markRead($id, $auth['id']);
         if ($item['fromId'] !== $auth['id'] && $item['status'] === 'OPEN') {
             db()->prepare("UPDATE `MdDeskItem` SET status='SEEN', seenAt=? WHERE id=? AND status='OPEN'")->execute([now_sql(), $id]);
             $item = self::load($auth, $id);
@@ -234,6 +295,7 @@ $tail"],
         $item = self::load($auth, $id);
         if ($item['fromId'] !== $auth['id'] && $auth['role'] !== 'SUPER_ADMIN') sendError('Only the sender can delete this.', 403);
         db()->prepare('DELETE FROM `MdDeskReply` WHERE itemId=?')->execute([$id]);
+        db()->prepare('DELETE FROM `MdDeskRead` WHERE itemId=?')->execute([$id]);
         db()->prepare('DELETE FROM `MdDeskItem` WHERE id=?')->execute([$id]);
         sendSuccess([], 'Deleted');
     }

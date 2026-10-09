@@ -126,14 +126,22 @@
   function renderForm() {
     clear(formBox);
     var t = state.compose;
-    formBox.appendChild(el('h2', { text: state.role === 'SUPER_ADMIN' ? 'Send to admin' : 'Send to MD / admin' }));
+    formBox.appendChild(el('h2', { text: state.canGroups ? 'Send to staff' : 'Send to MD / admin' }));
     formBox.appendChild(el('div', { class: 'md-types' }, Object.keys(TYPES).map(function (k) {
       return el('button', { type: 'button', class: 'md-type' + (k === t ? ' on' : ''), style: '--c:' + TYPES[k].c, 'data-type': k, onclick: function () { state.compose = k; renderForm(); } },
         [el('span', { class: 'i', text: TYPES[k].icon }), TYPES[k].label]);
     })));
-    var to = el('select', { id: 'md-to' }, [el('option', { value: '', text: state.role === 'SUPER_ADMIN' ? 'All admins' : 'All (MD + admins)' })].concat(state.users.map(function (u) {
-      return el('option', { value: u.id, text: u.name + (u.role === 'SUPER_ADMIN' ? ' (MD / Super Admin)' : ' (Admin)') });
-    })));
+    // Everyone in the company, grouped by role (Admins also get "All admins" / "Everyone").
+    var to = el('select', { id: 'md-to' });
+    if (state.canGroups) {
+      to.appendChild(el('optgroup', { label: 'Groups' }, [el('option', { value: '__ADMINS', text: 'All admins' }), el('option', { value: '__EVERYONE', text: 'Everyone (all users)' })]));
+    } else to.appendChild(el('option', { value: '', text: 'Choose…' }));
+    var ROLE_GROUP = { SUPER_ADMIN: 'MD / Super Admin', ADMIN: 'Admins', MANAGER: 'Managers', ACCOUNTS: 'Accounts', SALES_ENGINEER: 'Sales engineers', SALES: 'Sales' };
+    Object.keys(ROLE_GROUP).forEach(function (r) {
+      var us = state.users.filter(function (u) { return u.role === r; });
+      if (us.length) to.appendChild(el('optgroup', { label: ROLE_GROUP[r] }, us.map(function (u) { return el('option', { value: u.id, text: u.name + (u.department ? ' · ' + u.department : '') }); })));
+    });
+    if (state.toPick) { to.value = state.toPick; state.toPick = null; }
     var prio = el('select', { id: 'md-prio' }, ['NORMAL', 'HIGH', 'URGENT'].map(function (p) { return el('option', { value: p, text: PRIO[p][0] }); }));
     var g = el('div', { class: 'md-grid' }, [field('To', to), field('Priority', prio)]);
     var inp = {};
@@ -189,7 +197,8 @@
     formBox.appendChild(g);
     var send = el('button', { class: 'md-btn pri', type: 'button', id: 'md-send', text: 'Send ' + TYPES[t].label.toLowerCase() });
     send.onclick = function () {
-      var body = { type: t, toId: to.value, priority: prio.value };
+      var body = { type: t, toId: to.value.charAt(0) === '_' ? '' : to.value, toGroup: to.value === '__EVERYONE' ? 'EVERYONE' : 'ADMINS', priority: prio.value };
+      if (!to.value) { toast('Pick who to send it to.', 'err'); return; }
       Object.keys(inp).forEach(function (k) { if (k[0] !== '_') body[k] = inp[k].value.trim(); });
       if (inp._qid) body.quotationId = inp._qid();
       send.disabled = true;
@@ -200,6 +209,8 @@
     };
     formBox.appendChild(el('div', { class: 'md-acts' }, [send]));
   }
+
+  function toLabel(i) { return i.toName || (i.toGroup === 'EVERYONE' ? 'everyone' : 'all admins'); }
 
   // ── list ────────────────────────────────────────────────────────────
   function visibleItems() {
@@ -216,7 +227,7 @@
   }
   function renderTabs() {
     clear(tabsBox);
-    var unread = state.items.filter(function (i) { return i.toMe && i.status === 'OPEN'; }).length;
+    var unread = state.items.filter(function (i) { return i.unread; }).length;
     var tabs = [['inbox', 'Inbox'], ['sent', 'Sent']];
     if (state.role === 'SUPER_ADMIN') tabs.push(['all', 'All']);
     tabs.forEach(function (t) {
@@ -247,11 +258,11 @@
         i.type === 'TASK' && i.dueDate ? el('span', { class: 'md-badge', style: '--c:' + (i.overdue ? '#dc2626' : '#475569'), text: (i.overdue ? 'Overdue · ' : 'Due ') + dmy(i.dueDate) }) : null,
         +i.replyCount ? el('span', { text: '💬 ' + i.replyCount }) : null
       ]);
-      listBox.appendChild(el('button', { type: 'button', class: 'md-item' + (i.toMe && i.status === 'OPEN' ? ' unread' : '') + (i.status === 'DONE' ? ' done' : ''), style: '--c:' + T.c, 'data-item': i.id, onclick: function () { open(i.id); } }, [
+      listBox.appendChild(el('button', { type: 'button', class: 'md-item' + (i.unread ? ' unread' : '') + (i.status === 'DONE' ? ' done' : ''), style: '--c:' + T.c, 'data-item': i.id, onclick: function () { open(i.id); } }, [
         el('span', { class: 'i', text: T.icon }),
         el('div', {}, [
           el('b', { text: i.title }),
-          el('div', { class: 's', text: T.label + ' · ' + (i.mine ? 'to ' + (i.toName || 'all admins') : 'from ' + (i.fromName || '—') + (i.toId ? '' : ' · to all')) }),
+          el('div', { class: 's', text: T.label + ' · ' + (i.mine ? 'to ' + toLabel(i) : 'from ' + (i.fromName || '—') + (i.toId ? '' : ' · to ' + toLabel(i))) }),
           el('div', { class: 'x', text: itemLine(i) })
         ]),
         right
@@ -276,7 +287,7 @@
         el('span', { style: 'width:2.4rem;height:2.4rem;border-radius:.6rem;display:flex;align-items:center;justify-content:center;color:#fff;background:' + T.c + ';font-weight:700;flex:none', text: T.icon }),
         el('div', { style: 'flex:1;min-width:0' }, [
           el('h3', { text: i.title }),
-          el('div', { style: 'font-size:.8rem;color:#64748b;margin-top:.2rem', text: T.label + ' · from ' + (i.fromName || '—') + ' to ' + (i.toName || 'all admins') + ' · ' + when(i.createdAt) }),
+          el('div', { style: 'font-size:.8rem;color:#64748b;margin-top:.2rem', text: T.label + ' · from ' + (i.fromName || '—') + ' to ' + toLabel(i) + ' · ' + when(i.createdAt) }),
           el('div', { style: 'display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.35rem' }, [
             el('span', { class: 'md-badge', style: '--c:' + S[1], text: S[0] + (i.status === 'DONE' && i.doneByName ? ' by ' + i.doneByName : '') }),
             el('span', { class: 'md-badge', style: '--c:' + P[1], text: P[0] + ' priority' })
@@ -330,13 +341,9 @@
 
   function mountPage(content) {
     injectCss();
-    if (['SUPER_ADMIN', 'ADMIN'].indexOf(me().role) === -1) {
-      content.appendChild(el('div', { class: 'md-card', style: 'max-width:600px;margin:2rem auto' }, [el('div', { class: 'md-empty', text: 'The MD desk is for the Super Admin and Admins.' })]));
-      return;
-    }
     root = el('div', { class: 'md-wrap' });
     root.appendChild(el('div', { class: 'md-head' }, [el('h1', { text: 'MD desk' }),
-      el('p', { text: 'Direct line between the MD (Super Admin) and the Admins — messages, important tasks, prices given and new quotations given.' })]));
+      el('p', { text: 'Direct line from the MD — messages, important tasks, prices given and new quotations given, to anyone in the company. Replies come back here.' })]));
     formBox = el('div', { class: 'md-card', id: 'md-compose' });
     tabsBox = el('div', { class: 'md-tabs' });
     listBox = el('div', { class: 'md-list', id: 'md-list' });
@@ -351,7 +358,7 @@
     content.appendChild(root);
     var origRender = renderList;
     renderList = function () { stSel.value = state.status; origRender(); };
-    api('GET', '/md-desk/recipients').then(function (j) { state.users = j.data.users || []; renderForm(); }).catch(function () { renderForm(); });
+    api('GET', '/md-desk/recipients').then(function (j) { state.users = j.data.users || []; state.canGroups = !!j.data.canSendToGroups; renderForm(); }).catch(function () { renderForm(); });
     load().then(function () { var h = location.hash.slice(1); if (h) open(decodeURIComponent(h)); });
     timer = setInterval(function () { if (document.visibilityState === 'visible' && !document.querySelector('.md-modal')) load(); }, 30000);
   }
