@@ -380,7 +380,10 @@ class ExportController
             ['label'=>'Status',         'value'=>fn($r)=>$r['status']],
             ['label'=>'Late (minutes)', 'value'=>fn($r)=>$r['lateMinutes']??''],
             ['label'=>'Punch-in type',  'value'=>fn($r)=>!empty($r['lateRequestId']) ? 'After 9:45 (approved)' : (!empty($r['lateMinutes']) ? 'Grace time (late)' : 'On time')],
-            ['label'=>'Photo',          'value'=>fn($r)=>!empty($r['checkInPhoto']) ? 'Yes' : 'No'],
+            ['label'=>'Punch-in photo', 'value'=>fn($r)=>!empty($r['checkInPhoto']) ? 'Yes' : 'No'],
+            ['label'=>'Punch-out photo','value'=>fn($r)=>!empty($r['checkOutPhoto']) ? 'Yes' : 'No'],
+            ['label'=>'Punch-in location', 'value'=>fn($r)=>$r['checkInLat'] !== null && $r['checkInLng'] !== null ? round((float)$r['checkInLat'], 6) . ', ' . round((float)$r['checkInLng'], 6) : ''],
+            ['label'=>'Punch-out location','value'=>fn($r)=>$r['checkOutLat'] !== null && $r['checkOutLng'] !== null ? round((float)$r['checkOutLat'], 6) . ', ' . round((float)$r['checkOutLng'], 6) : ''],
             ['label'=>'GPS Pings Logged','value'=>fn($r)=>$r['pings_count']??0],
         ], 'attendance-' . $this->stamp(), 'Attendance & Location Report');
     }

@@ -10,7 +10,7 @@ class AttendanceController
     {
         ensure_schema([
             'Attendance' => ['create' => '', 'columns' => [
-                'checkInPhoto' => 'VARCHAR(120) NULL', 'lateMinutes' => 'INT NULL', 'lateRequestId' => 'VARCHAR(30) NULL',
+                'checkInPhoto' => 'VARCHAR(120) NULL', 'checkOutPhoto' => 'VARCHAR(120) NULL', 'lateMinutes' => 'INT NULL', 'lateRequestId' => 'VARCHAR(30) NULL',
             ]],
             'PunchRequest' => ['create' => "CREATE TABLE IF NOT EXISTS `PunchRequest` (
   `id` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `date` DATE NOT NULL, `reason` TEXT NOT NULL,
@@ -35,6 +35,26 @@ class AttendanceController
                 'request' => $req, 'canPunchIn' => $phase !== 'LOCKED' || ($req && $req['status'] === 'APPROVED')];
     }
 
+    // A punch photo sent as data:image/...;base64 → [bytes, extension]; stops the request if unusable.
+    private static function decodePhoto($photo, string $dir): array
+    {
+        $photo = (string) $photo;
+        if (!preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#', $photo, $pm)) sendError('Take a photo to punch ' . $dir . '.', 400);
+        $bin = base64_decode($pm[2], true);
+        if ($bin === false || strlen($bin) < 1000) sendError('The photo could not be read — take it again.', 400);
+        if (strlen($bin) > 4 * 1024 * 1024) sendError('The photo is too large.', 400);
+        return [$bin, $pm[1] === 'png' ? 'png' : ($pm[1] === 'webp' ? 'webp' : 'jpg')];
+    }
+
+    private static function savePhoto(string $name, string $bin, string $ext): string
+    {
+        $dir = UPLOADS_PATH . '/attendance';
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        $file = $name . '.' . $ext;
+        if (@file_put_contents("$dir/$file", $bin) === false) sendError('Could not save the photo on the server.', 500);
+        return $file;
+    }
+
     // POST /api/attendance/checkin — { lat, lng, photo: data:image/jpeg;base64,... }
     public function checkIn(): void
     {
@@ -53,11 +73,7 @@ class AttendanceController
                 : 'Punch-in closed at ' . self::GRACE_UNTIL . '. Send a request with the reason — an admin will release the punch-in.', 403);
         }
         // Photo is required (selfie at punch-in).
-        $photo = (string) ($b['photo'] ?? '');
-        if (!preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#', $photo, $pm)) sendError('Take a photo to punch in.', 400);
-        $bin = base64_decode($pm[2], true);
-        if ($bin === false || strlen($bin) < 1000) sendError('The photo could not be read — take it again.', 400);
-        if (strlen($bin) > 4 * 1024 * 1024) sendError('The photo is too large.', 400);
+        [$bin, $ext] = self::decodePhoto($b['photo'] ?? '', 'in');
 
         $lat = isset($b['lat']) && is_numeric($b['lat']) ? (float)$b['lat'] : null;
         $lng = isset($b['lng']) && is_numeric($b['lng']) ? (float)$b['lng'] : null;
@@ -66,10 +82,7 @@ class AttendanceController
             sendError('Location is required to punch in. Turn on location (GPS) on your device and allow this site to use it, then try again.', 400);
         }
         $id = gen_id();
-        $dir = UPLOADS_PATH . '/attendance';
-        if (!is_dir($dir)) @mkdir($dir, 0755, true);
-        $photoName = $id . '.' . ($pm[1] === 'png' ? 'png' : ($pm[1] === 'webp' ? 'webp' : 'jpg'));
-        if (@file_put_contents("$dir/$photoName", $bin) === false) sendError('Could not save the photo on the server.', 500);
+        $photoName = self::savePhoto($id, $bin, $ext);
         $late = date('H:i', self::nowTs()) >= self::ON_TIME_UNTIL ? (int) floor((self::nowTs() - strtotime(date('Y-m-d') . ' ' . self::ON_TIME_UNTIL)) / 60) : 0;
         db()->prepare(
             'INSERT INTO `Attendance` (id,userId,date,checkIn,checkInLat,checkInLng,checkInPhoto,lateMinutes,lateRequestId,status,createdAt,updatedAt)
@@ -101,12 +114,15 @@ class AttendanceController
         if ($lat === null || $lng === null) {
             sendError('Location is required to punch out. Turn on location (GPS) on your device and allow this site to use it, then try again.', 400);
         }
+        // Photo is required at punch-out too.
+        [$bin, $ext] = self::decodePhoto($b['photo'] ?? '', 'out');
+        $outPhoto = self::savePhoto($record['id'] . '_out', $bin, $ext);
         // Punching out ends any break that's still running.
         LocationHistoryController::closeOpenBreaks($auth['id']);
 
         db()->prepare(
-            'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,workingHours=?,updatedAt=? WHERE id=?'
-        )->execute([now_sql(), $lat, $lng, $hours, now_sql(), $record['id']]);
+            'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,checkOutPhoto=?,workingHours=?,updatedAt=? WHERE id=?'
+        )->execute([now_sql(), $lat, $lng, $outPhoto, $hours, now_sql(), $record['id']]);
 
         $s2 = db()->prepare('SELECT * FROM `Attendance` WHERE id=? LIMIT 1'); $s2->execute([$record['id']]);
         $upd = $s2->fetch();
@@ -165,6 +181,7 @@ class AttendanceController
 
         $s = db()->prepare(
             "SELECT a.id,a.userId,a.date,a.checkIn,a.checkOut,a.workingHours,a.status,
+                    a.checkInLat,a.checkInLng,a.checkOutLat,a.checkOutLng,a.checkInPhoto,a.checkOutPhoto,
                     u.name AS u_name, u.department
              FROM `Attendance` a LEFT JOIN `User` u ON u.id=a.userId
              $w ORDER BY a.date DESC, u.name ASC"
@@ -183,6 +200,12 @@ class AttendanceController
                 'checkOutFormatted' => fmt_ampm($r['checkOut']),
                 'workingHours'      => $r['workingHours'],
                 'status'            => $r['status'],
+                'checkInLat'        => $r['checkInLat'] !== null ? (float)$r['checkInLat'] : null,
+                'checkInLng'        => $r['checkInLng'] !== null ? (float)$r['checkInLng'] : null,
+                'checkOutLat'       => $r['checkOutLat'] !== null ? (float)$r['checkOutLat'] : null,
+                'checkOutLng'       => $r['checkOutLng'] !== null ? (float)$r['checkOutLng'] : null,
+                'checkInPhoto'      => !empty($r['checkInPhoto']),
+                'checkOutPhoto'     => !empty($r['checkOutPhoto']),
             ];
         }
         krsort($grouped); // newest date first
@@ -252,15 +275,16 @@ class AttendanceController
         sendSuccess([], $st === 'APPROVED' ? 'Punch-in released' : 'Request rejected');
     }
 
-    // GET /api/attendance/:id/photo — the punch-in photo (own, or admin-tier)
+    // GET /api/attendance/:id/photo[?kind=out] — the punch-in (or punch-out) photo (own, or admin-tier)
     public function photo(string $id): void
     {
         $auth = authenticate();
-        $s = db()->prepare('SELECT userId, checkInPhoto FROM `Attendance` WHERE id=?'); $s->execute([$id]);
+        $col = qp('kind') === 'out' ? 'checkOutPhoto' : 'checkInPhoto';
+        $s = db()->prepare("SELECT userId, `$col` AS file FROM `Attendance` WHERE id=?"); $s->execute([$id]);
         $r = $s->fetch();
-        if (!$r || !$r['checkInPhoto']) sendError('No photo.', 404);
+        if (!$r || !$r['file']) sendError('No photo.', 404);
         if ($r['userId'] !== $auth['id'] && !is_admin_tier($auth['role'])) sendError('Not allowed.', 403);
-        $path = UPLOADS_PATH . '/attendance/' . basename($r['checkInPhoto']);
+        $path = UPLOADS_PATH . '/attendance/' . basename($r['file']);
         if (!is_file($path)) sendError('Photo missing on the server.', 404);
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
         header('Content-Type: ' . ($ext === 'png' ? 'image/png' : ($ext === 'webp' ? 'image/webp' : 'image/jpeg')));

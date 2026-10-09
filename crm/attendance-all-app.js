@@ -91,6 +91,43 @@
     return dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   }
 
+  // Punch location → Google Maps link (coordinates in the tooltip).
+  function mapCell(lat, lng) {
+    if (lat == null || lng == null) return el('span', { class: 'text-muted', text: '—' });
+    var q = Number(lat).toFixed(6) + ',' + Number(lng).toFixed(6);
+    return el('a', { href: 'https://www.google.com/maps?q=' + q, target: '_blank', rel: 'noopener', title: q,
+      class: 'text-primary font-medium hover:underline whitespace-nowrap', text: '📍 Map' });
+  }
+
+  // Punch photos need the auth header, so they are fetched as blobs.
+  var photoCache = {};
+  function showPhoto(id, kind, who) {
+    var key = id + ':' + kind, t = '';
+    try { t = localStorage.getItem('crm_token') || ''; } catch (e) {}
+    var p = photoCache[key] || (photoCache[key] = fetch(API + '/api/attendance/' + encodeURIComponent(id) + '/photo' + (kind === 'out' ? '?kind=out' : ''),
+      { headers: { Authorization: 'Bearer ' + t } })
+      .then(function (r) { if (!r.ok) throw new Error('No photo'); return r.blob(); })
+      .then(function (b) { return URL.createObjectURL(b); }));
+    p.then(function (u) {
+      var m = el('div', { style: 'position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:2147483500;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1rem;gap:.5rem;cursor:zoom-out' }, [
+        el('img', { src: u, alt: 'Punch-' + kind + ' photo', style: 'max-width:100%;max-height:85vh;border-radius:.6rem' }),
+        el('div', { style: 'color:#fff;font-size:.9rem', text: who + ' · punch ' + kind })
+      ]);
+      m.addEventListener('click', function () { m.remove(); });
+      document.body.appendChild(m);
+    }).catch(function () { delete photoCache[key]; alert('Photo not available'); });
+  }
+  function photoBtns(r) {
+    var who = (r.user && r.user.name) || '';
+    var b = function (kind) {
+      return el('button', { type: 'button', class: 'btn-secondary', style: 'padding:.15rem .55rem;font-size:.75rem',
+        text: kind === 'in' ? 'In' : 'Out', onclick: function () { showPhoto(r.attendanceId, kind, who); } });
+    };
+    var kids = [r.checkInPhoto ? b('in') : null, r.checkOutPhoto ? b('out') : null];
+    if (!kids[0] && !kids[1]) return el('span', { class: 'text-muted', text: '—' });
+    return el('div', { class: 'flex gap-1' }, kids);
+  }
+
   var selectCls =
     'rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 ' +
     'px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-primary';
@@ -239,7 +276,7 @@
 
         days.forEach(function (day) {
           var present = day.records.filter(function (r) { return r.status === 'PRESENT'; }).length;
-          var heads = ['Employee', 'Department', 'Check-in', 'Check-out', 'Hours', 'Status'];
+          var heads = ['Employee', 'Department', 'Check-in', 'In location', 'Check-out', 'Out location', 'Photos', 'Hours', 'Status'];
           var tbody = el('tbody');
 
           day.records.forEach(function (r) {
@@ -250,7 +287,10 @@
                          text: (r.user && r.user.name) || '—' }),
               el('td', { class: 'px-4 py-2.5 text-muted', text: (r.user && r.user.department) || '—' }),
               el('td', { class: 'px-4 py-2.5', text: r.checkInFormatted || fmtTime(r.checkIn) }),
+              el('td', { class: 'px-4 py-2.5' }, [mapCell(r.checkInLat, r.checkInLng)]),
               el('td', { class: 'px-4 py-2.5', text: r.checkOutFormatted || fmtTime(r.checkOut) }),
+              el('td', { class: 'px-4 py-2.5' }, [r.checkOut ? mapCell(r.checkOutLat, r.checkOutLng) : el('span', { class: 'text-muted', text: '—' })]),
+              el('td', { class: 'px-4 py-2.5' }, [photoBtns(r)]),
               el('td', { class: 'px-4 py-2.5', text: hrs }),
               el('td', { class: 'px-4 py-2.5' }, [
                 el('span', {

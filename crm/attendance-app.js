@@ -84,6 +84,8 @@
       '.at-table th{text-align:left;font-size:.72rem;text-transform:uppercase;color:#64748b;padding:.5rem;border-bottom:1px solid #e2e8f0;white-space:nowrap}',
       '.at-table td{padding:.55rem .5rem;border-bottom:1px solid #f1f5f9;vertical-align:middle}.dark .at-table th,.dark .at-table td{border-color:#334155}',
       '.at-badge{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.74rem;font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}',
+      '.at-pair{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}.at-pair .at-sub{text-align:center;margin-top:.25rem;font-size:.75rem}',
+      '.at-map{color:#0f766e;font-weight:600;text-decoration:none;white-space:nowrap}.at-map:hover{text-decoration:underline}.dark .at-map{color:#2dd4bf}',
       '.at-thumb{width:38px;height:38px;border-radius:.4rem;object-fit:cover;cursor:pointer;background:#e2e8f0}',
       '.at-empty{padding:1.5rem;text-align:center;color:#64748b;font-size:.9rem}',
       '.at-modal{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:2147483500;display:flex;align-items:center;justify-content:center;padding:1rem}.at-modal img{max-width:100%;max-height:90vh;border-radius:.6rem}',
@@ -106,7 +108,7 @@
       navigator.geolocation.getCurrentPosition(function (p) { resolve(p.coords); }, function (e) {
         if (e && e.code === 1) return fail(e);
         navigator.geolocation.getCurrentPosition(function (p) { resolve(p.coords); }, fail, { enableHighAccuracy: false, timeout: 20000, maximumAge: 120000 });
-      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
     });
   }
 
@@ -123,14 +125,14 @@
 
   function stopCam() { if (state.stream) { state.stream.getTracks().forEach(function (t) { t.stop(); }); state.stream = null; } }
 
-  function photoPanel() {
+  function photoPanel(dir) {
     var cam = el('div', { class: 'at-cam', id: 'at-cam' });
     var file = el('input', { type: 'file', accept: 'image/*', capture: 'user', id: 'at-photo-file', style: 'display:none' });
     var shoot = el('button', { class: 'at-btn', type: 'button', id: 'at-snap' });
     function idle() {
       clear(cam);
       if (state.photo) { cam.appendChild(el('img', { src: state.photo, alt: 'Your photo' })); shoot.textContent = '↺ Retake photo'; }
-      else { cam.appendChild(el('div', { text: 'Photo needed to punch in' })); shoot.textContent = '📷 Take photo'; }
+      else { cam.appendChild(el('div', { text: 'Photo needed to punch ' + (dir || 'in') })); shoot.textContent = '📷 Take photo'; }
     }
     function live() {
       clear(cam);
@@ -178,10 +180,24 @@
         'Punched in at ' + hm(r.checkIn) + (r.lateMinutes ? ' (' + r.lateMinutes + ' min late)' : ' — on time') +
         (r.checkOut ? ' · punched out at ' + hm(r.checkOut) + ' · ' + hrs(r.workingHours) : '')
       ]));
+      var locs = el('div', { class: 'at-sub', id: 'at-locs' }, [
+        mapLink(r.checkInLat, r.checkInLng, '📍 Punch-in location'),
+        r.checkOut ? ' · ' : null, r.checkOut ? mapLink(r.checkOutLat, r.checkOutLng, '📍 Punch-out location') : null
+      ]);
+      right.appendChild(locs);
+      var left;
       if (!r.checkOut) {
-        right.appendChild(el('div', { class: 'at-row' }, [el('button', { class: 'at-btn out', type: 'button', id: 'at-out', onclick: punchOut, text: 'Punch out' })]));
+        // Punch out needs a fresh photo and the location, same as punch in.
+        right.appendChild(el('div', { class: 'at-sub', style: 'margin-top:.5rem', text: (state.photo ? '✓ Photo taken' : '✗ Photo not taken yet') + ' · location is taken when you punch out' }));
+        right.appendChild(el('div', { class: 'at-row' }, [el('button', { class: 'at-btn out', type: 'button', id: 'at-out', disabled: !state.photo || state.busy, onclick: punchOut, text: state.busy ? 'Punching out…' : 'Punch out' })]));
+        left = photoPanel('out');
+      } else {
+        left = el('div', { class: 'at-pair' }, [
+          el('div', {}, [photoThumbBig(r, 'in'), el('div', { class: 'at-sub', text: 'In · ' + hm(r.checkIn) })]),
+          el('div', {}, [r.checkOutPhoto ? photoThumbBig(r, 'out') : el('div', { class: 'at-cam', text: 'No photo' }), el('div', { class: 'at-sub', text: 'Out · ' + hm(r.checkOut) })])
+        ]);
       }
-      punchBox.appendChild(el('div', { class: 'at-punch' }, [r.checkInPhoto ? photoThumbBig(r) : el('div', {}), right]));
+      punchBox.appendChild(el('div', { class: 'at-punch' }, [left, right]));
       renderRequest();
       return;
     }
@@ -197,9 +213,9 @@
     renderRequest();
   }
 
-  function photoThumbBig(r) {
+  function photoThumbBig(r, kind) {
     var box = el('div', { class: 'at-cam' }, [el('div', { text: 'Loading photo…' })]);
-    loadPhoto(r.id).then(function (u) { clear(box).appendChild(el('img', { src: u, alt: 'Punch-in photo' })); }).catch(function () { clear(box).appendChild(el('div', { text: 'Photo not available' })); });
+    loadPhoto(r.id, kind).then(function (u) { clear(box).appendChild(el('img', { src: u, alt: kind === 'out' ? 'Punch-out photo' : 'Punch-in photo' })); }).catch(function () { clear(box).appendChild(el('div', { text: 'Photo not available' })); });
     return box;
   }
 
@@ -242,11 +258,17 @@
       .then(function () { state.busy = false; render(); });
   }
   function punchOut() {
+    if (!state.photo) { toast('Take a photo first.', 'err'); return; }
     if (!confirm('Punch out now?')) return;
-    var b = document.getElementById('at-out'); if (b) { b.disabled = true; b.textContent = 'Punching out…'; }
-    getLocation().then(function (c) { return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy }); })
-      .then(function (j) { toast(j.message || 'Punched out'); meter('close'); return load(); })
-      .catch(function (e) { locFail(e, 'out'); render(); });
+    state.busy = true; render();
+    getLocation().then(function (c) { return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo }); })
+      .then(function (j) { toast(j.message || 'Punched out'); state.photo = null; meter('close'); return load(); })
+      .catch(function (e) { locFail(e, 'out'); })
+      .then(function () { state.busy = false; render(); });
+  }
+  function mapLink(lat, lng, label) {
+    if (lat == null || lng == null || lat === '' || lng === '') return el('span', { text: label.replace('📍 ', '') + ': not recorded' });
+    return el('a', { href: 'https://www.google.com/maps?q=' + Number(lat).toFixed(6) + ',' + Number(lng).toFixed(6), target: '_blank', rel: 'noopener', class: 'at-map', text: label });
   }
   // Odometer: starting reading after punch in, closing reading after punch out
   // (the Fuel expense page works out the km and the claim from these).
@@ -288,15 +310,16 @@
   }
 
   var photoCache = {};
-  function loadPhoto(id) {
-    if (photoCache[id]) return photoCache[id];
-    return (photoCache[id] = fetch(API + '/api/attendance/' + encodeURIComponent(id) + '/photo', { headers: { Authorization: 'Bearer ' + (token() || '') } })
+  function loadPhoto(id, kind) {
+    var key = id + (kind === 'out' ? ':out' : '');
+    if (photoCache[key]) return photoCache[key];
+    return (photoCache[key] = fetch(API + '/api/attendance/' + encodeURIComponent(id) + '/photo' + (kind === 'out' ? '?kind=out' : ''), { headers: { Authorization: 'Bearer ' + (token() || '') } })
       .then(function (r) { if (!r.ok) throw new Error('No photo'); return r.blob(); })
       .then(function (b) { return URL.createObjectURL(b); }));
   }
-  function showPhoto(id) {
-    loadPhoto(id).then(function (u) {
-      var m = el('div', { class: 'at-modal', onclick: function () { m.remove(); } }, [el('img', { src: u, alt: 'Punch-in photo' })]);
+  function showPhoto(id, kind) {
+    loadPhoto(id, kind).then(function (u) {
+      var m = el('div', { class: 'at-modal', onclick: function () { m.remove(); } }, [el('img', { src: u, alt: kind === 'out' ? 'Punch-out photo' : 'Punch-in photo' })]);
       document.body.appendChild(m);
     }).catch(function () { toast('Photo not available', 'err'); });
   }
@@ -319,11 +342,15 @@
           el('td', { text: r.workingHours ? hrs(r.workingHours) : '—' }),
           el('td', {}, [r.lateMinutes ? el('span', { class: 'at-badge', style: '--c:#d97706', text: r.lateMinutes + ' min late' }) : el('span', { class: 'at-badge', style: '--c:#16a34a', text: 'On time' })]),
           el('td', {}, [el('span', { class: 'at-badge', style: '--c:' + st, text: r.status })]),
-          el('td', {}, [r.checkInPhoto ? el('button', { class: 'at-btn sm', type: 'button', onclick: function () { showPhoto(r.id); }, text: 'View' }) : '—'])
+          el('td', {}, [el('div', { class: 'at-row', style: 'margin:0;gap:.3rem' }, [
+            r.checkInPhoto ? el('button', { class: 'at-btn sm', type: 'button', onclick: function () { showPhoto(r.id); }, text: 'In' }) : null,
+            r.checkOutPhoto ? el('button', { class: 'at-btn sm', type: 'button', onclick: function () { showPhoto(r.id, 'out'); }, text: 'Out' }) : null
+          ])]),
+          el('td', { class: 'at-sub' }, [mapLink(r.checkInLat, r.checkInLng, '📍 In'), r.checkOut ? ' · ' : null, r.checkOut ? mapLink(r.checkOutLat, r.checkOutLng, '📍 Out') : null])
         ]));
       });
       body.appendChild(el('div', { class: 'at-tw' }, [el('table', { class: 'at-table' }, [
-        el('thead', {}, [el('tr', {}, ['Date', 'Punch in', 'Punch out', 'Hours', 'Time', 'Status', 'Photo'].map(function (h) { return el('th', { text: h }); }))]), tb])]));
+        el('thead', {}, [el('tr', {}, ['Date', 'Punch in', 'Punch out', 'Hours', 'Time', 'Status', 'Photos', 'Location'].map(function (h) { return el('th', { text: h }); }))]), tb])]));
     }).catch(function (e) { clear(body).appendChild(el('div', { class: 'at-empty', text: e.message })); });
   }
 
@@ -380,7 +407,7 @@
     injectCss();
     root = el('div', { class: 'at-wrap' });
     root.appendChild(el('div', { class: 'at-head' }, [el('h1', { text: 'Attendance' }),
-      el('p', { text: 'Punch in with a photo and your location. On time until 9:30 AM, grace until 9:45 AM; after that send a request for approval.' })]));
+      el('p', { text: 'Punch in and punch out with a photo and your location. On time until 9:30 AM, grace until 9:45 AM; after that send a request for approval.' })]));
     var pc = el('div', { class: 'at-card' }, [el('h2', { text: 'Today' })]);
     punchBox = el('div', { id: 'at-punch' }); pc.appendChild(punchBox);
     fuelBox = el('div', { id: 'at-fuel' }); pc.appendChild(fuelBox);

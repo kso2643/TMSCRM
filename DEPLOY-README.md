@@ -1,3 +1,19 @@
+# Update — 9 Oct (a): punch-out photo + location; all employees' punch locations for admin
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **Database:** one new column (`Attendance.checkOutPhoto`) is added automatically.
+
+- **Punch out needs a photo and location now:**
+  - After punching in, the camera box asks for the punch-out photo.
+  - The **Punch out** button stays disabled until the photo is taken.
+  - The GPS location is taken at the moment you punch out.
+- **Today card:** after punching out, it shows both photos (In / Out) with links to the punch-in and punch-out locations on Google Maps.
+- **My attendance history:** new **In / Out** photo buttons and a **Location** column (📍 In · 📍 Out map links).
+- **Admin → All employees tab:**
+  - New columns for each employee's punch-in location, punch-out location (Google Maps links) and both photos.
+  - The Excel export also lists both locations and whether each photo was taken.
+- **Location accuracy:** punch in/out now asks the phone for a fresh GPS fix rather than reusing one up to 30 seconds old.
+
 # Update — 8 Oct (a): closing odometer at punch-out → fuel expense; PO "Expected delivery" instead of brand
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.
