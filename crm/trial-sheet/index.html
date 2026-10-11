@@ -344,7 +344,7 @@ details.fmt ul{margin:6px 0 0 18px}
 :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 </style>
-<link rel="stylesheet" href="/motion.css?v=20261011b"/></head>
+<link rel="stylesheet" href="/motion.css?v=20261011c"/></head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 
@@ -429,7 +429,7 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); }
           <div class="grid g5">
             <div class="field"><label for="f-reportNo">Report no.</label><input id="f-reportNo" data-f="reportNo" autocomplete="off"></div>
             <div class="field"><label for="f-enquiryDate">Enquiry date</label><input id="f-enquiryDate" data-f="enquiryDate" type="date"></div>
-            <div class="field"><label for="f-trialDate">Trial date</label><input id="f-trialDate" data-f="trialDate" type="date"></div>
+            <div class="field"><label for="f-trialDate">Expected trial date</label><input id="f-trialDate" data-f="trialDate" type="date"></div>
             <div class="field"><label for="f-customer">Customer name</label><input id="f-customer" data-f="customer" autocomplete="off"></div>
             <div class="field"><label for="f-contact">Contact person</label><input id="f-contact" data-f="contact" autocomplete="off"></div>
             <div class="field"><label for="f-engineer">Application engineer</label><input id="f-engineer" data-f="engineer" autocomplete="off"></div>
@@ -2236,7 +2236,7 @@ function buildModel(R) {
   tools.forEach(t => { const l = OPS_BY_ID[t.op].label; if (opsUsed.indexOf(l) === -1) opsUsed.push(l); });
   const cy = R.totalCycle ? R.totalCycle + ' ' + R.timeUnit : '';
   const info = [
-    ['Enquiry date', fmtDate(R.enquiryDate)], ['Trial date', fmtDate(R.trialDate)], ['Report no.', R.reportNo],
+    ['Enquiry date', fmtDate(R.enquiryDate)], ['Expected trial date', fmtDate(R.trialDate)], ['Report no.', R.reportNo],
     ['Customer name', R.customer], ['Contact person', R.contact],
     ['Component name', R.component], ['Work material', materialText(R)], ['Machining area', R.matArea],
     ['Working component diameter or working area', R.workingDia], ['Component production / month', R.production], ['Total cycle time', cy],
@@ -2538,7 +2538,7 @@ function drawBand(ctx, y, compact, label) {
 }
 function drawInfo(ctx, y) {
   const doc = ctx.doc, M = ctx.M, MX = ctx.MX, W = ctx.PW - 2 * ctx.MX;
-  const fs = 6.8, lineH = fs * 0.3528 * 1.14, padX = 1.2, padY = 0.7, lw = 30, vw = W / 2 - lw;
+  const fs = 7.4, lineH = fs * 0.3528 * 1.18, padX = 1.8, padY = 1.25, lw = 34, vw = W / 2 - lw;
   doc.setLineWidth(0.15); pDraw(doc, PDF_GRID);
   for (let i = 0; i < M.info.length; i += 2) {
     const pairs = [M.info[i], M.info[i + 1] || ['', '']];
@@ -2558,7 +2558,7 @@ function drawInfo(ctx, y) {
   return y;
 }
 function planMatrix(ctx, idxs, fs, labW, colW) {
-  const doc = ctx.doc, M = ctx.M; const padX = 1.1, padY = ctx.padY || 0.55, lineH = fs * 0.3528 * 1.13;
+  const doc = ctx.doc, M = ctx.M; const padX = 1.8, padY = ctx.padY || 0.55, lineH = fs * 0.3528 * 1.18;
   const items = []; let total = 0;
   const heads = idxs.map(i => {
     const t = M.tools[i];
@@ -2666,13 +2666,17 @@ function drawChunk(ctx, idxs, ci, nCh) {
     y += 6.5;
   } else y = drawInfo(ctx, y);
   y += 2.5;
-  const labW = ctx.orient === 'p' ? (idxs.length > 4 ? 32 : 40) : 42; const colW = (W - labW) / idxs.length; const totalW = labW + colW * idxs.length;
+  const labW = ctx.orient === 'p' ? (idxs.length > 4 ? 36 : 48) : 50; const colW = (W - labW) / idxs.length; const totalW = labW + colW * idxs.length;
   const noteH = M.hasLibStar ? 3.8 : 0; const remH = ci === 0 ? measureRemarks(ctx, W) : 0;
   const sigTop = PH - MY - 13; const limit = sigTop - 2 - noteH - (remH ? remH + 2 : 0);
   let plan = null;
-  for (let fs = 7.2; fs >= 5.6 - 1e-9; fs -= 0.2) { const p = planMatrix(ctx, idxs, fs, labW, colW); if (y + p.total <= limit) { plan = p; break; } }
+  /* roomy rows first (bigger text, more padding); a long sheet continues on the next page instead of being squeezed */
+  const roomy = [[8.2, 2.6], [8, 2.3], [7.8, 2.1], [7.6, 1.9], [7.4, 1.7], [7.4, 1.5], [7.2, 1.35], [7.2, 1.2], [7, 1.1]];
+  const basePadY = ctx.padY;
+  for (const [fs, pad] of roomy) { ctx.padY = pad; const p = planMatrix(ctx, idxs, fs, labW, colW); if (y + p.total <= limit) { plan = p; break; } }
   let paged = false;
-  if (!plan) { plan = planMatrix(ctx, idxs, 5.6, labW, colW); paged = true; }
+  if (!plan) { ctx.padY = 1.9; plan = planMatrix(ctx, idxs, 7.6, labW, colW); paged = true; }
+  ctx.padY = basePadY;
   const head = plan.items[0];
   const limitPage = paged ? sigTop - 4 : limit + 100;
   plan.items.forEach(it => {

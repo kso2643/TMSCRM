@@ -24,6 +24,7 @@
   var API = 'https://api.apjtech.in';
   // A folder with index.html, like every other standalone page (/orders/, /tasks/).
   var SHEET_URL = '/trial-sheet/';
+  var SHEET_VERSION = '20261011c'; // bump when trial-sheet/index.html changes so the frame isn't served from cache
   // Company running the trial: its logo and name go on both sheets (PDF / Excel too).
   var BRANDS = {
     TMS: { company: 'Tulips Machining Solutions', logo: '/brand/tms-logo.png' },
@@ -215,7 +216,7 @@
     this.kind = kind;
     this.changed = false;
     this.ready = new Promise(function (res) { readyResolve = res; });
-    this.iframe = el('iframe', { class: 'trl-frame', src: SHEET_URL + '?embed=' + kind, title: kind === 'eda' ? 'Existing situation data analysis' : 'Cost savings report' });
+    this.iframe = el('iframe', { class: 'trl-frame', src: SHEET_URL + '?embed=' + kind + '&v=' + SHEET_VERSION, title: kind === 'eda' ? 'Existing situation data analysis' : 'Cost savings report' });
     // If the sheet file is missing on the server the frame shows the host's
     // 404 page and never says "ready" — replace that with a clear message.
     var isReady = false;

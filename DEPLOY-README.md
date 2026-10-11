@@ -1,3 +1,11 @@
+# Update — 11 Oct (c): roomier trial PDF; "Expected trial date"
+
+**Upload:** `crm/` (only `crm/trial-sheet/index.html` and `crm/trials-app.js` changed), then press **Ctrl+Shift+R** once.
+
+- **Trial (existing data) PDF:** taller rows, more padding, slightly bigger text and a wider label column. A normal sheet still fits on one page; a very long one continues on page 2 instead of being squeezed.
+- **Expected trial date:** the trial date field is now called **Expected trial date**, and it prints at the top of the PDF next to the enquiry date.
+- The trials page loads the sheet with a version number, so the new sheet shows up without clearing the cache.
+
 # Update — 11 Oct (b): catalogue suggestions in quotations; drill depth + tap depth for tapping
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.
