@@ -344,7 +344,7 @@ details.fmt ul{margin:6px 0 0 18px}
 :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 </style>
-<link rel="stylesheet" href="/motion.css?v=20261009c"/></head>
+<link rel="stylesheet" href="/motion.css?v=20261011a"/></head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 
@@ -429,6 +429,7 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); }
           <div class="grid g5">
             <div class="field"><label for="f-reportNo">Report no.</label><input id="f-reportNo" data-f="reportNo" autocomplete="off"></div>
             <div class="field"><label for="f-enquiryDate">Enquiry date</label><input id="f-enquiryDate" data-f="enquiryDate" type="date"></div>
+            <div class="field"><label for="f-trialDate">Trial date</label><input id="f-trialDate" data-f="trialDate" type="date"></div>
             <div class="field"><label for="f-customer">Customer name</label><input id="f-customer" data-f="customer" autocomplete="off"></div>
             <div class="field"><label for="f-contact">Contact person</label><input id="f-contact" data-f="contact" autocomplete="off"></div>
             <div class="field"><label for="f-engineer">Application engineer</label><input id="f-engineer" data-f="engineer" autocomplete="off"></div>
@@ -467,7 +468,7 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); }
           <h2>Tools &amp; cutting data</h2>
           <span class="hint" id="tools-count"></span>
           <div class="push">
-            <label class="switch"><input type="checkbox" id="sw-trial"> Trial recommendation rows</label>
+            <label class="switch" style="display:none"><input type="checkbox" id="sw-trial"> Trial recommendation rows</label>
             <button class="btn btn-sm" id="btn-lib-2" type="button" title="Cutting-data library">Cutting data</button>
             <button class="btn btn-sm" id="btn-add-tool" type="button">+ Add tool</button>
           </div>
@@ -1136,6 +1137,7 @@ const ISO_TITLES = { P: 'P - Steel', M: 'M - Stainless steel', K: 'K - Cast iron
 function matLabel(m) { return m.id + ' - ' + m.name + (m.eg ? ' (' + m.eg + ')' : ''); }
 
 const MACHINE_TYPES = ['VMC', 'HMC', 'CNC turning centre', 'CNC lathe', 'Turn-mill / Swiss type', 'SPM', 'Other'];
+const MACHINING_AREAS = ['OD (external diameter)', 'ID (bore / internal)', 'Face', 'Shoulder / step', 'Slot / groove', 'Pocket / cavity', 'Profile / contour', 'Hole (drilling)', 'Thread', 'Chamfer / edge', 'Parting off', 'Other'];
 const COOLANT_TYPES = ['External (flood)', 'Internal (through-tool)', 'External + internal', 'MQL', 'Dry'];
 const TAPERS = ['BT30', 'BT40', 'BT50', 'CAT40', 'ISO40', 'HSK-A63', 'HSK-A100', 'Capto C5', 'Capto C6', 'VDI30', 'VDI40', 'Turret 20 x 20', 'Turret 25 x 25', 'Turret 32 x 32'];
 const CONCERNS = ['Tool life', 'CPC', 'Cycle time', 'Surface finish', 'Chip control', 'Tool breakage'];
@@ -1145,7 +1147,12 @@ const CONCERNS = ['Tool life', 'CPC', 'Cycle time', 'Surface finish', 'Chip cont
 const HOLDING = {
   drilling: ['ER collet', 'Quick change', 'Weldon / side-lock', 'Shrink-fit', 'Hydraulic chuck', 'Morse taper sleeve', 'Other'],
   tapping:  ['ER collet', 'Quick change', 'Synchronous (rigid)', 'Tension-compression (floating)', 'Other'],
-  milling:  ['ER collet', 'Weldon / side-lock', 'Shrink-fit', 'Hydraulic chuck', 'Face-mill arbor', 'Other']
+  milling:  ['ER collet', 'Weldon / side-lock', 'Shrink-fit', 'Hydraulic chuck', 'Face-mill arbor', 'Other'],
+  turning:  ['Turret (square shank)', 'Boring sleeve', 'VDI block', 'BMT block', 'Quick change', 'Other'],
+  boring:   ['Boring sleeve', 'Split sleeve', 'VDI block', 'BMT block', 'Turret (round shank)', 'Other'],
+  grooving: ['Turret (square shank)', 'Blade block', 'VDI block', 'BMT block', 'Other'],
+  parting:  ['Blade block', 'Turret (square shank)', 'VDI block', 'BMT block', 'Other'],
+  threading:['Turret (square shank)', 'Boring sleeve', 'VDI block', 'BMT block', 'Other']
 };
 const ER_SIZES = ['ER8', 'ER11', 'ER16', 'ER20', 'ER25', 'ER32', 'ER40', 'ER50'];
 const QC_SIZES = ['Size 1', 'Size 2', 'Size 3'];
@@ -1392,7 +1399,7 @@ function newReport() {
   const now = new Date().toISOString();
   return {
     id: uuid(), kind: 'eda', reportNo: suggestReportNo(), createdAt: now, updatedAt: now,
-    enquiryDate: todayISO(), customer: '', contact: '', engineer: '',
+    enquiryDate: todayISO(), trialDate: '', customer: '', contact: '', engineer: '',
     component: '', matGroup: '', matArea: '', matGrade: '', workingDia: '', production: '',
     machineType: '', machineMake: '', machineModel: '', machinePower: '', taper: '', coolant: '', coolantPressure: '',
     totalCycle: '', timeUnit: S.settings.timeUnit || 'min',
@@ -2123,7 +2130,7 @@ const GROUPS = [
   { id: 'gain',   title: 'Expected improvement' }
 ];
 const AP_OPS = ['turning', 'boring', 'grooving', 'parting', 'milling'];
-const HOLD_OPS = ['drilling', 'tapping', 'milling'];
+const HOLD_OPS = ['drilling', 'tapping', 'milling', 'turning', 'boring', 'grooving', 'parting', 'threading'];
 const ROWS = [
   { id: 'op',   g: 'tool', label: 'Type of operation', kind: 'op' },
   { id: 'app',  g: 'tool', label: 'Application', kind: 'app' },
@@ -2151,7 +2158,7 @@ const ROWS = [
   { id: 'passes',   g: 'proc', label: 'No. of passes', kind: 'num', path: 'passes', ops: ['threading'] },
 
   { id: 'shank',    g: 'hold', label: 'Shank size (mm)', kind: 'text', path: 'shank', ph: 'e.g. 10 / 25 x 25' },
-  { id: 'square',   g: 'hold', label: 'Square size (mm)', kind: 'num', path: 'square', ops: ['drilling', 'tapping'] },
+  { id: 'square',   g: 'hold', label: 'Square size (mm)', kind: 'num', path: 'square', ops: ['drilling', 'tapping', 'milling', 'turning', 'boring', 'grooving', 'parting', 'threading'] },
   { id: 'holding',  g: 'hold', label: 'Holding', kind: 'holding', path: 'holding', ops: HOLD_OPS },
   { id: 'holdSize', g: 'hold', label: 'Collet / holder size', kind: 'holdsize', path: 'holdSize', ops: HOLD_OPS },
 
@@ -2229,9 +2236,9 @@ function buildModel(R) {
   tools.forEach(t => { const l = OPS_BY_ID[t.op].label; if (opsUsed.indexOf(l) === -1) opsUsed.push(l); });
   const cy = R.totalCycle ? R.totalCycle + ' ' + R.timeUnit : '';
   const info = [
-    ['Enquiry date', fmtDate(R.enquiryDate)], ['Report no.', R.reportNo],
+    ['Enquiry date', fmtDate(R.enquiryDate)], ['Trial date', fmtDate(R.trialDate)], ['Report no.', R.reportNo],
     ['Customer name', R.customer], ['Contact person', R.contact],
-    ['Component name', R.component], ['Work material', materialText(R)],
+    ['Component name', R.component], ['Work material', materialText(R)], ['Machining area', R.matArea],
     ['Working component diameter or working area', R.workingDia], ['Component production / month', R.production], ['Total cycle time', cy],
     ['Type of operation', opsUsed.join(', ')], ['Type of machine', R.machineType],
     ['Machine make', [R.machineMake, R.machineModel].filter(Boolean).join(' ')], ['Machine power', R.machinePower ? R.machinePower + ' kW' : ''],
@@ -2263,7 +2270,7 @@ function buildModel(R) {
     return cell;
   };
   GROUPS.forEach(g => {
-    if ((g.id === 'trial' || g.id === 'gain') && !R.showTrial) return;
+    if (g.id === 'trial' || g.id === 'gain') return; // removed from the existing-data sheet
     const rows = []; const mergedAt = {};
     ROWS.forEach(row => {
       if (row.g !== g.id || row.screen) return;
@@ -3362,6 +3369,7 @@ function initStaticOptions() {
   $('#f-matGroup').innerHTML = h;
   fillSelect($('#f-machineType'), MACHINE_TYPES, 'Select machine type');
   fillSelect($('#f-coolant'), COOLANT_TYPES, 'Select coolant type');
+  fillSelect($('#f-matArea'), MACHINING_AREAS, 'Select machining area');
   const dl = (id, arr) => { $('#' + id).innerHTML = arr.map(v => '<option value="' + esc(v) + '">').join(''); };
   dl('dl-taper', TAPERS); dl('dl-tsize', THREAD_SIZES); dl('dl-er', ER_SIZES); dl('dl-qc', QC_SIZES); dl('dl-dia', DIA_SIZES);
   fillOpSelect($('#c-op')); dl('dl-industry', INDUSTRIES); dl('dl-cmp-machine', MACHINE_TYPES);
@@ -3749,7 +3757,7 @@ function renderMatrix() {
   const cache = R.tools.map(t => libLookupTool(t, R));
   let h = '<thead><tr><th class="rl" scope="col">Parameter</th>' + R.tools.map((t, i) => toolHeadHTML(t, i, n)).join('') + '</tr></thead><tbody>';
   GROUPS.forEach(g => {
-    if ((g.id === 'trial' || g.id === 'gain') && !R.showTrial) return;
+    if (g.id === 'trial' || g.id === 'gain') return; // removed from the existing-data sheet
     const rows = ROWS.filter(r => r.g === g.id && R.tools.some(t => applies(r, t)));
     if (!rows.length) return;
     h += '<tr class="grp"><th class="rl" scope="row">' + esc(g.title) + '</th>' + R.tools.map((t, i) => '<td class="tc t' + i + '"></td>').join('') + '</tr>';

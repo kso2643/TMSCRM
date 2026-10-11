@@ -87,6 +87,7 @@ require __DIR__ . '/controllers/PurchaseOrderController.php';
 require __DIR__ . '/controllers/MdDeskController.php';
 require __DIR__ . '/controllers/AccountsController.php';
 require __DIR__ . '/controllers/SupplierQuoteController.php';
+require __DIR__ . '/controllers/CatalogController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -481,6 +482,22 @@ try {
             $method === 'GET'    && $c1 !== '' && $c2 === ''    => $ctrl->show($c1),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''    => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''    => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'catalog') {
+        $ctrl = new CatalogController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                           => $ctrl->index(),
+            $method === 'GET'    && $c1 === 'template'                   => $ctrl->template(),
+            $method === 'POST'   && $c1 === 'import'                     => $ctrl->import(),
+            $method === 'GET'    && $c1 === 'files' && $c2 === ''        => $ctrl->files(),
+            $method === 'POST'   && $c1 === 'files' && $c2 === ''        => $ctrl->uploadFile(),
+            $method === 'GET'    && $c1 === 'files' && $c2 !== ''        => $ctrl->downloadFile($c2),
+            $method === 'DELETE' && $c1 === 'files' && $c2 !== ''        => $ctrl->deleteFile($c2),
+            $method === 'POST'   && $c1 === ''                           => $ctrl->create(),
+            $method === 'PUT'    && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''             => $ctrl->delete($c1),
             default => sendError('Route not found', 404),
         };
     }

@@ -361,7 +361,7 @@ $tail",
         if ($qty === null || $qty <= 0) $errs[] = "$label: quantity must be more than 0";
         $priceRaw = str_replace([',', '₹', 'Rs', 'rs', ' '], '', (string) ($it['requestedPrice'] ?? ''));
         $price = null;
-        if ($priceRaw === '') $errs[] = "$label: target price is required";
+        if ($priceRaw === '') $price = null; // target price is optional
         elseif (!is_numeric($priceRaw) || (float) $priceRaw <= 0) $errs[] = "$label: price must be a number more than 0";
         else $price = round((float) $priceRaw, 2);
         // Priority (engineers no longer give discount, lead time or delivery date — the admin does)
@@ -584,7 +584,7 @@ $tail",
         sendSuccess([], 'Price request withdrawn');
     }
 
-    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Target Price (Rs) *', 'Priority (Urgent / High / Normal / Low)', 'Note'];
+    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Target Price (Rs)', 'Priority (Urgent / High / Normal / Low)', 'Note'];
 
     // GET /api/price-requests/template
     public function template(): void
@@ -603,7 +603,7 @@ $tail",
         $wb->setWidths($ls, [24, 20, 60]);
         $wb->addRow($ls, ['Category (any, these exist)', 'Regular / One time', 'How to fill'], 'header');
         $help = ['Delete the two sample rows, one row per item.', 'Item Code fills the product from your product list (optional).',
-                 'Product Name, Category, Brand, Regular / One time, Quantity and Target Price are required.', 'Priority: Urgent, High, Normal or Low (blank = Normal). Discount, lead time and delivery are given by the admin.',
+                 'Product Name, Category, Brand, Regular / One time and Quantity are required. Target price is optional.', 'Priority: Urgent, High, Normal or Low (blank = Normal). Discount, lead time and delivery are given by the admin.',
                  'Upload the file on the Price requests page, choose the company, check the items, then Raise request.'];
         $n = max(count($cats), 2, count($help));
         for ($i = 0; $i < $n; $i++) $wb->addRow($ls, [$cats[$i] ?? '', ['Regular', 'One time'][$i] ?? '', $help[$i] ?? '']);

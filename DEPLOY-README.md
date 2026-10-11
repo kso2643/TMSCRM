@@ -1,3 +1,29 @@
+# Update — 11 Oct (a): trial sheet fixes, one trial at a time, savings PDF for Super Admin, optional target price, Product catalogue page
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `api/controllers/CatalogController.php`, `crm/catalogue/`, `crm/catalogue-app.js`, React sidebar file `layout-913c5f66e99c4e4e.js`.
+- **Database:** new columns on `Product` (serial no., type and the type details) and a new `ProductCatalogueFile` table. All are added automatically, and existing products get serial numbers.
+
+1. **Trial sheet:**
+   - **Machining Area** now has options (OD, ID / bore, Face, Shoulder, Slot, Pocket, Profile, Hole, Thread…). It was empty before.
+   - **Square size** and **Holding** now show for milling and turning-type operations too. Turning has its own holding list (turret, boring sleeve, VDI, BMT…).
+   - New **Trial date** field. Trial date and machining area are printed on the sheet / PDF.
+   - The **Trial recommendation** and **Expected improvement** sections are removed.
+2. **Trials:**
+   - Admins see the request PDF: a **📄 Request** button in the list, and the PDF shown inside the approval step.
+   - An engineer can raise the **next trial only after the previous one is completed with its savings report**. Until then the button is disabled with a note. Admins are not limited.
+   - The **savings report PDF is shown only to the Super Admin** (and the engineer who wrote it). Other admins see "submitted — shared with the Super Admin only".
+3. **Price requests:** the target price is **optional**, in the form and in the Excel template.
+4. **Product catalogue** (new page under Sales):
+   - Tabs: Inserts / Cutters / End mills / Drills / Taps / General. Each type has its own details:
+     - **Insert:** grade, corner radius, chip breaker, and the materials it cuts (ISO P M K N S H).
+     - **Cutter:** diameter, **no. of pockets**, **insert that fits**. The insert list shows which cutters it fits.
+     - **End mill / Drill / Tap:** diameter, flutes, lengths, coolant, thread size, pitch…
+   - **Serial no.** for every product (also for products added on the Products page).
+   - Several brands, with a brand filter and a material filter.
+   - **Add by hand**, or **upload Excel** per type (download the type's template).
+   - **Catalogue PDFs** tab: upload brand catalogues, then open or download them. Everyone can browse; Admin / Super Admin can edit.
+
 # Update — 9 Oct (c): MD desk for everyone, supplier prices, several task timers, appointment days board, CPR without R/Y/G, any-format stock upload, leave → half/full day
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

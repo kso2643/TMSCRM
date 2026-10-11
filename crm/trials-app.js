@@ -61,6 +61,19 @@
   function isAdminTier() { return ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(role()) !== -1; }
   /** Approves / rejects — matches require_admin() in TrialController. */
   function canManage() { return ['SUPER_ADMIN', 'ADMIN'].indexOf(role()) !== -1; }
+  function isSuper() { return role() === 'SUPER_ADMIN'; }
+  /** A trial PDF shown inside the page (fetched with the login token). */
+  function pdfViewer(t, fileId, title) {
+    var box = el('div', { class: 'card p-3 space-y-2 trl-pdfview', 'data-pdf': fileId }, [el('p', { class: 'text-sm font-semibold', text: title }), el('p', { class: 'trl-help', text: 'Loading PDF…' })]);
+    fetch(API + '/api/trials/' + encodeURIComponent(t.id) + '/files/' + encodeURIComponent(fileId), { headers: { Authorization: 'Bearer ' + (token() || '') } })
+      .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.message || 'Could not open the PDF'); }); return r.blob(); })
+      .then(function (b) {
+        var url = URL.createObjectURL(b);
+        box.removeChild(box.lastChild);
+        box.appendChild(el('iframe', { src: url, title: title, style: 'width:100%;height:75vh;border:1px solid #e2e8f0;border-radius:.5rem;background:#fff' }));
+      }).catch(function (e) { box.lastChild.textContent = e.message; });
+    return box;
+  }
   function isMine(t) { var u = currentUser(); return !!(u && t.requestedBy && t.requestedBy.id === u.id); }
   function canEdit(t) { return canManage() || isMine(t); }
   /** Sends the sheet PDF to the server (kept on the trial, admins are alerted). Never blocks the main action. */
@@ -320,18 +333,28 @@
     var t;
     search.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { listState.search = search.value.trim(); load(); }, 300); });
 
+    var newBtn = el('button', { class: 'btn-primary', id: 'trl-new', text: '+ New trial request', onclick: function () { go('/new'); } });
+    var openBanner = el('div', { class: 'trl-banner trl-info', id: 'trl-open', style: 'display:none' });
     root.appendChild(el('div', { class: 'space-y-4' }, [
       el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
         el('h1', { class: 'page-title', text: 'Trials' }),
-        el('button', { class: 'btn-primary', text: '+ New trial request', onclick: function () { go('/new'); } })
+        newBtn
       ]),
+      openBanner,
       el('p', { class: 'trl-help', text: '1 · Raise a request with the existing situation data  →  2 · Admin approves with the recommended tool (cutter, insert, key, drill or tap)  →  3 · After the trial, fill the cost savings report to complete it.' }),
       tiles, el('div', { class: 'flex items-center gap-3 flex-wrap' }, [search, scopeBar]), body
     ]));
 
     function load() {
       var q = '/trials?status=' + listState.status + (listState.search ? '&search=' + encodeURIComponent(listState.search) : '') + (listState.scope === 'all' ? '&scope=all' : '');
-      api('GET', q).then(function (r) { render(r.data.trials || [], r.data.counts || {}); })
+      api('GET', q).then(function (r) {
+        var o = r.data.openTrial;
+        // One trial at a time: the next one opens after the savings report of the last.
+        newBtn.disabled = !!o; newBtn.title = o ? 'Finish ' + o.trialNo + ' first' : '';
+        openBanner.style.display = o ? '' : 'none';
+        if (o) openBanner.textContent = 'You can raise a new trial after ' + o.trialNo + ' is completed — ' + (o.status === 'PENDING_APPROVAL' ? 'it is waiting for approval.' : 'submit its savings report (step 4, Trial comparison).');
+        render(r.data.trials || [], r.data.counts || {});
+      })
         .catch(function (e) { body.innerHTML = ''; body.appendChild(errorCard(e.message, load)); });
     }
 
@@ -352,7 +375,7 @@
           ? 'No trials yet — use “+ New trial request” to raise one.' : 'No trials in this view.' }));
         return;
       }
-      var heads = ['Trial no.', 'Customer', 'Component', 'Requested by', 'Status', 'Recommendation', 'Saving / year', 'Raised'];
+      var heads = ['Trial no.', 'Customer', 'Component', 'Requested by', 'Status', 'Recommendation', 'Saving / year', 'Raised', 'PDF'];
       var tbody = el('tbody');
       trials.forEach(function (x) {
         var recs = x.recommendations || [];
@@ -366,7 +389,11 @@
             x.status === 'APPROVED' ? el('div', { class: 'text-xs ' + (x.dc ? 'text-green-700' : 'text-amber-700'), text: x.dc ? 'DC ✓ trial ' + fmtDate(x.dc.date) : 'DC approval pending' }) : null]),
           el('td', { class: 'px-3 py-3 text-sm', text: recs.length ? recText(recs[0]) + (recs.length > 1 ? '  +' + (recs.length - 1) + ' more' : '') : '—' }),
           el('td', { class: 'px-3 py-3 trl-nowrap font-medium', text: x.savingsPerYear !== null ? money(x.savingsPerYear) + (x.savingsPct !== null ? ' (' + Math.round(x.savingsPct) + '%)' : '') : '—' }),
-          el('td', { class: 'px-3 py-3 trl-nowrap text-muted', text: fmtDate(x.createdAt) })
+          el('td', { class: 'px-3 py-3 trl-nowrap text-muted', text: fmtDate(x.createdAt) }),
+          el('td', { class: 'px-3 py-3 trl-nowrap' }, [
+            x.edaFileId ? el('button', { class: 'btn-secondary btn-sm', 'data-eda-pdf': x.id, title: 'Trial request (existing data) PDF', text: '📄 Request', onclick: function (e) { e.stopPropagation(); openTrialFile(x, { id: x.edaFileId, fileName: 'Existing-data-' + x.trialNo + '.pdf' }, false); } }) : null,
+            x.cmpFileId ? el('button', { class: 'btn-secondary btn-sm', style: 'margin-left:.3rem', 'data-cmp-pdf': x.id, title: 'Savings report PDF', text: '📊 Savings', onclick: function (e) { e.stopPropagation(); openTrialFile(x, { id: x.cmpFileId, fileName: 'Trial-comparison-' + x.trialNo + '.pdf' }, false); } }) : null
+          ])
         ]);
         function open() { go('/t/' + encodeURIComponent(x.id)); }
         tr.addEventListener('click', open);
@@ -499,6 +526,9 @@
         ]),
         flashMsg ? el('div', { class: 'trl-banner trl-ok', text: flashMsg }) : null,
         steps(t, tab, savingsOpen),
+        // The admin sees the request PDF right away; the Super Admin the savings report PDF.
+        canManage() && tab === 'approval' && t.edaFileId ? pdfViewer(t, t.edaFileId, '📄 Trial request — existing data analysis PDF') : null,
+        isSuper() && tab === 'savings' && t.cmpFileId ? pdfViewer(t, t.cmpFileId, '📊 Savings report PDF') : null,
         tabBody(t, tab),
         docsPanel(t),
         relatedPanel(t)
@@ -701,6 +731,8 @@
 
     // Step 4 — trial comparison (savings report) sheet
     function savingsTab(t) {
+      if (t.savingsHidden) return el('div', { class: 'trl-banner trl-info', id: 'trl-sav-hidden', text: '✓ Savings report submitted' + (t.completedAt ? ' ' + fmtDate(t.completedAt) : '') + '. The report is shared with the Super Admin only.' });
+      if (isSuper() && t.status === 'COMPLETED' && t.cmpFileId && !isMine(t)) return el('p', { class: 'trl-help', text: 'Savings report shown above as PDF.' });
       var sheet = new Sheet('cmp');
       current = { sheet: sheet };
       var editable = canEdit(t);

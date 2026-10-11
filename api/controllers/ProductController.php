@@ -10,6 +10,14 @@ class ProductController
             'specification' => 'VARCHAR(255) NULL',
             'productType'   => 'VARCHAR(60) NULL',
         ]]], 'Product catalogue columns');
+        // serial no. + type columns of the catalogue page (CatalogController)
+        try { ensure_schema(CatalogController::schema(), 'Product catalogue'); } catch (Throwable $e) {}
+    }
+
+    public function __destruct()
+    {
+        // products added here (form / Excel) get their serial no. too
+        try { if (in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['POST', 'PUT'], true)) CatalogController::assignSerials(); } catch (Throwable $e) {}
     }
 
     /** Lower-case, no spaces / dashes / dots / slashes — so "SNMX1206" finds "SNMX 1206-ANN". */

@@ -94,7 +94,9 @@ $tail",
     }
 
     private const SELECT = 'SELECT t.*, u.name AS requestedByName, u.role AS requestedByRole, d.name AS decidedByName, dc.name AS dcApprovedByName,
-                                   c.companyName AS linkedCompanyName
+                                   c.companyName AS linkedCompanyName,
+                                   (SELECT f.id FROM `TrialFile` f WHERE f.trialId=t.id AND f.kind=\'EDA\' ORDER BY f.createdAt DESC LIMIT 1) AS edaFileId,
+                                   (SELECT f.id FROM `TrialFile` f WHERE f.trialId=t.id AND f.kind=\'CMP\' ORDER BY f.createdAt DESC LIMIT 1) AS cmpFileId
                             FROM `Trial` t
                             LEFT JOIN `User` u ON u.id = t.requestedById
                             LEFT JOIN `User` d ON d.id = t.decidedById
@@ -117,6 +119,23 @@ $tail",
     private function canSee(array $auth, array $row): bool
     {
         return true;
+    }
+
+    /** The savings report (comparison PDF / data) is for the Super Admin and the engineer who wrote it. */
+    private static function canSeeSavings(array $auth, array $row): bool
+    {
+        return $auth['role'] === 'SUPER_ADMIN' || $row['requestedById'] === $auth['id'];
+    }
+
+    private ?array $viewerCache = null;
+    private function viewer(): array { return $this->viewerCache ??= authenticate(); }
+
+    /** An engineer's trial that is still open (raised, or approved but no savings report yet). */
+    private static function openTrialOf(string $userId, string $exceptId = ''): ?array
+    {
+        $s = db()->prepare("SELECT id, trialNo, status FROM `Trial` WHERE requestedById=? AND status IN ('PENDING_APPROVAL','APPROVED') AND id<>? ORDER BY createdAt LIMIT 1");
+        $s->execute([$userId, $exceptId]);
+        return $s->fetch() ?: null;
     }
 
     private function canEdit(array $auth, array $row): bool
@@ -146,6 +165,8 @@ $tail",
             'savingsPerYear' => $r['savingsPerYear'] !== null ? (float) $r['savingsPerYear'] : null,
             'savingsPct'     => $r['savingsPct'] !== null ? (float) $r['savingsPct'] : null,
             'bestTool'       => $r['bestTool'],
+            'edaFileId'      => $r['edaFileId'] ?? null,
+            'cmpFileId'      => self::canSeeSavings($this->viewer(), $r) ? ($r['cmpFileId'] ?? null) : null,
             'completedAt'    => $r['completedAt'],
             'createdAt'      => $r['createdAt'],
             'updatedAt'      => $r['updatedAt'],
@@ -154,9 +175,11 @@ $tail",
             $fs = db()->prepare('SELECT f.id, f.kind, f.fileName, f.size, f.createdAt, f.viewedAt, u.name AS uploadedBy, v.name AS viewedBy
                                  FROM `TrialFile` f LEFT JOIN `User` u ON u.id=f.uploadedById LEFT JOIN `User` v ON v.id=f.viewedById WHERE f.trialId=? ORDER BY f.createdAt DESC');
             $fs->execute([$r['id']]);
-            $out['files'] = $fs->fetchAll();
+            $seeSav = self::canSeeSavings($this->viewer(), $r);
+            $out['files'] = array_values(array_filter($fs->fetchAll(), fn($f) => $f['kind'] !== 'CMP' || $seeSav));
             $out['existingData'] = $r['existingData'] ? json_decode($r['existingData'], true) : null;
-            $out['savingsData'] = $r['savingsData'] ? json_decode($r['savingsData'], true) : null;
+            $out['savingsData'] = $seeSav && $r['savingsData'] ? json_decode($r['savingsData'], true) : null;
+            $out['savingsHidden'] = !$seeSav && $out['hasSavings'];
         }
         return $out;
     }
@@ -250,7 +273,8 @@ $tail",
             $r = array_change_key_case($r, CASE_LOWER);
             if (isset($counts[$r['status']])) $counts[$r['status']] = (int) $r['n'];
         }
-        sendSuccess(['trials' => array_map(fn($r) => $this->shape($r, false), $rows), 'counts' => $counts]);
+        $open = self::isManager($auth) ? null : self::openTrialOf($auth['id']);
+        sendSuccess(['trials' => array_map(fn($r) => $this->shape($r, false), $rows), 'counts' => $counts, 'openTrial' => $open, 'canRaise' => !$open]);
     }
 
     // GET /api/trials/:id
@@ -270,6 +294,11 @@ $tail",
     {
         $auth = authenticate();
         $b = request_body();
+        // One trial at a time: the next trial can be raised only after the last one is
+        // completed with its savings report (admins are not limited).
+        if (!self::isManager($auth) && ($open = self::openTrialOf($auth['id']))) {
+            sendError('Finish trial ' . $open['trialNo'] . ' first — ' . ($open['status'] === 'PENDING_APPROVAL' ? 'it is waiting for approval' : 'submit its savings report (trial comparison)') . '. A new trial can be raised after that.', 409);
+        }
         $eda = $b['existingData'] ?? null;
         $json = self::sheetJson($eda, 'eda', 'existing situation data analysis');
         [$custName, $component] = self::headline($eda);
@@ -515,6 +544,10 @@ $tail",
         $s = db()->prepare('SELECT * FROM `TrialFile` WHERE id=? AND trialId=?'); $s->execute([$fid, $id]);
         $f = $s->fetch();
         if (!$f) sendError('File not found.', 404);
+        if ($f['kind'] === 'CMP') {
+            $row = $this->fetchRow($id);
+            if (!$row || !self::canSeeSavings($auth, $row)) sendError('The savings report is shared with the Super Admin only.', 403);
+        }
         $path = UPLOADS_PATH . '/trials/' . basename($f['storedName']);
         if (!is_file($path)) sendError('The file is missing on the server.', 404);
         if (self::isManager($auth) && !$f['viewedAt']) db()->prepare('UPDATE `TrialFile` SET viewedAt=?, viewedById=? WHERE id=?')->execute([now_sql(), $auth['id'], $fid]);

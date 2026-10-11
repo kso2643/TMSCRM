@@ -35,6 +35,7 @@
   // [tag, attributes] nodes, inlined so pages built from this shell have no
   // external icon dependency.
   var ICONS = {
+    "BookOpen": [["path",{"d":"M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"}],["path",{"d":"M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"}]],
     "Briefcase": [["rect",{"width":"20","height":"14","x":"2","y":"7","rx":"2","ry":"2"}],["path",{"d":"M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"}]],
     "Calculator": [["rect",{"width":"16","height":"20","x":"4","y":"2","rx":"2"}],["line",{"x1":"8","x2":"16","y1":"6","y2":"6"}],["line",{"x1":"16","x2":"16","y1":"14","y2":"18"}],["path",{"d":"M16 10h.01"}],["path",{"d":"M12 10h.01"}],["path",{"d":"M8 10h.01"}],["path",{"d":"M12 14h.01"}],["path",{"d":"M8 14h.01"}],["path",{"d":"M12 18h.01"}],["path",{"d":"M8 18h.01"}]],
     "MessageSquare": [["path",{"d":"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"}]],
@@ -75,7 +76,7 @@
     "Upload": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"17 8 12 3 7 8"}],["line",{"x1":"12","x2":"12","y1":"3","y2":"15"}]]
   };
   // Sidebar label -> icon. Keep in sync with the React layout chunk.
-  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee","Chat": "MessageSquare","Vendors": "Truck","MD desk": "Briefcase","Accounts": "Calculator"};
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee","Chat": "MessageSquare","Vendors": "Truck","MD desk": "Briefcase","Product catalogue": "BookOpen","Accounts": "Calculator"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -86,6 +87,7 @@
     { label: 'Customer map',          href: '/customers/map/',  icon: 'map',       section: 'CRM' },
     { label: 'Meetings & follow-ups', href: '/meetings/',       icon: 'calendar',  section: 'CRM' },
     { label: 'Products',              href: '/products/',       icon: 'package',   section: 'Sales' },
+    { label: 'Product catalogue',     href: '/catalogue/',      icon: 'book',      section: 'Sales' },
     { label: 'Quotations',            href: '/quotations/',     icon: 'file',      section: 'Sales' },
     { label: 'Orders',                href: '/orders/',         icon: 'clipboard', section: 'Sales' },
     { label: 'Trials',                href: '/trials/',         icon: 'flask',     section: 'Sales' },

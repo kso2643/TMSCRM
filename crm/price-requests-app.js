@@ -418,7 +418,7 @@
         el('div', { class: 'pr-f' }, [el('label', {}, ['Regular / One time ', el('span', { class: 'req', text: '*' })]), seg]),
         field('quantity', 'Quantity', { req: true, type: 'number', ph: '0' }),
         field('unit', 'Unit', { ph: 'PCS' }),
-        field('requestedPrice', 'Target ₹/unit', { req: true, type: 'number', ph: '0.00' }),
+        field('requestedPrice', 'Target ₹/unit (optional)', { type: 'number', ph: '0.00' }),
         priority,
         field('notes', 'Note', { cls: 'wide', ph: 'Competitor price, application, drawing reference…' })
       ]));
@@ -475,7 +475,7 @@
         if (!it.brand.trim()) { bad('brand'); miss.push('brand'); }
         if (!it.supplyType) { bad('supplyType'); miss.push('Regular / One time'); }
         if (!(num(it.quantity) > 0)) { bad('quantity'); miss.push('quantity'); }
-        if (!(num(it.requestedPrice) > 0)) { bad('requestedPrice'); miss.push('target price'); }
+        if (it.requestedPrice !== '' && it.requestedPrice != null && !(num(it.requestedPrice) > 0)) { bad('requestedPrice'); miss.push('a valid target price (or leave it blank)'); }
         if (!PRIO[it.priority]) { bad('priority'); miss.push('priority'); }
         if (miss.length) errs.push('Item ' + (i + 1) + ': ' + miss.join(', '));
       });
