@@ -2,8 +2,10 @@
    Product suggestions for the quotation forms (TMS and APJ).
 
    Type in a row's "Product Code" or "Specification" box (e.g. SNMX, snmx1206,
-   YG602) → a list of matching products from the Products page shows code,
-   specification, grade, brand, price and stock. Picking one fills the code,
+   YG602, M10, a serial no.) → a list of matching products from the Products /
+   Product catalogue pages shows serial no., code, type, specification, grade,
+   catalogue details (corner radius, ISO materials, diameter, pockets, insert
+   that fits, thread…), brand, price and stock. Picking one fills the code,
    specification and price of that row.
 
    Prices that come from the product list or from an approved price request are
@@ -27,6 +29,7 @@
     '.ps-tag{display:inline-block;padding:0 6px;border-radius:5px;font-size:11px;font-weight:600;margin-left:6px;background:#eef2ff;color:#3730a3}',
     '.ps-tag.g{background:#ecfeff;color:#0e7490}.ps-tag.st{background:#f0fdf4;color:#166534}.ps-tag.st0{background:#fef2f2;color:#991b1b}',
     '.ps-empty{padding:10px 12px;color:#64748b}.ps-v{color:#7c2d12;font-size:11.5px}',
+    '.ps-tag.t{background:#fef3c7;color:#92400e}.ps-sl{color:#94a3b8;font-weight:700;font-size:11px;margin-right:6px}.ps-cd{color:#0f766e;font-weight:600}',
     'input.ps-locked{background:#f1f5f9!important;color:#334155!important;cursor:not-allowed}',
     '.ps-lock{position:absolute;right:2px;top:50%;transform:translateY(-50%);border:0;background:none;cursor:pointer;font-size:12px;padding:2px}',
     '.ps-wrap{position:relative;display:contents}'
@@ -62,12 +65,15 @@
     active = input; results = list; sel = -1;
     box.innerHTML = list.length ? list.map(function (p, i) {
       var st = p.stock;
-      return '<button type="button" class="ps-it" data-i="' + i + '"><div><b>' + esc(p.itemCode) + '</b>' +
+      var TYPE = { INSERT: 'Insert', CUTTER: 'Cutter', ENDMILL: 'End mill', DRILL: 'Drill', TAP: 'Tap' };
+      return '<button type="button" class="ps-it" data-i="' + i + '"><div>' + (p.serialNo ? '<span class="ps-sl">#' + esc(p.serialNo) + '</span>' : '') + '<b>' + esc(p.itemCode) + '</b>' +
+        (TYPE[p.catType] ? '<span class="ps-tag t">' + TYPE[p.catType] + '</span>' : '') +
         (p.brand ? '<span class="ps-tag">' + esc(p.brand) + '</span>' : '') +
         (p.grade ? '<span class="ps-tag g">' + esc(p.grade) + '</span>' : '') +
         (st ? '<span class="ps-tag ' + (st.total > 0 ? 'st' : 'st0') + '">Stock ' + num(st.total) + (st.hand ? ' · hand ' + num(st.hand) : '') + '</span>' : '') +
         (p.standardPrice ? '<span style="float:right;font-weight:700">₹' + num(p.standardPrice) + '</span>' : '') + '</div>' +
-        '<div class="ps-s">' + esc([p.specification, p.productName !== p.specification ? p.productName : '', p.productType].filter(Boolean).join(' · ')) + '</div>' +
+        '<div class="ps-s">' + esc([p.specification, p.productName !== p.specification ? p.productName : ''].filter(Boolean).join(' · ')) + '</div>' +
+        (p.catDetails ? '<div class="ps-s ps-cd">' + esc(p.catDetails) + '</div>' : '') +
         (p.vendors && p.vendors.length ? '<div class="ps-s ps-v">Vendors: ' + p.vendors.map(function (v) {
           return esc(v.vendor) + (v.netPrice != null ? ' ₹' + num(v.netPrice) : '') + (v.stock != null ? ' (stock ' + num(v.stock) + ')' : '');
         }).join(' · ') + '</div>' : '') + '</button>';
@@ -92,7 +98,7 @@
     if (!p || !input) return;
     var row = input.closest('.item-row'), ins = rowInputs(row), info = rowInfo(input);
     closeBox();
-    var spec = [p.specification || p.productName, p.grade ? 'Grade ' + p.grade : '', p.brand].filter(Boolean).join(' — ');
+    var spec = [p.specification || p.productName, p.grade ? 'Grade ' + p.grade : '', p.catDetails ? p.catDetails.replace(/ · ISO [A-Z ]+$/, '') : '', p.brand].filter(Boolean).join(' — ');
     function set(field, val) {
       if (!ins[field]) return;
       ins[field].value = val;

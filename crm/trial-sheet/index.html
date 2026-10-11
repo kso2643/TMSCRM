@@ -344,7 +344,7 @@ details.fmt ul{margin:6px 0 0 18px}
 :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 </style>
-<link rel="stylesheet" href="/motion.css?v=20261011a"/></head>
+<link rel="stylesheet" href="/motion.css?v=20261011b"/></head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 
@@ -2148,7 +2148,7 @@ const ROWS = [
   { id: 'ap',    g: 'proc', label: 'Depth of cut, ap (mm)', kind: 'num', path: 'ap', ops: AP_OPS },
   { id: 'ae',    g: 'proc', label: 'Width of cut, ae (mm)', kind: 'num', path: 'ae', ops: ['milling'] },
   { id: 'len',   g: 'proc', label: 'Length of cut (mm)', kind: 'num', path: 'len', ops: ['turning', 'boring', 'grooving', 'parting', 'threading', 'milling'] },
-  { id: 'holeDepth',   g: 'proc', label: 'Drill depth (mm)', kind: 'num', path: 'holeDepth', ops: ['drilling'], ph: 'hole depth', merge: 'depth', short: 'Drill depth' },
+  { id: 'holeDepth',   g: 'proc', label: 'Drill depth (mm)', kind: 'num', path: 'holeDepth', ops: ['drilling', 'tapping'], ph: t => t.op === 'tapping' ? 'tap drill hole depth' : 'hole depth' },
   { id: 'tapDepth',    g: 'proc', label: 'Tap depth (mm)', kind: 'num', path: 'tapDepth', ops: ['tapping'], ph: 'thread depth', merge: 'depth', short: 'Tap depth' },
   { id: 'threadDepth', g: 'proc', label: 'Thread depth (mm)', kind: 'num', path: 'threadDepth', ops: ['threading'], merge: 'depth', short: 'Thread depth' },
   { id: 'intExt',   g: 'proc', label: 'Internal / external', kind: 'sel', path: 'intExt', ops: ['threading'], options: ['External', 'Internal'] },

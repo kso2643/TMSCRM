@@ -75,13 +75,15 @@ class ProductController
         $s = db()->prepare(
             "SELECT p.id,p.itemCode,p.productName,p.description,p.unit,p.standardPrice,p.hsnCode,p.categoryId,p.category,
                     p.brand,p.grade,p.specification,p.productType,
+                    p.serialNo,p.catType,p.cornerRadius,p.chipBreaker,p.isoMaterials,p.coating,p.diameter,p.pockets,p.fitsInsert,p.shank,
+                    p.flutes,p.lengthXd,p.coolantThrough,p.threadSize,p.pitch,p.tapType,
                     c.name AS cat_name, c.color AS cat_color
              FROM `Product` p LEFT JOIN `Category` c ON c.id=p.categoryId
              WHERE p.isActive=1 AND (p.itemCode LIKE ? OR p.description LIKE ? OR p.productName LIKE ? OR p.grade LIKE ? OR p.brand LIKE ?
-                                     OR $code LIKE ? OR $spec LIKE ?)
+                                     OR $code LIKE ? OR $spec LIKE ? OR p.fitsInsert LIKE ? OR p.threadSize LIKE ? OR p.serialNo=?)
              ORDER BY ($code LIKE ? OR $spec LIKE ?) DESC, ($code = ? OR $spec = ?) DESC, p.itemCode ASC LIMIT $limit"
         );
-        $s->execute([$like,$like,$like,$like,$like,$sqLike,$sqLike,$sqPre,$sqPre,$sq,$sq]);
+        $s->execute([$like,$like,$like,$like,$like,$sqLike,$sqLike,$like,$like,ctype_digit($q) ? (int) $q : -1,$sqPre,$sqPre,$sq,$sq]);
         $rows = $s->fetchAll();
         // stock for the results (by product id or item code)
         $stock = [];
@@ -110,10 +112,29 @@ class ProductController
             if ($offers) $r['vendors'] = array_slice($offers[strtoupper($r['itemCode'])] ?? [], 0, 4);
             $r['categoryRef'] = $r['cat_name'] ? ['name'=>$r['cat_name'],'color'=>$r['cat_color']] : null;
             $r['standardPrice'] = (float) $r['standardPrice'];
+            foreach (['cornerRadius','diameter','pitch'] as $k) if ($r[$k] !== null) $r[$k] = (float) $r[$k];
+            $r['catDetails'] = self::catDetails($r);
             $r['stock'] = $stock['id:' . $r['id']] ?? $stock['code:' . strtoupper($r['itemCode'])] ?? null;
             unset($r['cat_name'],$r['cat_color']); return $r;
         },$rows);
         sendSuccess(['results'=>$results]);
+    }
+
+    /** Short catalogue details for suggestions: "R0.8 · P M K", "D63 · Z5 · fits SNMX1206"… */
+    public static function catDetails(array $r): string
+    {
+        $n = fn($v) => rtrim(rtrim(number_format((float) $v, 3, '.', ''), '0'), '.');
+        $b = [];
+        $t = $r['catType'] ?? '';
+        if ($t === 'INSERT') { if ($r['cornerRadius'] !== null) $b[] = 'R' . $n($r['cornerRadius']); if ($r['chipBreaker']) $b[] = 'CB ' . $r['chipBreaker']; }
+        if (in_array($t, ['CUTTER', 'ENDMILL', 'DRILL'], true) && $r['diameter'] !== null) $b[] = 'D' . $n($r['diameter']);
+        if ($t === 'CUTTER') { if ($r['pockets']) $b[] = 'Z' . $r['pockets']; if ($r['fitsInsert']) $b[] = 'fits ' . $r['fitsInsert']; if ($r['shank']) $b[] = $r['shank']; }
+        if ($t === 'ENDMILL' && $r['flutes']) $b[] = $r['flutes'] . ' flutes';
+        if ($t === 'DRILL') { if ($r['lengthXd']) $b[] = $r['lengthXd']; if ($r['coolantThrough']) $b[] = 'coolant through'; }
+        if ($t === 'TAP') { if ($r['threadSize']) $b[] = $r['threadSize'] . ($r['pitch'] !== null ? 'x' . $n($r['pitch']) : ''); if ($r['tapType']) $b[] = $r['tapType']; }
+        if (!empty($r['coating'])) $b[] = $r['coating'];
+        if (!empty($r['isoMaterials'])) $b[] = 'ISO ' . str_replace(',', ' ', $r['isoMaterials']);
+        return implode(' · ', $b);
     }
 
     // GET /api/products/code/:code

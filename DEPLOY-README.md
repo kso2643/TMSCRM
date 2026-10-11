@@ -1,3 +1,13 @@
+# Update — 11 Oct (b): catalogue suggestions in quotations; drill depth + tap depth for tapping
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.
+
+- **Quotations (TMS and APJ):**
+  - Typing in a line's Product code or Specification box now suggests from the **Product catalogue**. Each suggestion shows the serial no., type (Insert / Cutter / End mill / Drill / Tap) and the catalogue details: corner radius, ISO materials, diameter, pockets, insert that fits, flutes, thread size…
+  - You can also search by thread size (e.g. M10), the insert a cutter takes, or the serial no.
+  - Picking a product puts those details into the specification.
+- **Trial sheet:** a **Tapping** tool now has both **Drill depth** (tap drill hole) and **Tap depth**. Drill depth has its own row on the sheet / PDF.
+
 # Update — 11 Oct (a): trial sheet fixes, one trial at a time, savings PDF for Super Admin, optional target price, Product catalogue page
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
