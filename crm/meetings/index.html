@@ -302,7 +302,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 .today-fixed{padding:.55rem .75rem;border:1px solid #cbd5e1;border-radius:.5rem;background:#f1f5f9;color:#0f172a;font-weight:600;font-size:.9rem}
 .dark .today-fixed{background:#1e293b;border-color:#334155;color:#e2e8f0}
 </style>
-<script src="/fuel-expense-app.js?v=20261011c" defer></script><script src="/attendance-all-app.js?v=20261011c" defer></script><script src="/appointments-reminder-app.js?v=20261011c" defer></script><script src="/crm-global.js?v=20261011c" defer></script><link rel="stylesheet" href="/motion.css?v=20261011c"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261012a" defer></script><script src="/attendance-all-app.js?v=20261012a" defer></script><script src="/appointments-reminder-app.js?v=20261012a" defer></script><script src="/crm-global.js?v=20261012a" defer></script><link rel="stylesheet" href="/motion.css?v=20261012a"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 
 <div id="auth-gate" class="state-block" style="max-width:420px;margin:80px auto;">
@@ -451,7 +451,8 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
       update: function (id, body) {
         return apiFetch("/meetings/" + encodeURIComponent(id), { method: "PUT", body: JSON.stringify(body) });
       },
-      meta: function () { return apiFetch("/meetings/meta"); }
+      meta: function () { return apiFetch("/meetings/meta"); },
+      addOption: function (list, label) { return apiFetch("/options", { method: "POST", body: JSON.stringify({ list: list, label: label }) }); }
     },
     users: {
       list: function () { return apiFetch("/users" + qs({ limit: 200 })); }
@@ -796,6 +797,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-save").addEventListener("click", function () { saveMeeting(m.id); });
     mountAttachments(document.getElementById("edit-att"), { meetingId: m.id });
 
+    enableAddNew();
     openBackdrop();
   }
 
@@ -1180,6 +1182,51 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     return new Date().toLocaleTimeString("en-GB", { timeZone: DISPLAY_TZ, hour: "2-digit", minute: "2-digit", hour12: false });
   }
 
+  /* ── "＋ Add new…" in the meeting dropdowns. A choice one user adds is saved
+     on the server (/api/options) and appears in that dropdown for everyone. ── */
+  var ADD_NEW = "__add__";
+  var ADDABLE = {
+    "new-type": ["meeting_type", "type"], "new-status": ["meeting_status", "status"], "edit-status": ["meeting_status", "status"],
+    "new-priority": ["meeting_priority", "priority"], "edit-priority": ["meeting_priority", "priority"]
+  };
+  function listFor(kind) { return kind === "type" ? VALID_TYPES : kind === "status" ? VALID_STATUSES : VALID_PRIORITIES; }
+  function enableAddNew() {
+    Object.keys(ADDABLE).forEach(function (id) {
+      var sel = document.getElementById(id);
+      if (!sel || sel.querySelector('option[value="' + ADD_NEW + '"]')) return;
+      var o = document.createElement("option"); o.value = ADD_NEW; o.textContent = "＋ Add new…"; sel.appendChild(o);
+      sel.setAttribute("data-prev", sel.value);
+      sel.addEventListener("focus", function () { if (sel.value !== ADD_NEW) sel.setAttribute("data-prev", sel.value); });
+      sel.addEventListener("change", function () {
+        if (sel.value !== ADD_NEW) { sel.setAttribute("data-prev", sel.value); return; }
+        var cfg = ADDABLE[id], prev = sel.getAttribute("data-prev") || "";
+        var label = (window.prompt("New " + cfg[1] + " (it will show for all users):") || "").trim();
+        if (!label) { sel.value = prev; return; }
+        api.meetings.addOption(cfg[0], label).then(function (res) {
+          var v = res.data.option.value, list = listFor(cfg[1]);
+          if (list.indexOf(v) < 0) list.push(v);
+          // every open dropdown of the same kind (incl. the list filters) gets the new choice
+          Object.keys(ADDABLE).concat(cfg[1] === "status" ? ["f-status"] : cfg[1] === "type" ? ["f-type"] : []).forEach(function (oid) {
+            var s2 = document.getElementById(oid);
+            if (!s2 || (ADDABLE[oid] && ADDABLE[oid][1] !== cfg[1]) || s2.querySelector('option[value="' + v + '"]')) return;
+            var no = document.createElement("option"); no.value = v; no.textContent = humanize(v);
+            var addOpt = s2.querySelector('option[value="' + ADD_NEW + '"]');
+            s2.insertBefore(no, addOpt);
+          });
+          sel.value = v; sel.setAttribute("data-prev", v);
+          addNewMsg((res.message || "Added") + ": " + humanize(v), false);
+        }).catch(function (e) { sel.value = prev; addNewMsg(e.message || "Could not add", true); });
+      });
+    });
+  }
+
+  function addNewMsg(text, bad) {
+    var fb = document.getElementById("drawer-feedback");
+    if (!fb) return;
+    fb.innerHTML = '<div style="margin:.4rem 1rem;padding:.45rem .7rem;border-radius:.5rem;font-size:.85rem;' + (bad ? "background:#fee2e2;color:#991b1b" : "background:#dcfce7;color:#166534") + '">' + escapeHtml(text) + "</div>";
+    setTimeout(function () { if (fb) fb.innerHTML = ""; }, 4000);
+  }
+
   function optionsHtml(list, selected, blankLabel) {
     return (blankLabel != null ? '<option value="">' + escapeHtml(blankLabel) + "</option>" : "") +
       list.map(function (v) { return '<option value="' + v + '"' + (v === selected ? " selected" : "") + ">" + humanize(v) + "</option>"; }).join("");
@@ -1248,6 +1295,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     });
     q.addEventListener("focus", function () { searchCustomers(q.value.trim()); });
     q.addEventListener("blur", function () { setTimeout(function () { var b = document.getElementById("cust-results"); if (b) b.classList.add("is-hidden"); }, 150); });
+    enableAddNew();
     openBackdrop();
     setTimeout(function () { q.focus(); }, 50);
   }
@@ -1443,6 +1491,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
       api.meetings.meta().then(function (res) {
         if (res.data.statuses && res.data.statuses.length) VALID_STATUSES = res.data.statuses;
         if (res.data.types && res.data.types.length) VALID_TYPES = res.data.types;
+        if (res.data.priorities && res.data.priorities.length) VALID_PRIORITIES = res.data.priorities;
       }).catch(function () { /* keep the built-in fallback lists above if this fails */ })
         .then(populateStaticFilterOptions)
     ];

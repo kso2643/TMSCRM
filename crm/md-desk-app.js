@@ -112,6 +112,13 @@
       '.md-qs{position:relative}.md-sugg{position:absolute;left:0;right:0;top:100%;z-index:50;background:#fff;border:1px solid #cbd5e1;border-radius:.5rem;box-shadow:0 10px 28px rgba(0,0,0,.18);max-height:240px;overflow:auto}',
       '.md-sugg button{display:block;width:100%;text-align:left;border:0;background:none;padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:#0f172a}.md-sugg button:hover{background:#eff6ff}.md-sugg small{color:#64748b}',
       '.dark .md-sugg{background:#1e293b;border-color:#334155}.dark .md-sugg button{color:#e2e8f0}',
+      '.md-qtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:.5rem;margin-bottom:.8rem}',
+      '.md-qtile{border:1px solid #e2e8f0;border-top:3px solid var(--c);border-radius:.6rem;background:#fff;padding:.5rem .6rem;text-align:left;cursor:pointer;color:inherit}.md-qtile.on{box-shadow:0 0 0 2px var(--c)}',
+      '.md-qtile b{display:block;font-size:1.25rem}.md-qtile span{font-size:.76rem;color:#475569;font-weight:600}.md-qtile small{display:block;font-size:.7rem;color:#64748b}',
+      '.dark .md-qtile{background:#0f172a;border-color:#334155}',
+      '.md-qtable{width:100%;border-collapse:collapse;font-size:.83rem}.md-qtable th{text-align:left;font-size:.7rem;text-transform:uppercase;color:#64748b;padding:.45rem;border-bottom:1px solid #e2e8f0;white-space:nowrap}',
+      '.md-qtable td{padding:.45rem;border-bottom:1px solid #f1f5f9;vertical-align:top}.dark .md-qtable th,.dark .md-qtable td{border-color:#334155}.md-n{text-align:right;white-space:nowrap}.md-sub{color:#64748b;font-size:.75rem}',
+      '.md-q-sel{border:1px solid #cbd5e1;border-radius:.4rem;padding:.15rem .3rem;font-size:.76rem;background:#fff;color:inherit}.dark .md-q-sel{background:#0f172a;border-color:#334155}',
       '.md-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;transition:opacity .25s,transform .25s;max-width:90vw}',
       '.md-toast.in{opacity:1;transform:translate(-50%,0)}.md-toast.err{background:#b91c1c}'
     ].join('\n');
@@ -354,13 +361,98 @@
     var search = el('input', { type: 'search', placeholder: 'Search…', id: 'md-search' });
     search.oninput = function () { state.q = search.value.trim(); renderList(); };
     var right = el('div', { class: 'md-card' }, [tabsBox, el('div', { class: 'md-bar' }, [typeSel, stSel, search]), listBox]);
-    root.appendChild(el('div', { class: 'md-cols' }, [formBox, right]));
+    var deskView = el('div', { class: 'md-cols' }, [formBox, right]);
+    var quoteView = el('div', { id: 'md-quotes', style: 'display:none' });
+    // Desk (messages, tasks…) | Quotations (follow-up status, price negotiation)
+    var views = el('div', { class: 'md-tabs', style: 'margin-bottom:1rem' }, [['desk', '📨 Desk'], ['quotes', '📄 Quotations']].map(function (v) {
+      return el('button', { type: 'button', class: 'md-tab' + (v[0] === 'desk' ? ' on' : ''), 'data-view': v[0], text: v[1], onclick: function () { showView(v[0]); } });
+    }));
+    function showView(v) {
+      Array.prototype.forEach.call(views.children, function (b) { b.classList.toggle('on', b.getAttribute('data-view') === v); });
+      deskView.style.display = v === 'desk' ? '' : 'none'; quoteView.style.display = v === 'quotes' ? '' : 'none';
+      if (v === 'quotes') quotesView(quoteView);
+      try { history.replaceState(null, '', v === 'quotes' ? '#quotes' : location.pathname); } catch (e) {}
+    }
+    root.appendChild(views); root.appendChild(deskView); root.appendChild(quoteView);
     content.appendChild(root);
+    if (location.hash === '#quotes') setTimeout(function () { showView('quotes'); }, 0);
     var origRender = renderList;
     renderList = function () { stSel.value = state.status; origRender(); };
     api('GET', '/md-desk/recipients').then(function (j) { state.users = j.data.users || []; state.canGroups = !!j.data.canSendToGroups; renderForm(); }).catch(function () { renderForm(); });
-    load().then(function () { var h = location.hash.slice(1); if (h) open(decodeURIComponent(h)); });
+    load().then(function () { var h = location.hash.slice(1); if (h && h !== 'quotes') open(decodeURIComponent(h)); });
     timer = setInterval(function () { if (document.visibilityState === 'visible' && !document.querySelector('.md-modal')) load(); }, 30000);
+  }
+
+  // ── Quotations: every quotation with its follow-up status, engineer / admin wise ──
+  var qf = { user: '', status: '', company: '', q: '', by: 'list' };
+  function quotesView(host) {
+    var QN = window.QuoteNotes;
+    clear(host);
+    if (!QN) { host.appendChild(el('div', { class: 'md-empty', text: 'Could not load the quotation notes module.' })); return; }
+    var tiles = el('div', { class: 'md-qtiles', id: 'md-qtiles' });
+    var who = el('select', { id: 'md-q-user' }, [el('option', { value: '', text: 'Everyone (engineers & admins)' })]);
+    var co = el('select', { id: 'md-q-co' }, [['', 'TMS & APJ'], ['TMS', 'TMS'], ['APJ', 'APJ']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+    var q = el('input', { type: 'search', placeholder: 'Search quotation no., customer…', id: 'md-q-search', value: qf.q });
+    var by = el('select', { id: 'md-q-by' }, [['list', 'List'], ['person', 'Person-wise summary']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+    who.value = qf.user; co.value = qf.company; by.value = qf.by;
+    var box = el('div', { id: 'md-q-list' });
+    host.appendChild(el('div', { class: 'md-card' }, [tiles, el('div', { class: 'md-bar' }, [who, co, by, q]), box]));
+    var t;
+    who.onchange = function () { qf.user = who.value; load(); };
+    co.onchange = function () { qf.company = co.value; load(); };
+    by.onchange = function () { qf.by = by.value; load(); };
+    q.oninput = function () { clearTimeout(t); t = setTimeout(function () { qf.q = q.value.trim(); load(); }, 250); };
+    function load() {
+      clear(box).appendChild(el('div', { class: 'md-empty', text: 'Loading…' }));
+      var qs = '?status=' + (qf.by === 'person' ? '' : qf.status) + (qf.user ? '&user=' + encodeURIComponent(qf.user) : '') + (qf.company ? '&company=' + qf.company : '') + (qf.q ? '&q=' + encodeURIComponent(qf.q) : '');
+      QN.api('GET', '/quote-follow' + qs).then(function (j) {
+        var d = j.data;
+        if (who.options.length <= 1) d.people.forEach(function (p) { who.appendChild(el('option', { value: p.id, text: p.name + (p.role === 'SUPER_ADMIN' || p.role === 'ADMIN' ? ' (admin)' : '') })); });
+        who.value = qf.user; who.style.display = d.seesAll ? '' : 'none';
+        clear(tiles);
+        var total = Object.keys(d.counts).reduce(function (a, k) { return a + d.counts[k].n; }, 0);
+        [['', 'All', '#1e3a8a', total]].concat(Object.keys(QN.STATUS).map(function (k) { return [k, QN.STATUS[k][0], QN.STATUS[k][1], d.counts[k] ? d.counts[k].n : 0, d.counts[k] ? d.counts[k].value : 0]; })).forEach(function (x) {
+          tiles.appendChild(el('button', { type: 'button', class: 'md-qtile' + (qf.status === x[0] ? ' on' : ''), style: '--c:' + x[2], 'data-qtile': x[0] || 'ALL', onclick: function () { qf.status = x[0]; if (qf.by === 'person') { qf.by = 'list'; by.value = 'list'; } load(); } },
+            [el('b', { text: String(x[3]) }), el('span', { text: x[1] }), x[4] ? el('small', { text: '₹' + Math.round(x[4]).toLocaleString('en-IN') }) : null]));
+        });
+        clear(box);
+        if (!d.items.length) { box.appendChild(el('div', { class: 'md-empty', text: 'No quotations here.' })); return; }
+        if (qf.by === 'person') return person(d);
+        var tb = el('tbody', {}, d.items.map(function (x) {
+          var sel = el('select', { class: 'md-q-sel', 'data-qsel': x.id, title: 'Change status' }, Object.keys(QN.STATUS).map(function (k) { return el('option', { value: k, text: QN.STATUS[k][0] }); }));
+          sel.value = x.followStatus;
+          sel.onchange = function () {
+            var note = '';
+            if (sel.value === 'OTHER') { note = prompt('Type the status:', x.followStatus === 'OTHER' ? x.followNote || '' : '') || ''; if (!note.trim()) { sel.value = x.followStatus; return; } }
+            QN.api('PATCH', '/quote-follow/' + encodeURIComponent(x.id) + '/status', { status: sel.value, note: note.trim() }).then(function (r) { toast(r.message); load(); }).catch(function (e) { toast(e.message, 'err'); sel.value = x.followStatus; });
+          };
+          var ln = x.lastNote;
+          return el('tr', { 'data-quote': x.id }, [
+            el('td', {}, [el('b', { text: x.quotationNumber || '—' }), el('div', { class: 'md-sub', text: x.company + ' · ' + dmy(x.quotationDate) })]),
+            el('td', { text: x.customer || '—' }),
+            el('td', {}, [x.user.name || '—', x.user.role === 'SUPER_ADMIN' || x.user.role === 'ADMIN' ? el('span', { class: 'md-badge', style: '--c:#7c3aed;margin-left:.3rem', text: 'admin' }) : null]),
+            el('td', { class: 'md-n', text: money(x.totalAmount) }),
+            el('td', {}, [QN.badge(x.followStatus, x.followNote), el('div', { style: 'margin-top:.25rem' }, [sel])]),
+            el('td', { class: 'md-sub', style: 'max-width:280px' }, ln ? [ln.newPrice != null ? el('b', { style: 'color:#0f172a', text: (ln.itemCode ? ln.itemCode + ' ' : '') + (ln.oldPrice != null ? money(ln.oldPrice) + ' → ' : '') + money(ln.newPrice) + ' ' }) : null, (ln.text || '').slice(0, 90), el('div', { text: (ln.user || '') + ' · ' + when(ln.createdAt) })] : ['—']),
+            el('td', {}, [el('button', { class: 'md-btn sm', type: 'button', 'data-qnotes': x.id, text: '💬 Notes' + (x.noteCount ? ' (' + x.noteCount + ')' : ''), onclick: function () { QN.open(x.id, { onChange: load }); } })])
+          ]);
+        }));
+        box.appendChild(el('div', { style: 'overflow-x:auto' }, [el('table', { class: 'md-qtable', id: 'md-q-table' }, [el('thead', {}, [el('tr', {}, ['Quotation', 'Customer', 'Engineer / admin', 'Value', 'Status', 'Latest note / price', ''].map(function (h, i) { return el('th', { class: i === 3 ? 'md-n' : '', text: h }); }))]), tb])]));
+      }).catch(function (e) { clear(box).appendChild(el('div', { class: 'md-empty', text: e.message })); });
+    }
+    function person(d) {
+      var by = {};
+      d.items.forEach(function (x) { var k = x.user.id; by[k] = by[k] || { name: x.user.name, role: x.user.role, n: 0, value: 0, st: {} }; by[k].n++; by[k].value += x.totalAmount; by[k].st[x.followStatus] = (by[k].st[x.followStatus] || 0) + 1; });
+      var keys = Object.keys(QN.STATUS);
+      var tb = el('tbody', {}, Object.keys(by).sort(function (a, b) { return by[b].n - by[a].n; }).map(function (k) {
+        var p = by[k];
+        return el('tr', {}, [el('td', {}, [el('b', { text: p.name || '—' }), p.role === 'SUPER_ADMIN' || p.role === 'ADMIN' ? el('span', { class: 'md-badge', style: '--c:#7c3aed;margin-left:.3rem', text: 'admin' }) : null]),
+          el('td', { class: 'md-n', text: String(p.n) }), el('td', { class: 'md-n', text: money(p.value) })]
+          .concat(keys.map(function (s) { return el('td', { class: 'md-n' }, [p.st[s] ? el('button', { type: 'button', class: 'md-btn sm', text: String(p.st[s]), onclick: function () { qf.user = k; qf.status = s; qf.by = 'list'; quotesView(host); } }) : el('span', { class: 'md-sub', text: '—' })]); })));
+      }));
+      box.appendChild(el('div', { style: 'overflow-x:auto' }, [el('table', { class: 'md-qtable', id: 'md-q-person' }, [el('thead', {}, [el('tr', {}, ['Engineer / admin', 'Quotations', 'Value'].concat(keys.map(function (s) { return QN.STATUS[s][0]; })).map(function (h, i) { return el('th', { class: i ? 'md-n' : '', text: h }); }))]), tb])]));
+    }
+    load();
   }
 
   window.MdDeskPage = { mountPage: mountPage };

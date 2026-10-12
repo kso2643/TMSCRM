@@ -1,3 +1,31 @@
+# Update — 12 Oct (a): quotation notes & price negotiation, MD desk Quotations tab, shared meeting dropdowns
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `api/controllers/OptionController.php`, `api/controllers/QuoteFollowController.php`, `crm/quote-notes.js`.
+- **Database:** new columns on `Quotation` (follow-up status, note, updated at / by) and new tables `QuotationNote` and `DropdownOption`. They are created automatically on first use.
+
+1. **Quotations page — comments and price changes:**
+   - Every saved quotation card now shows its follow-up status, the latest note or price, and a **💬 Notes** button.
+   - While you edit a quotation, a **💬 Notes** tab opens the same panel at the side.
+   - In the panel you can:
+     - add a **Comment**;
+     - record a **Price negotiation**, e.g. "customer asks ₹380 against ₹405";
+     - record a **Price changed** (the final price).
+   - For a price you pick the item, and the old → new price and the % change are shown in the history.
+   - A negotiation note moves a *Pending* quotation to *Price negotiation* automatically.
+2. **MD desk → new "📄 Quotations" tab:**
+   - Lists every quotation, from engineers and admins (admins are tagged).
+   - The tiles at the top show the count and value per status: Pending, Price negotiation, Trial, PO received, Comparison, Price concern, Closed and **Other**. Click a tile to filter.
+   - You can change the status straight from the list. **Other** asks you to type the status yourself.
+   - Filters: by person, by company (TMS / APJ), and search.
+   - **Person-wise summary** shows each engineer / admin's quotations broken down by status.
+   - **💬 Notes** opens the history, where you can add a negotiation or price change.
+   - Engineers see only their own quotations; admins and the MD see everyone's.
+3. **Meetings & follow-ups — "＋ Add new…" in the dropdowns:**
+   - The Type, Status and Follow-up priority dropdowns (in both the new-meeting form and the edit drawer) now end with **＋ Add new…**.
+   - Type the new choice and it is saved for **all users**. It also appears in the list filters.
+   - Fixed: the page's `/meetings/meta` call had no route, so it always fell back to the built-in lists.
+
 # Update — 11 Oct (c): roomier trial PDF; "Expected trial date"
 
 **Upload:** `crm/` (only `crm/trial-sheet/index.html` and `crm/trials-app.js` changed), then press **Ctrl+Shift+R** once.

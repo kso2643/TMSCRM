@@ -88,6 +88,8 @@ require __DIR__ . '/controllers/MdDeskController.php';
 require __DIR__ . '/controllers/AccountsController.php';
 require __DIR__ . '/controllers/SupplierQuoteController.php';
 require __DIR__ . '/controllers/CatalogController.php';
+require __DIR__ . '/controllers/OptionController.php';
+require __DIR__ . '/controllers/QuoteFollowController.php';
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -226,6 +228,7 @@ try {
     elseif ($c0 === 'meetings') {
         $ctrl = new MeetingController(); $exp = new ExportController();
         match (true) {
+            $method === 'GET'   && $c1 === 'meta'                       => $ctrl->meta(),
             $method === 'GET'   && $c1 === 'today-followups'            => $ctrl->todayFollowups(),
             $method === 'GET'   && $c1 === 'alerts'                     => $ctrl->alerts(),
             $method === 'PATCH' && $c1 === 'alerts' && $c3 === 'read'   => $ctrl->markAlertRead($c2),
@@ -482,6 +485,24 @@ try {
             $method === 'GET'    && $c1 !== '' && $c2 === ''    => $ctrl->show($c1),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''    => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''    => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'options') {
+        $ctrl = new OptionController();
+        match (true) {
+            $method === 'GET'  && $c1 === '' => $ctrl->index(),
+            $method === 'POST' && $c1 === '' => $ctrl->create(),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'quote-follow') {
+        $ctrl = new QuoteFollowController();
+        match (true) {
+            $method === 'GET'   && $c1 === ''                       => $ctrl->index(),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'notes'    => $ctrl->notes($c1),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'notes'    => $ctrl->addNote($c1),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'status'   => $ctrl->setStatus($c1),
             default => sendError('Route not found', 404),
         };
     }

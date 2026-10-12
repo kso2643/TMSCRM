@@ -10,11 +10,16 @@ class MeetingController
         'VISIT','CALL','ONLINE','TRIAL_SUPPORT','QUOTATION_DISCUSSION','TECHNICAL_DISCUSSION',
     ];
 
+    // Built-in choices plus the ones users added ("＋ Add new…" → OptionController).
+    private static function statuses(): array { return array_values(array_unique(array_merge(self::VALID_STATUSES, OptionController::values('meeting_status')))); }
+    private static function types(): array { return array_values(array_unique(array_merge(self::VALID_TYPES, OptionController::values('meeting_type')))); }
+    private static function priorities(): array { return array_values(array_unique(array_merge(['LOW', 'MEDIUM', 'HIGH'], OptionController::values('meeting_priority')))); }
+
     // GET /api/meetings/meta
     public function meta(): void
     {
         authenticate();
-        sendSuccess(['statuses' => self::VALID_STATUSES, 'types' => self::VALID_TYPES]);
+        sendSuccess(['statuses' => self::statuses(), 'types' => self::types(), 'priorities' => self::priorities()]);
     }
 
     // GET /api/meetings
@@ -187,7 +192,7 @@ class MeetingController
         $meetingType = $b['meetingType'] ?? '';
         if (!$customerId || !$meetingDate || !$meetingType)
             sendError('Customer, date, and type are required.', 400);
-        if (!in_array($meetingType, self::VALID_TYPES))
+        if (!in_array($meetingType, self::types()))
             sendError('Invalid meeting type.', 400);
         // A meeting is logged on the day it happens — only today's date is accepted.
         try {
@@ -196,7 +201,7 @@ class MeetingController
             if ($md->format('Y-m-d') !== date('Y-m-d')) sendError('A meeting can only be added for today (' . date('d M Y') . ').', 400);
         } catch (Exception $e) { sendError('Invalid meeting date.', 400); }
         $status = $b['status'] ?? 'NEW_LEAD';
-        if (!in_array($status, self::VALID_STATUSES))
+        if (!in_array($status, self::statuses()))
             sendError('Invalid status.', 400);
 
         $cs = db()->prepare('SELECT companyName FROM `Customer` WHERE id=? LIMIT 1');
