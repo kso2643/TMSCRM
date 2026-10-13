@@ -344,7 +344,7 @@ details.fmt ul{margin:6px 0 0 18px}
 :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 </style>
-<link rel="stylesheet" href="/motion.css?v=20261012a"/></head>
+<link rel="stylesheet" href="/motion.css?v=20261013a"/></head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 
@@ -522,7 +522,7 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); }
             <div class="field"><label for="c-opDesc">Operation description</label><input id="c-opDesc" data-cf="opDesc" placeholder="e.g. ID - rough face rough" autocomplete="off"></div>
             <div class="field"><label for="c-production">Production / month</label><input id="c-production" data-cf="production" inputmode="numeric" autocomplete="off"></div>
             <div class="field"><label for="c-opCost">Machine operating cost / hour</label><input id="c-opCost" data-cf="opCost" inputmode="decimal" placeholder="e.g. 400" autocomplete="off"></div>
-            <div class="field"><label for="c-changeMin">Insert change time (min)</label><input id="c-changeMin" data-cf="changeMin" inputmode="decimal" placeholder="e.g. 10" autocomplete="off"></div>
+            <div class="field"><label for="c-changeMin" id="c-changeMin-l">Insert change time (min)</label><input id="c-changeMin" data-cf="changeMin" inputmode="decimal" placeholder="e.g. 10" autocomplete="off"></div>
           </div>
         </div>
       </div>
@@ -546,11 +546,11 @@ html { scroll-padding-top: env(safe-area-inset-top, 0px); }
       </div>
 
       <div class="panel">
-        <div class="panel-head"><h2>Cost comparison charts</h2><span class="hint">Cost per component ( CPC ) = insert price &divide; total tool life per insert</span></div>
+        <div class="panel-head"><h2>Cost comparison charts</h2><span class="hint" id="cmp-chart-hint">Cost per component ( CPC ) = insert price &divide; total tool life per insert</span></div>
         <div class="panel-body"><div id="cmp-charts" class="cmp-charts-live"></div></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Cost savings summary</h2><span class="hint">Inserts, down time, cycle time, total savings and best tool</span></div>
+        <div class="panel-head"><h2>Cost savings summary</h2><span class="hint">Tool cost, down time, cycle time, total savings and best tool</span></div>
         <div class="panel-body"><div id="cmp-summary"></div></div>
       </div>
       <div class="panel">
@@ -1383,7 +1383,7 @@ function newTool(op) {
     op: op || 'milling', app: '', appCustom: false, mat: '',
     exSpec: '', comp: '', price: '',
     tsize: '', dia: '', z: '', pitch: '', ap: '', ae: '', len: '',
-    holeDepth: '', tapDepth: '', threadDepth: '',
+    holeDepth: '', tapDepth: '', threadDepth: '', ttype: '', holeType: '', coolant: '',
     intExt: '', hand: '', tol: '', approach: '', passes: '',
     shank: '', square: '', holding: '', holdSize: '',
     cycle: '', life: '', req: '',
@@ -1450,6 +1450,7 @@ function newCmpTool() {
     feed: '', ap: '', coolant: '',
     vc: '', rpm: '', sd: 'vc', src: {},
     price: '', numEdges: '', cycle: '',
+    toolType: '', tsize: '', holeDepth: '', tapDepth: '', holeType: '', regrind: '',
     edges: Array.from({ length: CMP_EDGES }, newCmpEdge)
   };
 }
@@ -1501,6 +1502,54 @@ function cmpDiaFor(R, t) {
   if (R.op === 'turning') return comp > 0 ? comp : (tool > 0 ? tool : null);
   return tool > 0 ? tool : (comp > 0 ? comp : null);
 }
+/* Operation-aware rows. Turning / milling / boring… compare insert tools (edges,
+   insert price, pockets). Drilling and tapping compare solid tools that are
+   reground: the rows become drill / tap type, thread size, hole depth, hole
+   type, number of uses (new + regrinds) and regrind cost; depth of cut and
+   pockets switch off where they do not apply. */
+const CMP_HOLE_OPS = ['drilling', 'tapping'];
+const CMP_TOOL_TYPES = {
+  drilling: ['Solid carbide', 'HSS / HSS-Co', 'Brazed carbide', 'Exchangeable tip', 'Indexable insert'],
+  tapping: ['Spiral point', 'Spiral flute', 'Straight flute', 'Forming (roll)', 'Thread mill']
+};
+function cmpIsHole(R) { return CMP_HOLE_OPS.indexOf(R.op) !== -1; }
+let CMPT = null; /* terms of the report being worked on - set by cmpFacts(), read by the summary + charts */
+function cmpTerms(R) {
+  const cur = S.settings.currency;
+  if (cmpIsHole(R)) {
+    const n = R.op === 'tapping' ? 'tap' : 'drill', N = n.charAt(0).toUpperCase() + n.slice(1);
+    return { hole: true, noun: n, life: e => (e === 0 ? 'New ' + n : 'Regrind ' + e),
+      numEdges: 'No. of uses (new + regrinds)', price: (R.op === 'drilling' ? 'Drill / insert price' : 'Tap price') + ' (' + cur + ')',
+      regrind: 'Regrind cost / regrind (' + cur + ')', totalLife: 'Total tool life / ' + n + ' (pc)',
+      used: N + 's used / year (pcs)', usedChart: N + 's used per year (pcs)', costOf: 'Cost of ' + N + 's',
+      fewer: 'fewer ' + n + 's per year', avgPc: 'Average pieces / use', avgMin: 'Average minutes / use', unit: 'use' };
+  }
+  return { hole: false, noun: 'insert', life: e => 'Edge ' + (e + 1),
+    numEdges: 'Number of edges', price: 'Insert price (' + cur + ')', regrind: '', totalLife: 'Total tool life / insert (pc)',
+    used: 'Inserts used / year (pcs)', usedChart: 'Inserts used per year (pcs)', costOf: 'Cost of Inserts',
+    fewer: 'fewer inserts per year', avgPc: 'Average pieces / edge', avgMin: 'Average minutes / edge', unit: 'edge' };
+}
+/* Tool + cutting-condition rows that apply to the report's operation (screen, sheet, PDF, Excel). */
+function cmpSpecRows(R) {
+  const op = R.op, hole = cmpIsHole(R), tap = op === 'tapping';
+  const rows = [{ g: 'tool', key: 'toolDia', label: tap ? 'Tap diameter (mm)' : (op === 'drilling' ? 'Drill diameter (mm)' : 'Tool diameter (mm)'), num: true, ph: hole ? 'e.g. 8.5' : 'e.g. 50' }];
+  if (hole) rows.push({ g: 'tool', key: 'toolType', label: tap ? 'Tap type' : 'Drill type', sel: CMP_TOOL_TYPES[op] });
+  rows.push({ g: 'tool', key: 'insertGrade', label: hole ? (tap ? 'Tap' : 'Drill') + ' (make / grade / coating)' : 'Insert (grade)' });
+  rows.push({ g: 'tool', key: 'toolHolder', label: hole ? 'Holder / collet' : 'Tool holder' });
+  if (op === 'milling') rows.push({ g: 'tool', key: 'pockets', label: 'No. of pockets in cutter', num: true, ph: 'e.g. 6' });
+  if (op === 'drilling') rows.push({ g: 'tool', key: 'pockets', label: 'Inserts per drill (indexable only)', num: true, ph: 'blank = solid' });
+  if (tap) rows.push({ g: 'tool', key: 'tsize', label: 'Thread size', ph: 'e.g. M8x1.25' });
+  rows.push({ g: 'cut', key: 'vc', label: 'Cutting speed, Vc (m/min)', num: true, speed: true });
+  rows.push({ g: 'cut', key: 'rpm', label: 'RPM', num: true, speed: true });
+  rows.push({ g: 'cut', key: 'feed', label: cmpFeedLabel(R), num: true, ph: tap ? '= pitch' : '' });
+  if (hole) {
+    rows.push({ g: 'cut', key: 'holeDepth', label: tap ? 'Drill (hole) depth (mm)' : 'Hole depth (mm)', num: true });
+    if (tap) rows.push({ g: 'cut', key: 'tapDepth', label: 'Tap depth (mm)', num: true });
+    rows.push({ g: 'cut', key: 'holeType', label: 'Hole type', sel: ['Through', 'Blind'] });
+  } else rows.push({ g: 'cut', key: 'ap', label: 'Cutting depth, ap (mm)' });
+  rows.push({ g: 'cut', key: 'coolant', label: 'Coolant', sel: hole ? ['Through-tool', 'External', 'MQL', 'Dry'] : ['Yes', 'No'] });
+  return rows;
+}
 function cmpUsesToolDia(R, t) { const comp = num(R.dia), tool = num(t.toolDia); return R.op === 'turning' ? !(comp > 0) && tool > 0 : tool > 0; }
 function recalcCmpTool(R, t) {
   const D = cmpDiaFor(R, t);
@@ -1517,7 +1566,7 @@ function recalcCmpAll(R) { R.tools.forEach(t => recalcCmpTool(R, t)); }
 
 function fmtShortK(v) { if (!v) return ''; const a = Math.abs(v); if (a >= 1e5) return (v / 1e3).toFixed(0) + 'k'; if (a >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'k'; return String(Math.round(v * 100) / 100); }
 function cmpSummaryData(facts, titles, cur) {
-  const defs = [['Cost of Inserts', 'insYr'], ['Cost of Down Time', 'downYr'], ['Cost of Cycle Time', 'cycYr']];
+  const defs = [[(CMPT || cmpTerms({ op: '' })).costOf, 'insYr'], ['Cost of Down Time', 'downYr'], ['Cost of Cycle Time', 'cycYr']];
   const has = facts.some(f => f.insYr !== null || f.downYr !== null || f.cycYr !== null || f.insUsed);
   const rows = defs.map(d => ({ label: d[0], key: d[1], vals: facts.map(f => f[d[1]] === null ? '' : fmtMoney(f[d[1]])), raw: facts.map(f => f[d[1]]), tones: cmpTone(facts, d[1]) }));
   const uRaw = facts.map(f => f.insUsed === null || f.insUsed === undefined ? null : Math.ceil(f.insUsed - 1e-9));
@@ -1559,7 +1608,7 @@ function drawGroupedBarPNG(cats, series, opts) {
 }
 function cmpSummaryChartUrl(sd, opts) {
   opts = opts || {};
-  const cats = ['Cost of Inserts', 'Cost of Down Time', 'Cost of Cycle Time', 'Total Savings'];
+  const cats = [(CMPT || cmpTerms({ op: '' })).costOf, 'Cost of Down Time', 'Cost of Cycle Time', 'Total Savings'];
   const series = sd.titles.map((t, ti) => ({ name: t, color: CMP_TOOL_COLORS[ti % CMP_TOOL_COLORS.length],
     values: [sd.rows.find(r => r.key === 'insYr').raw[ti] || 0, sd.rows.find(r => r.key === 'downYr').raw[ti] || 0, sd.rows.find(r => r.key === 'cycYr').raw[ti] || 0, (ti === sd.bi && sd.saveTotal !== null) ? sd.saveTotal : 0],
     colors: [null, null, null, '#17703F'] }));
@@ -1568,7 +1617,7 @@ function cmpSummaryChartUrl(sd, opts) {
 function cmpInsertsChartUrl(sd, opts) {
   opts = opts || {}; const u = sd.rows.find(r => r.key === 'insUsed');
   if (!u || !u.raw.some(v => v)) return '';
-  return drawBarChartPNG(sd.titles, u.raw.map(v => v || 0), { title: 'Inserts used per year (pcs)', w: opts.w || 760, h: opts.h || 260, colors: CMP_TOOL_COLORS });
+  return drawBarChartPNG(sd.titles, u.raw.map(v => v || 0), { title: (CMPT || cmpTerms({ op: '' })).usedChart, w: opts.w || 760, h: opts.h || 260, colors: CMP_TOOL_COLORS });
 }
 function cmpSummaryHTML(sd, chartUrl, chart2Url) {
   const n = sd.titles.length, cur = esc(sd.cur);
@@ -1579,17 +1628,17 @@ function cmpSummaryHTML(sd, chartUrl, chart2Url) {
   h += '<tr class="cs-hl"><td class="cs-l">Total Savings<small>' + cur + ' per year</small></td>' + sd.titles.map((t, i) => (i === sd.bi && sd.saveTotal !== null) ? '<td class="cs-v cs-big">' + esc(fmtAbs(sd.saveTotal)) + '</td>' : '<td class="cs-v cs-dash">&ndash;</td>').join('') + '</tr>';
   h += '<tr class="cs-best"><td class="cs-l">Which is best</td>' + sd.titles.map((t, i) => i === sd.bi ? '<td class="cs-v cs-bestcell">BEST</td>' : '<td class="cs-v"></td>').join('') + '</tr></table>';
   if (sd.bi !== -1 && sd.saveTotal !== null) {
-    h += '<div class="cs-banner"><b>BEST: ' + esc(sd.bestTitle) + '</b><div class="num"><b>' + cur + ' ' + esc(fmtAbs(sd.saveTotal)) + '</b><span>saved per year</span></div><div class="num"><b>' + cur + ' ' + esc(fmtAbs(sd.saveMonth)) + '</b><span>saved per month</span></div>' + (sd.fewerInserts > 0 ? '<div class="num"><b>' + esc(fmtMoney(sd.fewerInserts)) + '</b><span>fewer inserts per year</span></div>' : '') + (sd.savePct === null ? '' : '<div class="num"><b>' + esc(fmtAbsPct(sd.savePct / 100)) + '</b><span>cost reduction</span></div>') + '</div>';
+    h += '<div class="cs-banner"><b>BEST: ' + esc(sd.bestTitle) + '</b><div class="num"><b>' + cur + ' ' + esc(fmtAbs(sd.saveTotal)) + '</b><span>saved per year</span></div><div class="num"><b>' + cur + ' ' + esc(fmtAbs(sd.saveMonth)) + '</b><span>saved per month</span></div>' + (sd.fewerInserts > 0 ? '<div class="num"><b>' + esc(fmtMoney(sd.fewerInserts)) + '</b><span>' + esc((CMPT || cmpTerms({ op: '' })).fewer) + '</span></div>' : '') + (sd.savePct === null ? '' : '<div class="num"><b>' + esc(fmtAbsPct(sd.savePct / 100)) + '</b><span>cost reduction</span></div>') + '</div>';
   }
-  if (chartUrl) h += '<div class="cs-chart"><img src="' + chartUrl + '" alt="Cost of inserts, down time, cycle time and total savings"></div>';
-  if (chart2Url) h += '<div class="cs-chart"><img src="' + chart2Url + '" alt="Inserts used per year"></div>';
+  if (chartUrl) h += '<div class="cs-chart"><img src="' + chartUrl + '" alt="Tool cost, down time, cycle time and total savings"></div>';
+  if (chart2Url) h += '<div class="cs-chart"><img src="' + chart2Url + '" alt="' + esc((CMPT || cmpTerms({ op: '' })).usedChart) + '"></div>';
   return h + '</div>';
 }
 function renderCmpSummary() {
   const box = $('#cmp-summary'); if (!box) return;
   const R = S.R, facts = cmpFacts(R, R.tools);
   const sd = cmpSummaryData(facts, R.tools.map((t, i) => t.label || ('Tool ' + (i + 1))), S.settings.currency);
-  box.innerHTML = sd.has ? cmpSummaryHTML(sd, cmpSummaryChartUrl(sd)) : '<div class="hint">Enter cycle time per part, machine cost / hour and insert change time to see the summary.</div>';
+  box.innerHTML = sd.has ? cmpSummaryHTML(sd, cmpSummaryChartUrl(sd)) : '<div class="hint">Enter cycle time per part, machine cost / hour and ' + (CMPT && CMPT.hole ? 'tool' : 'insert') + ' change time to see the summary.</div>';
 }
 function drawCmpSummaryPage(ctx, sd, R) {
   const doc = ctx.doc, MX = ctx.MX, W = ctx.PW - 2 * MX, n = sd.titles.length, cur = pdfSafe(sd.cur);
@@ -1627,7 +1676,7 @@ function drawCmpSummaryPage(ctx, sd, R) {
   if (sd.bi !== -1 && sd.saveTotal !== null) {
     const bh = 20; pFill(doc, [23, 112, 63]); doc.rect(MX, y, W, bh, 'F'); pText(doc, [255, 255, 255]);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(pdfSafe('BEST: ' + sd.bestTitle), MX + 4, y + bh / 2 + 1.6, { maxWidth: 62 });
-    const blocks = [[cur + ' ' + fmtAbs(sd.saveTotal), 'SAVED PER YEAR'], [cur + ' ' + fmtAbs(sd.saveMonth), 'SAVED PER MONTH']]; if (sd.fewerInserts > 0) blocks.push([fmtMoney(sd.fewerInserts), 'FEWER INSERTS / YEAR']); if (sd.savePct !== null) blocks.push([fmtAbsPct(sd.savePct / 100), 'COST REDUCTION']);
+    const blocks = [[cur + ' ' + fmtAbs(sd.saveTotal), 'SAVED PER YEAR'], [cur + ' ' + fmtAbs(sd.saveMonth), 'SAVED PER MONTH']]; if (sd.fewerInserts > 0) blocks.push([fmtMoney(sd.fewerInserts), (CMPT || cmpTerms({ op: '' })).fewer.toUpperCase().replace(' PER ', ' / ')]); if (sd.savePct !== null) blocks.push([fmtAbsPct(sd.savePct / 100), 'COST REDUCTION']);
     blocks.forEach((b, k) => { const cx = MX + 68 + (W - 68) * (k + 0.5) / blocks.length; doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.text(pdfSafe(b[0]), cx, y + 9, { align: 'center' }); doc.setFont('helvetica', 'normal'); doc.setFontSize(6.6); doc.text(b[1], cx, y + 14.4, { align: 'center' }); });
     y += bh + 8;
   }
@@ -1649,15 +1698,20 @@ function cmpAvg(t) {
    everything on columns after the first (the baseline) is a saving vs it. */
 function cmpFacts(R, tools) {
   const production = num(R.production);
+  CMPT = cmpTerms(R);
+  const hole = cmpIsHole(R);
   const raw = tools.map(t => {
-    const avg = cmpAvg(t); const edges = num(t.numEdges); const price = num(t.price);
+    const avg = cmpAvg(t); const edges = num(t.numEdges); const price0 = num(t.price);
+    /* drill / tap: what one tool costs over all its uses = price + regrind cost x regrinds */
+    const regr = hole ? (num(t.regrind) || 0) : 0;
+    const price = (price0 !== null && edges > 0) ? price0 + regr * Math.max(0, edges - 1) : price0;
     const totalLife = (avg.pc !== null && edges > 0) ? avg.pc * edges : null;
     const costEdge = (price !== null && edges > 0) ? price / edges : null;
     const cpc = (totalLife && totalLife > 0 && price !== null) ? price / totalLife : null;
     const costMonth = (cpc !== null && production !== null) ? cpc * production : null;
     const costYear = costMonth !== null ? costMonth * 12 : null;
     const partsYr = production !== null ? production * 12 : null;
-    const nIns = (num(t.pockets) > 0) ? num(t.pockets) : 1;
+    const nIns = ((R.op === 'milling' || R.op === 'drilling') && num(t.pockets) > 0) ? num(t.pockets) : 1;
     const opCost = num(R.opCost), chg = num(R.changeMin), cyc = num(t.cycle);
     const insUsed = (totalLife && totalLife > 0 && partsYr !== null) ? nIns * partsYr / totalLife : null;
     const insYr = (costEdge !== null && avg.pc > 0 && partsYr !== null) ? costEdge * nIns / avg.pc * partsYr : null;
@@ -1699,13 +1753,13 @@ function cmpChartUrls(R, facts, opts) {
   const insV = facts.map(f => (f.insUsed === null || f.insUsed === undefined) ? 0 : Math.ceil(f.insUsed - 1e-9));
   const outCpcIdx = out.length;
   if (facts.some(f => f.cpc !== null)) out.push({ key: 'cpc', url: drawBarChartPNG(labels, facts.map(f => f.cpc === null ? 0 : f.cpc), { title: 'Cost per component ( CPC ) (' + cur + ')', w: w, h: h }) });
-  if (insV.some(v => v > 0)) out.push({ key: 'ins', url: drawBarChartPNG(labels, insV, { title: 'Inserts used per year (pcs)', w: w, h: h }) });
+  if (insV.some(v => v > 0)) out.push({ key: 'ins', url: drawBarChartPNG(labels, insV, { title: CMPT.usedChart, w: w, h: h }) });
   return out;
 }
 function renderCmpCharts() {
   const box = $('#cmp-charts'); if (!box) return;
   const R = S.R; const charts = cmpChartUrls(R, cmpFacts(R, R.tools), { w: 460, h: 230 });
-  box.innerHTML = charts.length ? charts.map(c => '<img src="' + c.url + '" alt="' + (c.key === 'ins' ? 'Inserts used per year chart' : 'Cost per component ( CPC ) chart') + '">').join('') : '<div class="hint">Enter insert price, number of edges and pieces per edge to see the comparison chart.</div>';
+  box.innerHTML = charts.length ? charts.map(c => '<img src="' + c.url + '" alt="' + (c.key === 'ins' ? CMPT.usedChart + ' chart' : 'Cost per component ( CPC ) chart') + '">').join('') : '<div class="hint">Enter insert price, number of edges and pieces per edge to see the comparison chart.</div>';
 }
 function cmpWinner(facts) {
   let best = null, bi = -1;
@@ -1780,38 +1834,30 @@ function buildCmpModel(R) {
   const mkCell = (text, opts) => Object.assign({ text: text === null || text === undefined ? '' : String(text) }, opts || {});
   const toolRow = (label, fn) => ({ label: label, cells: R.tools.map((t, i) => fn(t, i)) });
   const groups = [];
-  groups.push({ id: 'tool', title: 'Tool', rows: [
-    toolRow('Tool diameter (mm)', t => mkCell(t.toolDia)),
-    toolRow('Insert (grade)', t => mkCell(t.insertGrade)),
-    toolRow('Tool holder', t => mkCell(t.toolHolder))
-  ].concat(R.op === 'milling' ? [toolRow('No. of pockets in cutter', t => mkCell(t.pockets))] : []) });
-  groups.push({ id: 'cut', title: 'Cutting condition', rows: [
-    toolRow('Cutting speed, Vc (m/min)', t => mkCell(t.vc)),
-    toolRow('RPM', t => mkCell(t.rpm)),
-    toolRow(feedLabel, t => mkCell(t.feed)),
-    toolRow('Cutting depth, ap (mm)', t => mkCell(t.ap)),
-    toolRow('Coolant', t => mkCell(t.coolant))
-  ] });
+  const spec = cmpSpecRows(R), T = cmpTerms(R);
+  groups.push({ id: 'tool', title: 'Tool', rows: spec.filter(x => x.g === 'tool').map(x => toolRow(x.label, t => mkCell(t[x.key]))) });
+  groups.push({ id: 'cut', title: 'Cutting condition', rows: spec.filter(x => x.g === 'cut').map(x => toolRow(x.label, t => mkCell(t[x.key]))) });
   const lifeRows = [];
   for (let e = 0; e < CMP_EDGES; e++) {
     if (!R.tools.some(t => t.edges[e].pc !== '' || t.edges[e].min !== '')) continue;
-    lifeRows.push(toolRow('Edge ' + (e + 1) + ' (pc / min)', t => mkCell((t.edges[e].pc !== '' || t.edges[e].min !== '') ? ((t.edges[e].pc || '\u2013') + ' pc / ' + (t.edges[e].min || '\u2013') + ' min') : '')));
+    lifeRows.push(toolRow(T.life(e) + ' (pc / min)', t => mkCell((t.edges[e].pc !== '' || t.edges[e].min !== '') ? ((t.edges[e].pc || '\u2013') + ' pc / ' + (t.edges[e].min || '\u2013') + ' min') : '')));
   }
   lifeRows.push(toolRow('Average (pc / min)', t => { const a = cmpAvg(t); return mkCell(a.n ? (fmtG(a.pc) + ' pc / ' + fmtG(a.min) + ' min') : '', { calc: true }); }));
   groups.push({ id: 'life', title: 'Tool life test data', rows: lifeRows });
   groups.push({ id: 'cost', title: 'Cost facts', rows: [
-    toolRow('Number of edges', t => mkCell(t.numEdges)),
-    toolRow('Insert price (' + st.currency + ')', t => mkCell(t.price)),
-    { label: 'Total tool life / insert (pc)', cells: facts.map(f => mkCell(f.totalLife === null ? '' : fmtMoney(f.totalLife), { calc: true })) },
+    toolRow(T.numEdges, t => mkCell(t.numEdges)),
+    toolRow(T.price, t => mkCell(t.price))
+  ].concat(T.hole ? [toolRow(T.regrind, t => mkCell(t.regrind))] : []).concat([
+    { label: T.totalLife, cells: facts.map(f => mkCell(f.totalLife === null ? '' : fmtMoney(f.totalLife), { calc: true })) },
     { label: 'Cost per component ( CPC ) (' + st.currency + ')', cells: facts.map(f => mkCell(f.cpc === null ? '' : fmtMoney(f.cpc), { calc: true })) },
-    (tn => ({ label: 'Inserts used / year (pcs)', cells: facts.map((f, i) => mkCell(f.insUsed === null || f.insUsed === undefined ? '' : fmtMoney(Math.ceil(f.insUsed - 1e-9)), { calc: true, gain: tn[i] })) }))(cmpTone(facts, 'insUsed')),
+    (tn => ({ label: T.used, cells: facts.map((f, i) => mkCell(f.insUsed === null || f.insUsed === undefined ? '' : fmtMoney(Math.ceil(f.insUsed - 1e-9)), { calc: true, gain: tn[i] })) }))(cmpTone(facts, 'insUsed')),
     { label: 'Cost saved / component (' + st.currency + ')', cells: facts.map((f, i) => mkCell(f.refA ? '' : (f.savedComp === null ? '' : fmtAbs(f.savedComp)), { calc: !f.refA, na: !!f.refA, gain: (!f.refA && f.savedComp !== null) ? f.savedComp : null })) },
     { label: 'Cost per month (' + st.currency + ')', cells: facts.map(f => mkCell(f.costMonth === null ? '' : fmtMoney(f.costMonth), { calc: true })) },
     { label: 'Cost saved / month (' + st.currency + ')', cells: facts.map((f, i) => mkCell(f.refA ? '' : (f.savedMonth === null ? '' : fmtAbs(f.savedMonth)), { calc: !f.refA, na: !!f.refA, gain: (!f.refA && f.savedMonth !== null) ? f.savedMonth : null })) },
     { label: 'Cost per year (' + st.currency + ')', cells: facts.map(f => mkCell(f.costYear === null ? '' : fmtMoney(f.costYear), { calc: true })) },
     { label: 'Cost saved / year (' + st.currency + ')', cells: facts.map((f, i) => mkCell(f.refA ? '' : (f.savedYear === null ? '' : fmtAbs(f.savedYear)), { calc: !f.refA, na: !!f.refA, gain: (!f.refA && f.savedYear !== null) ? f.savedYear : null })) },
     { label: 'Tool cost reduction %', cells: facts.map((f, i) => mkCell(f.refA ? '' : (f.pct === null ? '' : fmtAbsPct(f.pct / 100)), { calc: !f.refA, na: !!f.refA, gain: !f.refA ? f.pct : null })) }
-  ] });
+  ]) });
   const cur = st.currency;
   groups.find(g => g.id === 'cost').rows.push(toolRow('Cycle time per part (min)', t => mkCell(t.cycle)));
   const summary = cmpSummaryData(facts, R.tools.map((t, i) => t.label || ('Tool ' + (i + 1))), cur);
@@ -2141,6 +2187,7 @@ const ROWS = [
   { id: 'comp',   g: 'exist', label: 'Competitor name', kind: 'text', path: 'comp' },
   { id: 'price',  g: 'exist', label: 'Competitor price or CPC', kind: 'text', path: 'price' },
 
+  { id: 'ttype', g: 'proc', label: 'Drill / tap type', kind: 'sel', path: 'ttype', ops: ['drilling', 'tapping'], options: t => CMP_TOOL_TYPES[t.op] || [] },
   { id: 'tsize', g: 'proc', label: 'Thread size', kind: 'tsize', path: 'tsize', ops: ['tapping', 'threading'], ph: 'e.g. M8x1.25' },
   { id: 'dia',   g: 'proc', label: 'Tool or component diameter (mm)', kind: 'num', path: 'dia', ph: t => OPS_BY_ID[t.op].hint },
   { id: 'z',     g: 'proc', label: 'No. of teeth / flutes (Z)', kind: 'num', path: 'z', ops: ['milling'], ph: 'e.g. 4' },
@@ -2150,6 +2197,8 @@ const ROWS = [
   { id: 'len',   g: 'proc', label: 'Length of cut (mm)', kind: 'num', path: 'len', ops: ['turning', 'boring', 'grooving', 'parting', 'threading', 'milling'] },
   { id: 'holeDepth',   g: 'proc', label: 'Drill depth (mm)', kind: 'num', path: 'holeDepth', ops: ['drilling', 'tapping'], ph: t => t.op === 'tapping' ? 'tap drill hole depth' : 'hole depth' },
   { id: 'tapDepth',    g: 'proc', label: 'Tap depth (mm)', kind: 'num', path: 'tapDepth', ops: ['tapping'], ph: 'thread depth', merge: 'depth', short: 'Tap depth' },
+  { id: 'holeType',    g: 'proc', label: 'Hole type', kind: 'sel', path: 'holeType', ops: ['drilling', 'tapping'], options: ['Through', 'Blind'] },
+  { id: 'coolant',     g: 'proc', label: 'Coolant', kind: 'sel', path: 'coolant', ops: ['drilling', 'tapping'], options: ['Through-tool', 'External', 'MQL', 'Dry'] },
   { id: 'threadDepth', g: 'proc', label: 'Thread depth (mm)', kind: 'num', path: 'threadDepth', ops: ['threading'], merge: 'depth', short: 'Thread depth' },
   { id: 'intExt',   g: 'proc', label: 'Internal / external', kind: 'sel', path: 'intExt', ops: ['threading'], options: ['External', 'Internal'] },
   { id: 'hand',     g: 'proc', label: 'RH / LH thread', kind: 'sel', path: 'hand', ops: ['threading'], options: ['RH', 'LH'] },
@@ -3047,11 +3096,17 @@ async function buildCmpXlsxBlob(R) {
   };
   const feedLabel = cmpFeedLabel(R);
 
+  const spec = cmpSpecRows(R), T = cmpTerms(R);
+  const specXl = x => addRow(x.label, (cell, t) => {
+    const v = x.num ? num(t[x.key]) : null;
+    cell.value = x.num ? (v === null ? (t[x.key] || null) : v) : (t[x.key] || null);
+    if (x.num) cell.numFmt = x.key === 'pockets' ? '0' : '0.0#';
+    cell.font = F(); cell.alignment = { horizontal: x.num || x.sel ? 'center' : 'left', vertical: 'middle', wrapText: true };
+    if (x.sel) cell.dataValidation = { type: 'list', allowBlank: true, showErrorMessage: false, formulae: ['"' + x.sel.join(',').replace(/"/g, '') + '"'] };
+  });
   addGroup('Tool');
-  const toolDiaRow = addRow('Tool diameter (mm)', (cell, t) => { const v = num(t.toolDia); cell.value = v === null ? (t.toolDia || null) : v; cell.numFmt = '0.0#'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
-  addRow('Insert (grade)', (cell, t) => { cell.value = t.insertGrade || null; cell.font = F(); cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }; });
-  addRow('Tool holder', (cell, t) => { cell.value = t.toolHolder || null; cell.font = F(); cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }; });
-  if (R.op === 'milling') addRow('No. of pockets in cutter', (cell, t) => { cell.value = num(t.pockets); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  let toolDiaRow = null;
+  spec.filter(x => x.g === 'tool').forEach(x => { const rr = specXl(x); if (x.key === 'toolDia') toolDiaRow = rr; });
 
   addGroup('Cutting condition');
   const vcRow = r, rpmRow = r + 1;
@@ -3072,38 +3127,38 @@ async function buildCmpXlsxBlob(R) {
     } else { vcCell.value = vcNum; rpmCell.value = rpmNum; }
   });
   ws.getRow(vcRow).height = 18; ws.getRow(rpmRow).height = 18; r += 2;
-  addRow(feedLabel, (cell, t) => { cell.value = t.feed || null; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
-  addRow('Cutting depth, ap (mm)', (cell, t) => { cell.value = t.ap || null; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
-  addRow('Coolant', (cell, t) => { cell.value = t.coolant || null; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.dataValidation = { type: 'list', allowBlank: true, formulae: ['"Yes,No"'] }; });
+  spec.filter(x => x.g === 'cut' && !x.speed).forEach(specXl);
 
   addGroup('Tool life test data');
   const pcStart = r;
-  for (let e = 0; e < CMP_EDGES; e++) addRow('Edge ' + (e + 1) + ' - pieces', (cell, t) => { cell.value = num(t.edges[e].pc); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  for (let e = 0; e < CMP_EDGES; e++) addRow(T.life(e) + ' - pieces', (cell, t) => { cell.value = num(t.edges[e].pc); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
   const pcEnd = r - 1;
   const minStart = r;
-  for (let e = 0; e < CMP_EDGES; e++) addRow('Edge ' + (e + 1) + ' - minutes', (cell, t) => { cell.value = num(t.edges[e].min); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  for (let e = 0; e < CMP_EDGES; e++) addRow(T.life(e) + ' - minutes', (cell, t) => { cell.value = num(t.edges[e].min); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
   const minEnd = r - 1;
-  const avgPc = addRow('Average pieces / edge', (cell, t, j, col) => { const a = cmpAvg(t); cell.value = { formula: 'IFERROR(AVERAGE(' + col + pcStart + ':' + col + pcEnd + '),"")', result: a.pc === null ? '' : Math.round(a.pc * 100) / 100 }; cell.numFmt = '0.0'; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
-  addRow('Average minutes / edge', (cell, t, j, col) => { const a = cmpAvg(t); cell.value = { formula: 'IFERROR(AVERAGE(' + col + minStart + ':' + col + minEnd + '),"")', result: a.min === null ? '' : Math.round(a.min * 100) / 100 }; cell.numFmt = '0.0'; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  const avgPc = addRow(T.avgPc, (cell, t, j, col) => { const a = cmpAvg(t); cell.value = { formula: 'IFERROR(AVERAGE(' + col + pcStart + ':' + col + pcEnd + '),"")', result: a.pc === null ? '' : Math.round(a.pc * 100) / 100 }; cell.numFmt = '0.0'; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  addRow(T.avgMin, (cell, t, j, col) => { const a = cmpAvg(t); cell.value = { formula: 'IFERROR(AVERAGE(' + col + minStart + ':' + col + minEnd + '),"")', result: a.min === null ? '' : Math.round(a.min * 100) / 100 }; cell.numFmt = '0.0'; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
 
   addGroup('Cost facts');
-  const numEdges = addRow('Number of edges', (cell, t) => { cell.value = num(t.numEdges); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
-  const price = addRow('Insert price (' + st.currency + ')', (cell, t) => { cell.value = num(t.price); cell.numFmt = '0.00'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  const numEdges = addRow(T.numEdges, (cell, t) => { cell.value = num(t.numEdges); cell.numFmt = '0'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  const price = addRow(T.price, (cell, t) => { cell.value = num(t.price); cell.numFmt = '0.00'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; });
+  const regrind = T.hole ? addRow(T.regrind, (cell, t) => { cell.value = num(t.regrind); cell.numFmt = '0.00'; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; }) : null;
   ws.getCell(r, 1).value = 'Number of production / month'; ws.getCell(r, 1).font = F({ bold: true, color: { argb: 'FF283A46' } }); ws.getCell(r, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F6F8' } }; ws.getCell(r, 1).border = xlBorder(); ws.getCell(r, 1).alignment = { vertical: 'middle' };
   ws.mergeCells(r, 2, r, LC); const pcell = ws.getCell(r, 2); pcell.value = num(R.production); pcell.numFmt = '0'; pcell.font = F(); pcell.alignment = { horizontal: 'center', vertical: 'middle' };
   for (let c = 2; c <= LC; c++) ws.getCell(r, c).border = xlBorder();
   ws.getRow(r).height = 18; const prodAddr = '$B$' + r; r++;
 
-  const totalLife = addRow('Total tool life / insert (pc)', (cell, t, j, col) => {
+  const totalLife = addRow(T.totalLife, (cell, t, j, col) => {
     const a = cmpAvg(t); const ne = num(t.numEdges); const val = (a.pc !== null && ne > 0) ? a.pc * ne : '';
     cell.value = { formula: 'IF(AND(ISNUMBER(' + col + avgPc.row + '),ISNUMBER(' + col + numEdges.row + ')),' + col + avgPc.row + '*' + col + numEdges.row + ',"")', result: val };
     cell.numFmt = '0.0'; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
   const cpc = addRow('Cost per component ( CPC ) (' + st.currency + ')', (cell, t, j, col) => {
-    const f = M.facts[j]; cell.value = { formula: 'IF(AND(ISNUMBER(' + col + totalLife.row + '),' + col + totalLife.row + '>0,ISNUMBER(' + col + price.row + ')),' + col + price.row + '/' + col + totalLife.row + ',"")', result: f.cpc === null ? '' : Math.round(f.cpc * 100) / 100 };
+    const spend = regrind ? '(' + col + price.row + '+N(' + col + regrind.row + ')*MAX(0,' + col + numEdges.row + '-1))' : col + price.row;
+    const f = M.facts[j]; cell.value = { formula: 'IF(AND(ISNUMBER(' + col + totalLife.row + '),' + col + totalLife.row + '>0,ISNUMBER(' + col + price.row + ')),' + spend + '/' + col + totalLife.row + ',"")', result: f.cpc === null ? '' : Math.round(f.cpc * 100) / 100 };
     cell.numFmt = '0.00'; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
-  addRow('Inserts used / year (pcs)', (cell, t, j) => {
+  addRow(T.used, (cell, t, j) => {
     const f = M.facts[j]; cell.value = (f.insUsed === null || f.insUsed === undefined) ? '' : Math.ceil(f.insUsed - 1e-9);
     cell.numFmt = '0'; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
@@ -3454,8 +3509,9 @@ function cmpToolHeadHTML(t, i, n) {
 function cmpMatCell(R, t, i, key, opts) {
   opts = opts || {};
   if (opts.kind === 'select') {
+    const list = (opts.options || []).slice(); if (t[key] && list.indexOf(t[key]) === -1) list.unshift(t[key]); /* keep an older value visible */
     return '<td class="tc t' + i + '" data-r="' + key + '"><select data-t="' + i + '" data-k="' + key + '" aria-label="' + esc(opts.label || key) + ', tool ' + (i + 1) + '"><option value=""></option>' +
-      (opts.options || []).map(o => '<option value="' + esc(o) + '"' + (t[key] === o ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select></td>';
+      list.map(o => '<option value="' + esc(o) + '"' + (t[key] === o ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select></td>';
   }
   const val = t[key] === undefined ? '' : t[key];
   const srcCls = (key === 'vc' || key === 'rpm') ? (t.src[key] === 'calc' ? ' src-calc' : '') : '';
@@ -3498,26 +3554,24 @@ function renderCmpMatrix() {
   const grp = title => '<tr class="grp"><th class="rl" scope="row">' + esc(title) + '</th>' + R.tools.map((t, i) => '<td class="tc t' + i + '"></td>').join('') + '</tr>';
   const row = (label, fn) => '<tr><th class="rl" scope="row">' + esc(label) + '</th>' + R.tools.map(fn).join('') + '</tr>';
 
+  const T = cmpTerms(R), spec = cmpSpecRows(R);
+  { const l = $('#c-changeMin-l'); if (l) l.textContent = (T.hole ? 'Tool' : 'Insert') + ' change time (min)';
+    const ch = $('#cmp-chart-hint'); if (ch) ch.innerHTML = T.hole ? 'Cost per component ( CPC ) = (' + T.noun + ' price + regrind cost &times; regrinds) &divide; total tool life per ' + T.noun : 'Cost per component ( CPC ) = insert price &divide; total tool life per insert'; }
+  const specRow = x => row(x.label, (t, i) => cmpMatCell(R, t, i, x.key, x.sel ? { label: x.label, kind: 'select', options: x.sel } : { label: x.label, numeric: !!x.num, ph: x.speed ? (cmpDiaFor(R, t) ? '' : 'needs diameter') : (x.ph || '') }));
   h += grp('Tool');
-  h += row('Tool diameter (mm)', (t, i) => cmpMatCell(R, t, i, 'toolDia', { label: 'Tool diameter', numeric: true, ph: 'e.g. 50' }));
-  h += row('Insert (grade)', (t, i) => cmpMatCell(R, t, i, 'insertGrade', { label: 'Insert grade' }));
-  h += row('Tool holder', (t, i) => cmpMatCell(R, t, i, 'toolHolder', { label: 'Tool holder' }));
-  if (R.op === 'milling') h += row('No. of pockets in cutter', (t, i) => cmpMatCell(R, t, i, 'pockets', { label: 'No. of pockets in cutter', numeric: true, ph: 'e.g. 6' }));
+  spec.filter(x => x.g === 'tool').forEach(x => { h += specRow(x); });
   h += grp('Cutting condition');
-  h += row('Cutting speed, Vc (m/min)', (t, i) => cmpMatCell(R, t, i, 'vc', { label: 'Cutting speed', numeric: true, ph: cmpDiaFor(R, t) ? '' : 'needs diameter' }));
-  h += row('RPM', (t, i) => cmpMatCell(R, t, i, 'rpm', { label: 'RPM', numeric: true, ph: cmpDiaFor(R, t) ? '' : 'needs diameter' }));
-  h += row(feedLabel, (t, i) => cmpMatCell(R, t, i, 'feed', { label: 'Feed rate', numeric: true }));
-  h += row('Cutting depth, ap (mm)', (t, i) => cmpMatCell(R, t, i, 'ap', { label: 'Cutting depth' }));
-  h += row('Coolant', (t, i) => cmpMatCell(R, t, i, 'coolant', { label: 'Coolant', kind: 'select', options: ['Yes', 'No'] }));
+  spec.filter(x => x.g === 'cut').forEach(x => { h += specRow(x); });
   h += grp('Tool life test data');
-  for (let e = 0; e < CMP_EDGES; e++) { h += row('Edge ' + (e + 1) + ' (pc / min)', (t, i) => cmpEdgeCell(i, t, e)); }
+  for (let e = 0; e < CMP_EDGES; e++) { h += row(T.life(e) + ' (pc / min)', (t, i) => cmpEdgeCell(i, t, e)); }
   h += row('Average (pc / min)', (t, i) => cmpAvgCell(i, t));
   h += grp('Cost facts');
-  h += row('Number of edges', (t, i) => cmpMatCell(R, t, i, 'numEdges', { label: 'Number of edges', numeric: true }));
-  h += row('Insert price (' + S.settings.currency + ')', (t, i) => cmpMatCell(R, t, i, 'price', { label: 'Insert price', numeric: true }));
-  h += row('Total tool life / insert (pc)', (t, i) => cmpFactCell(i, facts[i].totalLife === null ? '' : fmtMoney(facts[i].totalLife), { key: 'totalLife' }));
+  h += row(T.numEdges, (t, i) => cmpMatCell(R, t, i, 'numEdges', { label: T.numEdges, numeric: true, ph: T.hole ? 'e.g. 4' : '' }));
+  h += row(T.price, (t, i) => cmpMatCell(R, t, i, 'price', { label: T.price, numeric: true }));
+  if (T.hole) h += row(T.regrind, (t, i) => cmpMatCell(R, t, i, 'regrind', { label: T.regrind, numeric: true, ph: '0 if not reground' }));
+  h += row(T.totalLife, (t, i) => cmpFactCell(i, facts[i].totalLife === null ? '' : fmtMoney(facts[i].totalLife), { key: 'totalLife' }));
   h += row('Cost per component ( CPC ) (' + S.settings.currency + ')', (t, i) => cmpFactCell(i, facts[i].cpc === null ? '' : fmtMoney(facts[i].cpc), { key: 'cpc' }));
-  { const tnU = cmpTone(facts, 'insUsed'); h += row('Inserts used / year (pcs)', (t, i) => cmpFactCell(i, facts[i].insUsed === null || facts[i].insUsed === undefined ? '' : fmtMoney(Math.ceil(facts[i].insUsed - 1e-9)), { key: 'insUsed', tone: tnU[i] })); }
+  { const tnU = cmpTone(facts, 'insUsed'); h += row(T.used, (t, i) => cmpFactCell(i, facts[i].insUsed === null || facts[i].insUsed === undefined ? '' : fmtMoney(Math.ceil(facts[i].insUsed - 1e-9)), { key: 'insUsed', tone: tnU[i] })); }
   h += row('Cost saved / component (' + S.settings.currency + ')', (t, i) => cmpFactCell(i, fmtAbs(facts[i].savedComp), { key: 'savedComp', blankBaseline: true, isRef: facts[i].refA, tone: sgnTone(facts[i].savedComp) }));
   h += row('Cost per month (' + S.settings.currency + ')', (t, i) => cmpFactCell(i, facts[i].costMonth === null ? '' : fmtMoney(facts[i].costMonth), { key: 'costMonth' }));
   h += row('Cost saved / month (' + S.settings.currency + ')', (t, i) => cmpFactCell(i, fmtAbs(facts[i].savedMonth), { key: 'savedMonth', blankBaseline: true, isRef: facts[i].refA, tone: sgnTone(facts[i].savedMonth) }));
@@ -3571,8 +3625,15 @@ function commitCmpInput(el) {
     t.edges[+el.dataset.edge][el.dataset.k] = el.value; refreshCmpFacts(); markDirty(); return;
   }
   const k = el.dataset.k; t[k] = el.value;
-  if (k === 'vc' || k === 'rpm' || k === 'toolDia') {
-    if (k !== 'toolDia') { t.src[k] = el.value.trim() === '' ? '' : 'user'; t.sd = k; }
+  if (k === 'tsize' && R.op === 'tapping') {
+    const ts = parseThreadSize(el.value);
+    const put = (kk, v) => { t[kk] = String(v); t.src[kk] = 'calc'; const inp = $('#cmp-matrix td[data-r="' + kk + '"].t' + ti + ' input'); if (inp) inp.value = t[kk]; };
+    if (ts && ts.pitch && (t.feed === '' || t.src.feed === 'calc')) put('feed', ts.pitch);
+    if (ts && ts.dia && (t.toolDia === '' || t.src.toolDia === 'calc')) put('toolDia', ts.dia);
+  }
+  if (k === 'feed' || k === 'toolDia') delete t.src[k]; /* typed by hand - no longer follows the thread size */
+  if (k === 'vc' || k === 'rpm' || k === 'toolDia' || k === 'tsize') {
+    if (k === 'vc' || k === 'rpm') { t.src[k] = el.value.trim() === '' ? '' : 'user'; t.sd = k; }
     recalcCmpTool(R, t);
     ['vc', 'rpm'].forEach(kk => {
       const td = $('#cmp-matrix td[data-r="' + kk + '"].t' + ti); if (!td) return;
@@ -3581,7 +3642,7 @@ function commitCmpInput(el) {
       td.className = 'tc t' + ti + (t.src[kk] === 'calc' ? ' src-calc' : '');
       if (inp) inp.placeholder = cmpDiaFor(R, t) ? '' : 'needs diameter';
     });
-  } else if (k === 'numEdges' || k === 'price' || k === 'cycle' || k === 'pockets') { refreshCmpFacts(); }
+  } else if (k === 'numEdges' || k === 'price' || k === 'cycle' || k === 'pockets' || k === 'regrind') { refreshCmpFacts(); }
   markDirty();
 }
 function commitCmpSelect(el) {
@@ -3737,7 +3798,7 @@ function cellHTML(row, t, i, E) {
       const h = libHintText(t, R);
       return '<td class="' + base + ' hint-cell ' + h.cls + '" data-r="libhint">' + hintCellInner(t, i) + '</td>';
     }
-    case 'sel': return '<td class="' + base + '" data-r="' + row.id + '">' + selectHTML(i, row.path, row.options, t[row.path], 'Select\u2026', aria) + '</td>';
+    case 'sel': return '<td class="' + base + '" data-r="' + row.id + '">' + selectHTML(i, row.path, typeof row.options === 'function' ? row.options(t) : row.options, t[row.path], 'Select\u2026', aria) + '</td>';
     case 'holding': return '<td class="' + base + '" data-r="holding">' + selectHTML(i, 'holding', holdingOptions(t.op), t.holding, 'Select holding\u2026', aria) + '</td>';
     case 'holdsize': {
       const lid = holdListId(t.holding);
@@ -3853,6 +3914,8 @@ function commitSelect(el) {
     t.holding = v; renderMatrix();
   } else if (k === 'intExt' || k === 'hand') {
     t[k] = v; if (k === 'intExt') { applySuggestions(t); } refreshTool(ti);
+  } else if (k === 'ttype' || k === 'holeType' || k === 'coolant') {
+    t[k] = v;
   }
   markDirty();
 }

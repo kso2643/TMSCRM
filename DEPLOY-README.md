@@ -1,3 +1,28 @@
+# Update — 13 Oct (a): drilling & tapping in the savings comparison; operation-based rows
+
+**Upload:** `crm/` only. The changed files are `crm/trial-sheet/index.html` and `crm/trials-app.js`, plus the version stamps on each page. Then press **Ctrl+Shift+R** once. No database changes.
+
+1. **Savings / comparison report — rows now follow the "Type of operation":**
+   - **Turning, boring, grooving, threading:** insert rows as before (insert grade, depth of cut ap, edges, insert price).
+   - **Milling:** additionally shows *No. of pockets in cutter*.
+   - **Drilling:**
+     - Tool rows: *Drill diameter*, *Drill type* (solid carbide / HSS / brazed / exchangeable tip / indexable), *Drill (make / grade / coating)*, *Holder / collet*, *Inserts per drill* (indexable drills only).
+     - Cutting rows: *Hole depth* and *Hole type* (through / blind), plus coolant (through-tool / external / MQL / dry).
+     - Depth of cut and pockets are switched off.
+   - **Tapping:**
+     - Tool rows: *Tap diameter*, *Tap type* (spiral point / spiral flute / straight flute / forming / thread mill), *Thread size*.
+     - Cutting rows: *Drill (hole) depth*, *Tap depth*, *Hole type*, coolant.
+     - Typing the thread size (e.g. M10) fills in the pitch as the feed and the tap diameter, so RPM can be worked out from Vc.
+   - **Drills and taps are compared as reground tools:**
+     - Tool-life rows are *New tool, Regrind 1, Regrind 2…*.
+     - *No. of uses (new + regrinds)* and *Regrind cost / regrind* are added.
+     - CPC = (tool price + regrind cost × regrinds) ÷ total tool life.
+     - Wording changes to match: "Taps / Drills used per year", "Cost of Taps", "Tool change time".
+   - The screen, the sheet preview, the PDF and the Excel file all show the same rows. The Excel CPC formula includes the regrind cost.
+2. **Existing data analysis:**
+   - Drilling and tapping tools get *Drill / tap type*, *Hole type* and *Coolant* rows.
+   - As with the other operation rows, these show only for drilling and tapping columns and are greyed out for the other tools.
+
 # Update — 12 Oct (a): quotation notes & price negotiation, MD desk Quotations tab, shared meeting dropdowns
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
