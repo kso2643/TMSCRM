@@ -13,9 +13,11 @@
  */
 class OptionController
 {
-    public const LISTS = ['meeting_status', 'meeting_type', 'meeting_priority'];
+    public const LISTS = ['meeting_status', 'meeting_type', 'meeting_priority', 'brand'];
+    /** Lists that keep the label as typed ("Taegutec") instead of an UPPER_SNAKE code. */
+    private const AS_TYPED = ['brand'];
     /** Longest value each list's column can hold (Meeting.status / meetingType are VARCHAR(40), followUpPriority VARCHAR(20)). */
-    private const MAX = ['meeting_status' => 40, 'meeting_type' => 40, 'meeting_priority' => 20];
+    private const MAX = ['meeting_status' => 40, 'meeting_type' => 40, 'meeting_priority' => 20, 'brand' => 100];
 
     public static function schema(): array
     {
@@ -51,7 +53,18 @@ class OptionController
         if (!in_array($list, self::LISTS, true)) sendError('Unknown list.', 400);
         $s = db()->prepare('SELECT o.value, o.label, o.createdAt, u.name AS createdBy FROM `DropdownOption` o LEFT JOIN `User` u ON u.id=o.createdById WHERE o.listKey=? ORDER BY o.createdAt');
         $s->execute([$list]);
-        sendSuccess(['options' => $s->fetchAll()]);
+        $opts = $s->fetchAll();
+        if ($list === 'brand') {
+            // brands already on products and vendors count too, so every page offers the same list
+            $seen = [];
+            foreach ($opts as $o) $seen[mb_strtolower($o['value'])] = 1;
+            $more = [];
+            try { $more = db()->query("SELECT DISTINCT TRIM(brand) FROM `Product` WHERE brand IS NOT NULL AND TRIM(brand)<>''")->fetchAll(PDO::FETCH_COLUMN); } catch (Throwable $e) {}
+            try { foreach (db()->query("SELECT brands FROM `Vendor` WHERE brands IS NOT NULL AND brands<>''")->fetchAll(PDO::FETCH_COLUMN) as $b) foreach (preg_split('/[,\/;]+/', $b) as $x) $more[] = trim($x); } catch (Throwable $e) {}
+            foreach ($more as $b) { if ($b === '' || isset($seen[mb_strtolower($b)])) continue; $seen[mb_strtolower($b)] = 1; $opts[] = ['value' => $b, 'label' => $b, 'createdAt' => null, 'createdBy' => null]; }
+            usort($opts, fn($a, $b) => strcasecmp($a['label'], $b['label']));
+        }
+        sendSuccess(['options' => $opts]);
     }
 
     public function create(): void
@@ -65,7 +78,7 @@ class OptionController
         if (mb_strlen($label) < 2) sendError('Type the new choice (at least 2 letters).', 400);
         $max = self::MAX[$list];
         if (mb_strlen($label) > $max) sendError("Keep the choice to $max letters or fewer.", 400);
-        $value = mb_substr(self::valueOf($label), 0, $max);
+        $value = in_array($list, self::AS_TYPED, true) ? $label : mb_substr(self::valueOf($label), 0, $max);
         if ($value === '') sendError('Use letters or numbers for the new choice.', 400);
         $s = db()->prepare('SELECT value, label FROM `DropdownOption` WHERE listKey=? AND value=?'); $s->execute([$list, $value]);
         if ($ex = $s->fetch()) sendSuccess(['option' => $ex], 'Already in the list');

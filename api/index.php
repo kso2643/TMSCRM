@@ -527,7 +527,8 @@ try {
         match (true) {
             $method === 'GET'    && $c1 === ''                    => $ctrl->index(),
             $method === 'GET'    && $c1 === 'recipients'          => $ctrl->recipients(),
-            $method === 'GET'    && $c1 === 'quotations'          => $ctrl->quotations(),
+            $method === 'GET'    && $c1 === 'quotations' && $c2 === '' => $ctrl->quotations(),
+            $method === 'GET'    && $c1 === 'quotations' && $c2 !== '' => $ctrl->quotationItems($c2),
             $method === 'GET'    && $c1 === 'unread'              => $ctrl->unread(),
             $method === 'POST'   && $c1 !== '' && $c2 === 'ack'   => $ctrl->ack($c1),
             $method === 'POST'   && $c1 === ''                    => $ctrl->create(),

@@ -29,6 +29,20 @@ class UserController
     private const HR_BOOL_FIELDS = ['presentAddressSameAsPermanent'];
     private const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN'];
 
+    /** deletedAt: a removed user (has records, so not deleted outright) is hidden from the list. */
+    private static function ensure(): void
+    {
+        ensure_schema(['User' => ['create' => '', 'columns' => ['deletedAt' => 'DATETIME NULL']]], 'User removal');
+    }
+
+    /** Only the Super Admin may change, remove or create a Super Admin. */
+    private static function guardTarget(array $auth, ?array $target, ?string $newRole = null): void
+    {
+        if ($auth['role'] === 'SUPER_ADMIN') return;
+        if ($target && $target['role'] === 'SUPER_ADMIN') sendError('Only the Super Admin can change a Super Admin account.', 403);
+        if ($newRole === 'SUPER_ADMIN') sendError('Only the Super Admin can give the Super Admin role.', 403);
+    }
+
     private function fetchSafe(string $id): ?array
     {
         $stmt = db()->prepare(
@@ -59,6 +73,7 @@ class UserController
     public function index(): void
     {
         $auth = authenticate(); require_admin($auth);
+        self::ensure();
         [$page, $limit, $offset] = paginate(50);
         $search   = qp('search', '');
         $role     = qp('role', '');
@@ -72,6 +87,7 @@ class UserController
         }
         if ($role) { $where[] = 'role=?'; $params[] = $role; }
         if ($isActive !== null) { $where[] = 'isActive=?'; $params[] = ($isActive === 'true' ? 1 : 0); }
+        $where[] = qp('removed', '') === '1' ? 'deletedAt IS NOT NULL' : 'deletedAt IS NULL';
         $w = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
         $total = (int)db()->prepare("SELECT COUNT(*) FROM `User` $w")->execute($params) ? 0 : 0;
@@ -113,6 +129,8 @@ class UserController
 
         if (!$name || !$email || !$pass) sendError('Name, email, and password are required.', 400);
         if (!in_array($role, self::ROLES)) sendError('Role must be one of: ' . implode(', ', self::ROLES), 400);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) sendError('Enter a valid email address.', 400);
+        self::guardTarget($auth, null, $role);
         if (strlen($pass) < 6) sendError('Password must be at least 6 characters.', 400);
 
         $s = db()->prepare('SELECT id FROM `User` WHERE email=? LIMIT 1');
@@ -193,9 +211,21 @@ class UserController
 
         $role = $body['role'] ?? null;
         if ($role && !in_array($role, self::ROLES)) sendError('Invalid role.', 400);
+        self::guardTarget($auth, $existing, $role);
+        if ($id === $auth['id'] && $role && $role !== $existing['role']) sendError('You cannot change your own role.', 400);
 
         $sets = []; $params = [];
+        if (array_key_exists('name', $body) && trim((string) $body['name']) === '') sendError('Name cannot be empty.', 400);
         if (!empty($body['name']))                    { $sets[]='name=?';           $params[]=trim($body['name']); }
+        if (array_key_exists('email', $body)) {
+            $em = strtolower(trim((string) $body['email']));
+            if (!filter_var($em, FILTER_VALIDATE_EMAIL)) sendError('Enter a valid email address.', 400);
+            if ($em !== strtolower((string) $existing['email'])) {
+                $es = db()->prepare('SELECT id FROM `User` WHERE email=? AND id<>? LIMIT 1'); $es->execute([$em, $id]);
+                if ($es->fetch()) sendError('Another account already uses this email.', 409);
+                $sets[] = 'email=?'; $params[] = $em;
+            }
+        }
         if (array_key_exists('phone',$body))          { $sets[]='phone=?';          $params[]=trim($body['phone'])?: null; }
         if (array_key_exists('department',$body))     { $sets[]='department=?';     $params[]=trim($body['department'])?: null; }
         if ($role)                                    { $sets[]='role=?';           $params[]=$role; }
@@ -238,20 +268,48 @@ class UserController
         sendSuccess(['user' => $this->fetchSafe($id)], 'User updated');
     }
 
-    // DELETE /api/users/:id  (soft-deactivate)
+    // DELETE /api/users/:id               deactivate (can log in again after "Reactivate")
+    // DELETE /api/users/:id?permanent=1   delete for good; someone with quotations, meetings, attendance…
+    //                                     is removed instead (deactivated + hidden) so those records keep their name
     public function delete(string $id): void
     {
         $auth = authenticate(); require_admin($auth);
-        if ($id === $auth['id']) sendError('You cannot deactivate your own account.', 400);
-        $s = db()->prepare('UPDATE `User` SET isActive=0 WHERE id=?');
-        if (!$s->execute([$id]) || $s->rowCount() === 0) sendError('User not found.', 404);
-        sendSuccess(['user' => $this->fetchSafe($id)], 'User deactivated');
+        self::ensure();
+        if ($id === $auth['id']) sendError('You cannot deactivate or delete your own account.', 400);
+        $target = $this->fetchSafe($id);
+        if (!$target) sendError('User not found.', 404);
+        self::guardTarget($auth, $target);
+        if (qp('permanent', '') !== '1') {
+            db()->prepare('UPDATE `User` SET isActive=0 WHERE id=?')->execute([$id]);
+            log_activity($auth['id'], 'USER_DEACTIVATED', 'User', $id, ['name' => $target['name']]);
+            sendSuccess(['user' => $this->fetchSafe($id)], 'User deactivated');
+        }
+        $pdo = db();
+        try {
+            $pdo->beginTransaction();
+            // their own log / alert rows go with them; business records (quotations, meetings…) block the delete
+            foreach (['ActivityLog' => 'userId', 'AppointmentAlert' => 'userId', 'FollowUpAlert' => 'userId', 'Notification' => 'userId'] as $t => $c) {
+                try { $pdo->prepare("DELETE FROM `$t` WHERE `$c`=?")->execute([$id]); } catch (PDOException $e) { if ($e->getCode() !== '42S02') throw $e; }
+            }
+            $pdo->prepare('DELETE FROM `User` WHERE id=?')->execute([$id]);
+            $pdo->commit();
+            log_activity($auth['id'], 'USER_DELETED', 'User', null, ['name' => $target['name'], 'email' => $target['email']]);
+            sendSuccess(['deleted' => true], 'User "' . $target['name'] . '" deleted');
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            if (($e->errorInfo[1] ?? 0) != 1451) throw $e;
+            db()->prepare('UPDATE `User` SET isActive=0, deletedAt=? WHERE id=?')->execute([now_sql(), $id]);
+            log_activity($auth['id'], 'USER_REMOVED', 'User', $id, ['name' => $target['name']]);
+            sendSuccess(['deleted' => false, 'removed' => true],
+                'User "' . $target['name'] . '" removed. They had quotations, meetings or other records, so those keep their name; the account can no longer log in and is hidden from the list.');
+        }
     }
 
     // PATCH /api/users/:id/reset-password
     public function resetPassword(string $id): void
     {
         $auth = authenticate(); require_admin($auth);
+        $t = $this->fetchSafe($id); if ($t) self::guardTarget($auth, $t);
         $body = request_body();
         $new_pw = $body['newPassword'] ?? '';
         if (!$new_pw || strlen($new_pw) < 6) sendError('New password must be at least 6 characters.', 400);
@@ -266,6 +324,8 @@ class UserController
     public function toggleLock(string $id): void
     {
         $auth = authenticate(); require_admin($auth);
+        if ($id === $auth['id']) sendError('You cannot lock your own account.', 400);
+        $t = $this->fetchSafe($id); if ($t) self::guardTarget($auth, $t);
         $s = db()->prepare('SELECT id,isLocked FROM `User` WHERE id=? LIMIT 1');
         $s->execute([$id]);
         $user = $s->fetch();
@@ -281,7 +341,9 @@ class UserController
     public function reactivate(string $id): void
     {
         $auth = authenticate(); require_admin($auth);
-        $s = db()->prepare('UPDATE `User` SET isActive=1,isLocked=0,failedLoginCount=0 WHERE id=?');
+        self::ensure();
+        $t = $this->fetchSafe($id); if ($t) self::guardTarget($auth, $t);
+        $s = db()->prepare('UPDATE `User` SET isActive=1,isLocked=0,failedLoginCount=0,deletedAt=NULL WHERE id=?');
         if (!$s->execute([$id]) || $s->rowCount() === 0) sendError('User not found.', 404);
         sendSuccess(['user' => $this->fetchSafe($id)], 'User reactivated');
     }

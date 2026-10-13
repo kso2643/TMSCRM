@@ -54,9 +54,9 @@ $tail"],
   `id` VARCHAR(30) NOT NULL, `poId` VARCHAR(30) NOT NULL, `sortOrder` INT NOT NULL DEFAULT 0,
   `itemCode` VARCHAR(120) NULL, `description` VARCHAR(500) NULL, `brand` VARCHAR(100) NULL,
   `quantity` DECIMAL(14,2) NOT NULL DEFAULT 0, `unit` VARCHAR(20) NULL, `unitPrice` DECIMAL(14,2) NULL, `discount` DECIMAL(6,2) NULL,
-  `netPrice` DECIMAL(14,2) NULL, `totalPrice` DECIMAL(14,2) NULL, `delivery` VARCHAR(80) NULL,
+  `netPrice` DECIMAL(14,2) NULL, `totalPrice` DECIMAL(14,2) NULL, `delivery` VARCHAR(80) NULL, `customerName` VARCHAR(160) NULL,
   PRIMARY KEY (`id`), KEY `PurchaseOrderItem_po_idx` (`poId`)
-$tail"],
+$tail", 'columns' => ['customerName' => 'VARCHAR(160) NULL']],
             'CompanyProfile' => ['create' => "CREATE TABLE IF NOT EXISTS `CompanyProfile` (
   `code` VARCHAR(5) NOT NULL, `name` VARCHAR(160) NOT NULL, `address` TEXT NULL, `phone` VARCHAR(160) NULL,
   `email` VARCHAR(160) NULL, `gstin` VARCHAR(30) NULL, `updatedById` VARCHAR(30) NULL, `updatedAt` DATETIME NULL,
@@ -147,8 +147,8 @@ $tail"],
         if (qp('company')) { $w[] = 'p.company=?'; $p[] = self::co(qp('company')); }
         if (qp('status')) { $w[] = 'p.status=?'; $p[] = strtoupper(qp('status')); }
         if (($q = trim((string) qp('q', ''))) !== '') {
-            $w[] = '(p.poNumber LIKE ? OR p.vendorName LIKE ? OR p.subject LIKE ? OR p.quoteRef LIKE ? OR EXISTS (SELECT 1 FROM `PurchaseOrderItem` x WHERE x.poId=p.id AND (x.itemCode LIKE ? OR x.description LIKE ?)))';
-            array_push($p, "%$q%", "%$q%", "%$q%", "%$q%", "%$q%", "%$q%");
+            $w[] = '(p.poNumber LIKE ? OR p.vendorName LIKE ? OR p.subject LIKE ? OR p.quoteRef LIKE ? OR EXISTS (SELECT 1 FROM `PurchaseOrderItem` x WHERE x.poId=p.id AND (x.itemCode LIKE ? OR x.description LIKE ? OR x.customerName LIKE ? OR x.brand LIKE ?)))';
+            array_push($p, "%$q%", "%$q%", "%$q%", "%$q%", "%$q%", "%$q%", "%$q%", "%$q%");
         }
         $s = db()->prepare('SELECT p.*, u.name AS createdByName, (SELECT COUNT(*) FROM `PurchaseOrderItem` x WHERE x.poId=p.id) AS lineCount
                             FROM `PurchaseOrder` p LEFT JOIN `User` u ON u.id=p.createdById ' . ($w ? 'WHERE ' . implode(' AND ', $w) : '') . '
@@ -194,7 +194,7 @@ $tail"],
             $sub += $total ?? 0;
             $items[] = ['itemCode' => $code ? strtoupper($code) : null, 'description' => $desc, 'brand' => self::str($it['brand'] ?? '', 100), 'quantity' => $qty,
                         'unit' => self::str($it['unit'] ?? '', 20), 'unitPrice' => $price, 'discount' => $disc, 'netPrice' => $net, 'totalPrice' => $total,
-                        'delivery' => self::str($it['delivery'] ?? '', 80)];
+                        'delivery' => self::str($it['delivery'] ?? '', 80), 'customerName' => self::str($it['customerName'] ?? '', 160)];
         }
         if (!$items) sendError('Add at least one item.', 400);
         $gst = self::num($b['gstPercent'] ?? '');
@@ -221,8 +221,8 @@ $tail"],
     private function saveItems(string $id, array $items): void
     {
         db()->prepare('DELETE FROM `PurchaseOrderItem` WHERE poId=?')->execute([$id]);
-        $ins = db()->prepare('INSERT INTO `PurchaseOrderItem` (id,poId,sortOrder,itemCode,description,brand,quantity,unit,unitPrice,discount,netPrice,totalPrice,delivery) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
-        foreach ($items as $k => $it) $ins->execute([gen_id(), $id, $k + 1, $it['itemCode'], $it['description'], $it['brand'], $it['quantity'], $it['unit'], $it['unitPrice'], $it['discount'], $it['netPrice'], $it['totalPrice'], $it['delivery']]);
+        $ins = db()->prepare('INSERT INTO `PurchaseOrderItem` (id,poId,sortOrder,itemCode,description,brand,quantity,unit,unitPrice,discount,netPrice,totalPrice,delivery,customerName) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        foreach ($items as $k => $it) $ins->execute([gen_id(), $id, $k + 1, $it['itemCode'], $it['description'], $it['brand'], $it['quantity'], $it['unit'], $it['unitPrice'], $it['discount'], $it['netPrice'], $it['totalPrice'], $it['delivery'], $it['customerName']]);
     }
 
     public function create(): void
@@ -401,6 +401,7 @@ class PurchaseOrderPdf
         $head();
         foreach ($p['items'] as $n => $it) {
             $desc = trim((string) ($it['description'] ?? ''));
+            if (!empty($it['brand'])) $desc = trim($desc . ($desc !== '' ? ' — ' : '') . 'Brand: ' . $it['brand']);
             $this->font('Helvetica', 7.5, self::DARK);
             $dl = $this->wrap($desc ?: '—', $col[2] - 4);
             $this->font('Helvetica-Bold', 7.5, self::DARK);

@@ -24,7 +24,7 @@
   var API = 'https://api.apjtech.in';
   // A folder with index.html, like every other standalone page (/orders/, /tasks/).
   var SHEET_URL = '/trial-sheet/';
-  var SHEET_VERSION = '20261013a'; // bump when trial-sheet/index.html changes so the frame isn't served from cache
+  var SHEET_VERSION = '20261013b'; // bump when trial-sheet/index.html changes so the frame isn't served from cache
   // Company running the trial: its logo and name go on both sheets (PDF / Excel too).
   var BRANDS = {
     TMS: { company: 'Tulips Machining Solutions', logo: '/brand/tms-logo.png' },

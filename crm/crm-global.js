@@ -78,7 +78,7 @@
   // app and as the newer hand-coded page. A React link would open the old one
   // (and a refresh the new one), so on React pages any click on such a link is
   // turned into a normal page load.
-  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue)\/?$/;
+  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/users|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue)\/?$/;
   function hardLinks() {
     if (!window.__next_f) return; // only the compiled React pages need this
     document.addEventListener('click', function (e) {
@@ -801,7 +801,7 @@
       }).catch(function () {});
   }
 
-  // ── 7. MD desk: unread items addressed to me stay on screen on every page ─
+  // ── 7. CEO Desk (was MD desk): unread items addressed to me stay on screen on every page ─
   // until opened or acknowledged (GET /md-desk/unread, POST /md-desk/:id/ack).
   var mdHost = null, mdBusy = false;
   function mdPoll() {
@@ -831,7 +831,7 @@
       'button{font:600 12px/1 inherit;font-family:inherit;border-radius:7px;padding:6px 10px;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#0f172a}button.p{background:#1e3a8a;border-color:#1e3a8a;color:#fff}';
     var w = document.createElement('div'); w.className = 'w'; w.setAttribute('role', 'alert');
     var h = document.createElement('div'); h.className = 'h';
-    h.appendChild(document.createTextNode('📣 From the MD desk' + (items.length > 1 ? ' (' + items.length + ')' : '')));
+    h.appendChild(document.createTextNode('📣 From the CEO Desk' + (items.length > 1 ? ' (' + items.length + ')' : '')));
     w.appendChild(h);
     items.slice(0, 3).forEach(function (it) {
       var row = document.createElement('div'); row.className = 'i';

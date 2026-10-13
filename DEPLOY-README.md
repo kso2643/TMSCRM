@@ -1,3 +1,45 @@
+# Update — 13 Oct (b): turning & milling in the savings report, PO brand + customer per item, CEO Desk, Users page
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `crm/users-app.js`, and a new React sidebar file `layout-c30d5e7a1b2f4c86.js` (it shows "CEO Desk").
+- **Database:** new columns are added automatically: `PurchaseOrderItem.customerName`, `MdDeskItem.items / customerId / batchId` and `User.deletedAt`.
+
+1. **Savings / comparison report — turning and milling details:**
+   - **Turning / boring:**
+     - Tool rows: turning type (OD roughing / finishing, ID boring, facing, profiling), insert ISO code (e.g. CNMG 120408), insert grade, nose radius, chip breaker and tool holder.
+     - Cutting rows: Vc, RPM, feed per rev, depth of cut and length of cut.
+     - Calculated: **table feed Vf** (feed × RPM) and **cutting time per pass**.
+   - **Milling:**
+     - Tool rows: cutter diameter, cutter type (face / shoulder / slot / high-feed / copy / solid end mill), insert ISO code, grade, arbor, number of pockets (Z) and entry angle.
+     - Cutting rows: Vc, RPM, feed per tooth, ap, ae (width of cut) and length of cut.
+     - Calculated: Vf (fz × Z × RPM) and cutting time.
+   - The same rows appear on the sheet preview, the PDF and the Excel file.
+   - Changing the operation clears a turning or cutter type that does not belong to the new operation.
+2. **Vendors → Purchase order, each item now has:**
+   - **Brand:**
+     - The dropdown lists the vendor's own brands first, then every brand in use (products, vendors, added by hand).
+     - **＋ Other (type new)…** adds a brand, and it then shows in the list for everyone.
+     - The brand prints on the PO PDF next to the description.
+   - **Customer (for whom):**
+     - Type to search the customer list.
+     - It is kept on the PO record and searchable from the PO list, but it is **not printed** on the vendor's PDF.
+3. **MD desk is now "CEO Desk":**
+   - **To:** tick **one or more people**; each gets their own copy, with its own status and replies. "Pick all" works per role, and "All admins" / "Everyone" are still there.
+   - **Price given / New quotation:**
+     - Search the **customer**. Their quotations are listed; click one to copy its items, prices and discounts.
+     - Add or edit **item lines**: item code (with product suggestions), product, qty, price, discount %, and the net price is worked out.
+     - The person receiving it sees the items table.
+4. **Users page (Admin / Super Admin)** — rebuilt so every action works:
+   - **Add user**: name, email, password, role, phone, department, designation and employee code.
+   - **Edit**: change the name, email, role or details.
+   - Reset password, lock / unlock, deactivate / reactivate.
+   - **Delete:**
+     - A user with no records is deleted for good.
+     - Someone who already has quotations, meetings, attendance and so on is *removed* instead: they cannot log in and are hidden from the list, and those records keep their name.
+     - The "Removed" filter shows removed users, with a Restore button.
+   - Only the Super Admin can edit or remove a Super Admin or give that role.
+   - Nobody can delete, lock or change the role of their own account.
+
 # Update — 13 Oct (a): drilling & tapping in the savings comparison; operation-based rows
 
 **Upload:** `crm/` only. The changed files are `crm/trial-sheet/index.html` and `crm/trials-app.js`, plus the version stamps on each page. Then press **Ctrl+Shift+R** once. No database changes.

@@ -1,6 +1,9 @@
 <?php
 /**
- * MD desk — direct line between the Super Admin (MD) and the Admins.
+ * CEO Desk (was "MD desk") — direct line between the Super Admin (CEO) and the staff.
+ * One send can go to several people at once (toIds[]): each gets their own copy
+ * with its own status and replies. Price / quotation items can carry item lines
+ * (item code, product, qty, price, discount) and the customer they are for.
  *
  * One item is one of:
  *   MESSAGE    a direct message
@@ -22,7 +25,8 @@
  *   GET    /api/md-desk/recipients       who I can send to
  *   GET    /api/md-desk/unread           unread items to me (for the pop-up on every page)
  *   POST   /api/md-desk/:id/ack          mark read without opening
- *   GET    /api/md-desk/quotations?q=    recent quotations to pick from
+ *   GET    /api/md-desk/quotations?q=&customerId=   recent quotations to pick from (a customer's quotations)
+ *   GET    /api/md-desk/quotations/:id   one quotation's item lines (code, qty, price, discount)
  *   POST   /api/md-desk                  new item
  *   GET    /api/md-desk/:id              item + replies (marks it seen)
  *   POST   /api/md-desk/:id/reply        { body }
@@ -47,7 +51,7 @@ class MdDeskController
   `status` VARCHAR(10) NOT NULL DEFAULT 'OPEN', `seenAt` DATETIME NULL, `doneAt` DATETIME NULL, `doneById` VARCHAR(30) NULL,
   `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `updatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `MdDeskItem_to_idx` (`toId`), KEY `MdDeskItem_from_idx` (`fromId`), KEY `MdDeskItem_created_idx` (`createdAt`)
-$tail", 'columns' => ['toGroup' => "VARCHAR(10) NOT NULL DEFAULT 'ADMINS'"]],
+$tail", 'columns' => ['toGroup' => "VARCHAR(10) NOT NULL DEFAULT 'ADMINS'", 'items' => 'MEDIUMTEXT NULL', 'customerId' => 'VARCHAR(30) NULL', 'batchId' => 'VARCHAR(30) NULL']],
             'MdDeskRead' => ['create' => "CREATE TABLE IF NOT EXISTS `MdDeskRead` (
   `itemId` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `readAt` DATETIME NOT NULL,
   PRIMARY KEY (`itemId`, `userId`)
@@ -104,6 +108,12 @@ $tail"],
         $s->execute(array_merge([$id], $p));
         $r = $s->fetch();
         if (!$r) sendError('Item not found.', 404);
+        return self::shape($r);
+    }
+
+    private static function shape(array $r): array
+    {
+        $r['items'] = !empty($r['items']) ? (json_decode($r['items'], true) ?: []) : [];
         return $r;
     }
 
@@ -134,7 +144,7 @@ $tail"],
             $r['toMe'] = $r['toId'] === $auth['id'] || ($r['toId'] === null && $r['fromId'] !== $auth['id'] && ($r['toGroup'] === 'EVERYONE' || $admin));
             $r['unread'] = $r['toMe'] && !isset($read[$r['id']]) && $r['status'] !== 'DONE';
             $r['overdue'] = $r['type'] === 'TASK' && $r['status'] !== 'DONE' && $r['dueDate'] && $r['dueDate'] < date('Y-m-d');
-            return $r;
+            return self::shape($r);
         }, $s->fetchAll());
         sendSuccess(['items' => $items, 'me' => $auth['id'], 'role' => $auth['role']]);
     }
@@ -177,8 +187,10 @@ $tail"],
     {
         self::auth();
         $q = trim((string) qp('q', ''));
-        $where = ''; $p = [];
-        if ($q !== '') { $where = 'WHERE q.quotationNumber LIKE ? OR c.companyName LIKE ?'; $p = ["%$q%", "%$q%"]; }
+        $w = []; $p = [];
+        if ($q !== '') { $w[] = '(q.quotationNumber LIKE ? OR c.companyName LIKE ?)'; array_push($p, "%$q%", "%$q%"); }
+        if (($cid = trim((string) qp('customerId', ''))) !== '') { $w[] = 'q.customerId=?'; $p[] = $cid; }
+        $where = $w ? 'WHERE ' . implode(' AND ', $w) : '';
         try {
             $s = db()->prepare("SELECT q.id, q.quotationNumber, q.totalAmount, COALESCE(q.quotationDate, q.createdAt) AS date, q.status,
                     COALESCE(c.companyName, q.toName) AS customerName, u.name AS byName
@@ -190,6 +202,41 @@ $tail"],
         sendSuccess(['quotations' => $rows]);
     }
 
+    // GET /api/md-desk/quotations/:id — item lines to copy into a price / quotation item
+    public function quotationItems(string $id): void
+    {
+        self::auth();
+        $s = db()->prepare('SELECT q.id, q.quotationNumber, q.totalAmount, q.customerId, COALESCE(c.companyName, q.toName) AS customerName
+            FROM `Quotation` q LEFT JOIN `Customer` c ON c.id=q.customerId WHERE q.id=?');
+        $s->execute([$id]);
+        $q = $s->fetch();
+        if (!$q) sendError('Quotation not found.', 404);
+        $i = db()->prepare('SELECT itemCode, productName, quantity, unitPrice, discount, netPrice FROM `QuotationItem` WHERE quotationId=? ORDER BY sortOrder, createdAt');
+        $i->execute([$id]);
+        $items = array_map(fn($r) => ['itemCode' => $r['itemCode'], 'productName' => $r['productName'], 'quantity' => (float) $r['quantity'],
+            'price' => (float) $r['unitPrice'], 'discount' => (float) $r['discount'], 'net' => (float) $r['netPrice']], $i->fetchAll());
+        $q['totalAmount'] = (float) $q['totalAmount'];
+        sendSuccess(['quotation' => $q, 'items' => $items]);
+    }
+
+    /** Item lines from the body → clean list (code, product, qty, price, discount, net). */
+    private static function itemLines($raw): array
+    {
+        $out = [];
+        foreach ((array) $raw as $k => $it) {
+            if (!is_array($it)) continue;
+            $code = mb_substr(trim((string) ($it['itemCode'] ?? '')), 0, 120);
+            $prod = mb_substr(trim((string) ($it['productName'] ?? '')), 0, 255);
+            $qty = self::money($it['quantity'] ?? null); $price = self::money($it['price'] ?? null); $disc = self::money($it['discount'] ?? null);
+            if ($code === '' && $prod === '' && $price === null) continue;
+            if ($code === '' && $prod === '') sendError('Line ' . ($k + 1) . ': enter the item code or product.', 400);
+            if ($disc !== null && ($disc < 0 || $disc > 100)) sendError('Line ' . ($k + 1) . ': discount must be between 0 and 100 %.', 400);
+            $net = $price === null ? null : round($price * (1 - ($disc ?? 0) / 100), 2);
+            $out[] = ['itemCode' => $code, 'productName' => $prod, 'quantity' => $qty, 'price' => $price, 'discount' => $disc, 'net' => $net];
+        }
+        return array_slice($out, 0, 100);
+    }
+
     // POST /api/md-desk
     public function create(): void
     {
@@ -199,19 +246,21 @@ $tail"],
         if (!in_array($type, self::TYPES, true)) sendError('Pick what you are sending: message, task, price or quotation.', 400);
         $prio = strtoupper(trim((string) ($b['priority'] ?? 'NORMAL')));
         if (!in_array($prio, self::PRIORITIES, true)) $prio = 'NORMAL';
-        $toId = trim((string) ($b['toId'] ?? ''));
+        // several people at once (toIds[]), one person (toId) or a group (toGroup, admins only)
+        $toIds = array_values(array_unique(array_filter(array_map(fn($x) => trim((string) $x), (array) ($b['toIds'] ?? [])))));
+        if (!$toIds && trim((string) ($b['toId'] ?? '')) !== '') $toIds = [trim((string) $b['toId'])];
         $group = strtoupper(trim((string) ($b['toGroup'] ?? 'ADMINS')));
         if (!in_array($group, ['ADMINS', 'EVERYONE'], true)) $group = 'ADMINS';
-        if ($toId !== '') {
+        if (count($toIds) > 200) sendError('Too many people picked.', 400);
+        foreach ($toIds as $tid) {
             $s = db()->prepare('SELECT id, role FROM `User` WHERE id=? AND isActive=1');
-            $s->execute([$toId]);
+            $s->execute([$tid]);
             $u = $s->fetch();
             if (!$u) sendError('Pick who to send it to.', 400);
-            if ($toId === $auth['id']) sendError('Pick someone other than yourself.', 400);
-            if (!self::isAdmin($auth) && !in_array($u['role'], ['SUPER_ADMIN', 'ADMIN'], true)) sendError('You can send to the MD or an Admin.', 403);
-        } elseif (!self::isAdmin($auth)) {
-            sendError('Pick the MD or an Admin to send it to.', 400);
+            if ($tid === $auth['id']) sendError('Pick someone other than yourself.', 400);
+            if (!self::isAdmin($auth) && !in_array($u['role'], ['SUPER_ADMIN', 'ADMIN'], true)) sendError('You can send to the CEO or an Admin.', 403);
         }
+        if (!$toIds && !self::isAdmin($auth)) sendError('Pick the CEO or an Admin to send it to.', 400);
         $title = trim((string) ($b['title'] ?? ''));
         $details = trim((string) ($b['details'] ?? ''));
         $cust = trim((string) ($b['customerName'] ?? ''));
@@ -223,12 +272,21 @@ $tail"],
         $amount = self::money($b['amount'] ?? null);
         $due = to_date_only($b['dueDate'] ?? null);
         if ($disc !== null && ($disc < 0 || $disc > 100)) sendError('Discount must be between 0 and 100 %.', 400);
+        $lines = in_array($type, ['PRICE', 'QUOTATION'], true) ? self::itemLines($b['items'] ?? []) : [];
+        $custId = trim((string) ($b['customerId'] ?? '')) ?: null;
 
         if ($type === 'PRICE') {
             if ($cust === '') sendError('Enter the customer the price was given to.', 400);
+            if ($lines) {
+                // first line also fills the single-item columns (lists, alerts, older screens)
+                $f = $lines[0];
+                if ($code === '') $code = $f['itemCode']; if ($prod === '') $prod = $f['productName'];
+                if ($price === null) $price = $f['price']; if ($disc === null) $disc = $f['discount'];
+                foreach ($lines as $k => $l) if ($l['price'] === null) sendError('Line ' . ($k + 1) . ' (' . ($l['itemCode'] ?: $l['productName']) . '): enter the price.', 400);
+            }
             if ($code === '' && $prod === '') sendError('Enter the item code or product.', 400);
             if ($price === null) sendError('Enter the price given.', 400);
-            if ($title === '') $title = 'Price given · ' . ($code ?: $prod) . ' · ' . $cust;
+            if ($title === '') $title = 'Price given · ' . (count($lines) > 1 ? count($lines) . ' items' : ($code ?: $prod)) . ' · ' . $cust;
         } elseif ($type === 'QUOTATION') {
             if ($cust === '') sendError('Enter the customer the quotation was given to.', 400);
             if ($qno === '') sendError('Enter the quotation number.', 400);
@@ -239,13 +297,21 @@ $tail"],
             if ($title === '' && $details === '') sendError('Write the message.', 400);
             if ($title === '') $title = mb_substr(preg_replace('/\s+/', ' ', $details), 0, 80);
         }
-        $id = gen_id(); $now = now_sql();
-        db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,itemCode,productName,price,discount,quotationId,quotationNo,amount,fromId,toId,toGroup,status,createdAt,updatedAt)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?)')
-            ->execute([$id, $type, mb_substr($title, 0, 255), $details ?: null, $prio, $type === 'TASK' ? $due : null, $cust ?: null, $code ?: null, $prod ?: null,
-                $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $auth['id'], $toId ?: null, $toId ? 'ADMINS' : $group, $now, $now]);
-        log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $id, ['type' => $type, 'title' => $title]);
-        sendSuccess(['item' => self::load($auth, $id)], 'Sent', 201);
+        if ($type === 'QUOTATION' && $amount === null && $lines) {
+            $amount = 0.0; foreach ($lines as $l) $amount += ($l['net'] ?? 0) * ($l['quantity'] ?? 1);
+            $amount = round($amount, 2);
+        }
+        $now = now_sql(); $batch = count($toIds) > 1 ? gen_id() : null; $ids = [];
+        $ins = db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,customerId,itemCode,productName,price,discount,quotationId,quotationNo,amount,items,fromId,toId,toGroup,batchId,status,createdAt,updatedAt)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?)');
+        foreach ($toIds ?: [null] as $tid) {
+            $id = gen_id(); $ids[] = $id;
+            $ins->execute([$id, $type, mb_substr($title, 0, 255), $details ?: null, $prio, $type === 'TASK' ? $due : null, $cust ?: null, $custId, $code ?: null, $prod ?: null,
+                $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $lines ? json_encode($lines, JSON_UNESCAPED_UNICODE) : null,
+                $auth['id'], $tid, $tid ? 'ADMINS' : $group, $batch, $now, $now]);
+        }
+        log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $ids[0], ['type' => $type, 'title' => $title, 'to' => count($ids)]);
+        sendSuccess(['item' => self::load($auth, $ids[0]), 'count' => count($ids)], count($ids) > 1 ? 'Sent to ' . count($ids) . ' people' : 'Sent', 201);
     }
 
     // GET /api/md-desk/:id

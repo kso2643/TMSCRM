@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════════════
    Quotation notes & follow-up status — shared by the Quotations page and
-   the MD desk (Quotations tab).
+   the CEO Desk (Quotations tab).
 
    QuoteNotes.open(quotationId, { onChange, panel })  — notes log of the
      quotation: comments, price negotiation (customer asks / we offered),

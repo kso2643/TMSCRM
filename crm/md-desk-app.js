@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════
-   MD desk — direct line between the Super Admin (MD) and the Admins.
+   CEO Desk (formerly "MD desk") — direct line between the Super Admin (CEO) and the staff.
 
    Send a direct message, an important task (priority + due date), a price
    given to a customer, or a new quotation given — to one Admin / Super
@@ -70,7 +70,7 @@
     st.textContent = [
       '.md-wrap{max-width:1300px;margin:0 auto}',
       '.md-head h1{font-size:1.35rem;font-weight:700;margin:0}.md-head p{margin:.15rem 0 1rem;color:#64748b;font-size:.85rem}',
-      '.md-cols{display:grid;grid-template-columns:400px minmax(0,1fr);gap:1rem;align-items:start}@media (max-width:980px){.md-cols{grid-template-columns:1fr}}',
+      '.md-cols{display:grid;grid-template-columns:460px minmax(0,1fr);gap:1rem;align-items:start}@media (max-width:980px){.md-cols{grid-template-columns:1fr}}',
       '.md-card{background:#fff;border:1px solid #e2e8f0;border-radius:.9rem;padding:1rem;margin-bottom:1rem}.dark .md-card{background:#1e293b;border-color:#334155}',
       '.md-card h2{font-size:1rem;font-weight:700;margin:0 0 .7rem}',
       '.md-types{display:grid;grid-template-columns:repeat(2,1fr);gap:.4rem;margin-bottom:.7rem}',
@@ -117,8 +117,20 @@
       '.md-qtile b{display:block;font-size:1.25rem}.md-qtile span{font-size:.76rem;color:#475569;font-weight:600}.md-qtile small{display:block;font-size:.7rem;color:#64748b}',
       '.dark .md-qtile{background:#0f172a;border-color:#334155}',
       '.md-qtable{width:100%;border-collapse:collapse;font-size:.83rem}.md-qtable th{text-align:left;font-size:.7rem;text-transform:uppercase;color:#64748b;padding:.45rem;border-bottom:1px solid #e2e8f0;white-space:nowrap}',
-      '.md-qtable td{padding:.45rem;border-bottom:1px solid #f1f5f9;vertical-align:top}.dark .md-qtable th,.dark .md-qtable td{border-color:#334155}.md-n{text-align:right;white-space:nowrap}.md-sub{color:#64748b;font-size:.75rem}',
+      '.md-qtable th.md-n{text-align:right}.md-qtable td{padding:.45rem;border-bottom:1px solid #f1f5f9;vertical-align:top}.dark .md-qtable th,.dark .md-qtable td{border-color:#334155}.md-n{text-align:right;white-space:nowrap}.md-sub{color:#64748b;font-size:.75rem}',
       '.md-q-sel{border:1px solid #cbd5e1;border-radius:.4rem;padding:.15rem .3rem;font-size:.76rem;background:#fff;color:inherit}.dark .md-q-sel{background:#0f172a;border-color:#334155}',
+      '.md-chips{display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.35rem;min-height:1.6rem;align-items:center}',
+      '.md-chip{display:inline-flex;align-items:center;gap:.25rem;background:#dbeafe;color:#1e3a8a;border-radius:999px;padding:.12rem .25rem .12rem .6rem;font-size:.78rem;font-weight:600}.md-chip button{border:0;background:none;cursor:pointer;color:inherit;font-size:1rem;line-height:1;padding:0 .25rem}',
+      '.dark .md-chip{background:#1e3a8a;color:#dbeafe}',
+      '.md-plist{max-height:210px;overflow:auto;border:1px solid #e2e8f0;border-radius:.5rem;margin-top:.35rem;padding:.25rem .45rem}.dark .md-plist{border-color:#334155}',
+      '.md-pgh{font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:#64748b;font-weight:700;margin:.35rem 0 .1rem;display:flex;gap:.4rem;align-items:center}',
+      '.md-f .md-pitem{display:flex;gap:.5rem;align-items:center;font-size:.84rem;font-weight:500;color:inherit;margin:0;padding:.2rem 0;cursor:pointer}.md-pitem input{width:auto!important}.md-pitem small{color:#64748b}',
+      '.md-link{border:0;background:none;color:#2563eb;cursor:pointer;font-size:.7rem;text-transform:none;letter-spacing:0;padding:0}',
+      '.md-cquotes{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.35rem;align-items:center}',
+      '.md-lines{display:flex;flex-direction:column;gap:.4rem;margin-bottom:.4rem}.md-line{border:1px solid #e2e8f0;border-radius:.55rem;padding:.4rem;background:#f8fafc}.dark .md-line{background:#0f172a;border-color:#334155}',
+      '.md-l1{display:flex;gap:.35rem;align-items:center}.md-l1>input{flex:1}.md-ln{font-size:.72rem;color:#64748b;font-weight:700;width:1.1rem;text-align:center}',
+      '.md-l2{display:grid;grid-template-columns:repeat(4,1fr);gap:.35rem;margin-top:.35rem}.md-l2 label{font-size:.68rem;color:#64748b;font-weight:600;display:flex;flex-direction:column;gap:.1rem}',
+      '.md-f .md-line input{padding:.32rem .45rem;font-size:.82rem}.md-net{font-size:.85rem;font-weight:700;color:#0f172a;padding:.32rem 0}.dark .md-net{color:#e2e8f0}',
       '.md-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;transition:opacity .25s,transform .25s;max-width:90vw}',
       '.md-toast.in{opacity:1;transform:translate(-50%,0)}.md-toast.err{background:#b91c1c}'
     ].join('\n');
@@ -130,33 +142,183 @@
 
   // ── compose ─────────────────────────────────────────────────────────
   function field(label, input, wide) { return el('div', { class: 'md-f' + (wide ? ' w' : '') }, [el('label', { text: label }), input]); }
+  /* Who to send to: tick several people (each gets their own copy), or — for
+     Admins / CEO — a whole group. Picked people show as chips. */
+  function recipientPicker() {
+    var sel = state.toSel;
+    var ROLE_GROUP = { SUPER_ADMIN: 'CEO / Super Admin', ADMIN: 'Admins', MANAGER: 'Managers', ACCOUNTS: 'Accounts', SALES_ENGINEER: 'Sales engineers', SALES: 'Sales' };
+    var chips = el('div', { class: 'md-chips', id: 'md-to-chips' });
+    var search = el('input', { type: 'search', id: 'md-to-search', placeholder: 'Search people…', autocomplete: 'off' });
+    var list = el('div', { class: 'md-plist', id: 'md-to-list' });
+    var byId = {}; state.users.forEach(function (u) { byId[u.id] = u; });
+    var GROUPS = { __ADMINS: 'All admins', __EVERYONE: 'Everyone (all users)' };
+    function drawChips() {
+      clear(chips);
+      var ks = Object.keys(sel);
+      if (!ks.length) chips.appendChild(el('span', { class: 'md-sub', text: 'Nobody picked yet — tick one or more people below.' }));
+      ks.forEach(function (k) {
+        chips.appendChild(el('span', { class: 'md-chip' }, [GROUPS[k] || (byId[k] ? byId[k].name : k),
+          el('button', { type: 'button', 'aria-label': 'Remove', text: '×', onclick: function () { delete sel[k]; draw(); } })]));
+      });
+    }
+    function box(k, label, sub) {
+      var cb = el('input', { type: 'checkbox', 'data-to': k });
+      cb.checked = !!sel[k];
+      cb.onchange = function () {
+        if (cb.checked) {
+          if (GROUPS[k]) Object.keys(sel).forEach(function (x) { delete sel[x]; });   // a group replaces individual picks
+          else { delete sel.__ADMINS; delete sel.__EVERYONE; }
+          sel[k] = true;
+        } else delete sel[k];
+        draw();
+      };
+      return el('label', { class: 'md-pitem' }, [cb, el('span', {}, [label, sub ? el('small', { text: ' ' + sub }) : null])]);
+    }
+    function draw() {
+      drawChips(); clear(list);
+      var q = search.value.trim().toLowerCase();
+      if (state.canGroups && !q) list.appendChild(el('div', { class: 'md-pgrp' }, [el('div', { class: 'md-pgh', text: 'Groups' }), box('__ADMINS', 'All admins'), box('__EVERYONE', 'Everyone (all users)')]));
+      Object.keys(ROLE_GROUP).forEach(function (r) {
+        var us = state.users.filter(function (u) { return u.role === r && (!q || (u.name + ' ' + (u.department || '')).toLowerCase().indexOf(q) !== -1); });
+        if (!us.length) return;
+        var grp = el('div', { class: 'md-pgrp' }, [el('div', { class: 'md-pgh' }, [ROLE_GROUP[r] + ' ',
+          us.length > 1 ? el('button', { type: 'button', class: 'md-link', text: 'pick all', onclick: function () { delete sel.__ADMINS; delete sel.__EVERYONE; us.forEach(function (u) { sel[u.id] = true; }); draw(); } }) : null])]);
+        us.forEach(function (u) { grp.appendChild(box(u.id, u.name, u.department || '')); });
+        list.appendChild(grp);
+      });
+    }
+    search.oninput = draw;
+    draw();
+    return el('div', { class: 'md-f w' }, [el('label', { text: 'To (pick one or more)' }), chips, search, list]);
+  }
+
+  /* Customer box: type to search the customer list; picking one also lists that
+     customer's quotations (click one to copy its items, prices and discounts). */
+  function customerPicker(ctx, onQuote) {
+    var inp = el('input', { id: 'md-customerName', placeholder: 'Search customer…', autocomplete: 'off', value: ctx.customerName || '' });
+    var sugg = el('div', { class: 'md-sugg', hidden: true });
+    var quotes = el('div', { class: 'md-cquotes', id: 'md-cust-quotes' });
+    var t;
+    inp.addEventListener('input', function () {
+      ctx.customerName = inp.value.trim(); ctx.customerId = null; clear(quotes);
+      clearTimeout(t);
+      var q = inp.value.trim();
+      if (q.length < 2) { sugg.hidden = true; return; }
+      t = setTimeout(function () {
+        api('GET', '/customers?limit=8&search=' + encodeURIComponent(q)).then(function (j) {
+          var list = (j.data && j.data.items) || [];
+          clear(sugg); sugg.hidden = !list.length;
+          list.forEach(function (c) {
+            sugg.appendChild(el('button', { type: 'button', onclick: function () { pickCustomer(c.id, c.companyName); } },
+              [el('b', { text: c.companyName }), ' ', el('small', { text: [c.contactPerson, c.location].filter(Boolean).join(' · ') })]));
+          });
+        }).catch(function () {});
+      }, 250);
+    });
+    function pickCustomer(id, name) {
+      ctx.customerId = id; ctx.customerName = name; inp.value = name; sugg.hidden = true;
+      clear(quotes).appendChild(el('span', { class: 'md-sub', text: 'Loading quotations…' }));
+      api('GET', '/md-desk/quotations?customerId=' + encodeURIComponent(id)).then(function (j) {
+        var list = j.data.quotations || [];
+        clear(quotes);
+        if (!list.length) { quotes.appendChild(el('span', { class: 'md-sub', text: 'No quotations for this customer yet — add the items below.' })); return; }
+        quotes.appendChild(el('span', { class: 'md-sub', text: 'Quotations for ' + name + ' — click one to copy its items:' }));
+        list.forEach(function (q) {
+          quotes.appendChild(el('button', { type: 'button', class: 'md-btn sm', 'data-cq': q.id, onclick: function () { onQuote(q); } },
+            [q.quotationNumber + ' · ' + money(q.totalAmount) + ' · ' + dmy(q.date)]));
+        });
+      }).catch(function () { clear(quotes); });
+    }
+    document.addEventListener('click', function (e) { if (!inp.parentNode || !inp.parentNode.contains(e.target)) sugg.hidden = true; });
+    return el('div', { class: 'md-f w' }, [el('label', { text: 'Customer' }), el('div', { class: 'md-qs' }, [inp, sugg]), quotes]);
+  }
+
+  /* Item lines: item code (suggests from products), product, qty, price, discount → net. */
+  function linesEditor(ctx) {
+    var wrap = el('div', { class: 'md-f w' });
+    function blank() { return { itemCode: '', productName: '', quantity: '', price: '', discount: '' }; }
+    if (!ctx.lines || !ctx.lines.length) ctx.lines = [blank()];
+    function net(l) { var p = parseFloat(l.price), d = parseFloat(l.discount) || 0; return isNaN(p) ? null : Math.round(p * (1 - d / 100) * 100) / 100; }
+    function draw() {
+      clear(wrap);
+      wrap.appendChild(el('label', { text: 'Items — code, price and discount' }));
+      var tb = el('div', { class: 'md-lines', id: 'md-lines' });
+      ctx.lines.forEach(function (l, i) {
+        var netEl = el('span', { class: 'md-net', text: net(l) == null ? '—' : money(net(l)) });
+        function f(key, ph, attrs) {
+          var x = el('input', Object.assign({ placeholder: ph, value: l[key] == null ? '' : String(l[key]), 'data-line': String(i), 'data-k': key, autocomplete: 'off' }, attrs || {}));
+          x.addEventListener('input', function () { l[key] = x.value; netEl.textContent = net(l) == null ? '—' : money(net(l)); if (ctx.onTotal) ctx.onTotal(); });
+          return x;
+        }
+        var code = f('itemCode', 'Item code'); var prod = f('productName', 'Product / description');
+        var sg = el('div', { class: 'md-sugg', hidden: true }), t;
+        code.addEventListener('input', function () {
+          clearTimeout(t); var q = code.value.trim();
+          if (q.length < 2) { sg.hidden = true; return; }
+          t = setTimeout(function () {
+            api('GET', '/products/search?limit=8&q=' + encodeURIComponent(q)).then(function (j) {
+              var list = j.data.results || []; clear(sg); sg.hidden = !list.length;
+              list.forEach(function (p) {
+                sg.appendChild(el('button', { type: 'button', onmousedown: function (e) {
+                  e.preventDefault(); l.itemCode = p.itemCode; l.productName = p.specification || p.productName || '';
+                  if ((l.price === '' || l.price == null) && p.price) l.price = p.price;
+                  draw();
+                } }, [el('b', { text: p.itemCode }), ' ', el('small', { text: [p.specification || p.productName, p.brand].filter(Boolean).join(' · ') })]));
+              });
+            }).catch(function () {});
+          }, 220);
+        });
+        code.addEventListener('blur', function () { setTimeout(function () { sg.hidden = true; }, 150); });
+        tb.appendChild(el('div', { class: 'md-line', 'data-row': String(i) }, [
+          el('div', { class: 'md-l1' }, [el('span', { class: 'md-ln', text: String(i + 1) }), el('div', { class: 'md-qs', style: 'flex:0 0 38%' }, [code, sg]), prod,
+            el('button', { type: 'button', class: 'md-btn sm red', title: 'Remove item', text: '✕', onclick: function () { ctx.lines.splice(i, 1); if (!ctx.lines.length) ctx.lines.push(blank()); draw(); if (ctx.onTotal) ctx.onTotal(); } })]),
+          el('div', { class: 'md-l2' }, [
+            el('label', {}, ['Qty', f('quantity', 'Qty', { type: 'number', min: '0', step: 'any', inputmode: 'decimal' })]),
+            el('label', {}, ['Price ₹', f('price', '0.00', { type: 'number', min: '0', step: '0.01', inputmode: 'decimal' })]),
+            el('label', {}, ['Disc %', f('discount', '0', { type: 'number', min: '0', max: '100', step: '0.01', inputmode: 'decimal' })]),
+            el('label', {}, ['Net', netEl])
+          ])
+        ]));
+      });
+      wrap.appendChild(tb);
+      wrap.appendChild(el('button', { type: 'button', class: 'md-btn sm', id: 'md-add-line', text: '+ Add item', onclick: function () { ctx.lines.push(blank()); draw(); var r = wrap.querySelectorAll('[data-k=itemCode]'); r[r.length - 1].focus(); } }));
+    }
+    ctx.redraw = draw;
+    draw();
+    return wrap;
+  }
+
   function renderForm() {
     clear(formBox);
     var t = state.compose;
-    formBox.appendChild(el('h2', { text: state.canGroups ? 'Send to staff' : 'Send to MD / admin' }));
+    if (!state.toSel) state.toSel = {};
+    if (state.toPick) { state.toSel = {}; state.toSel[state.toPick] = true; state.toPick = null; }
+    formBox.appendChild(el('h2', { text: state.canGroups ? 'Send to staff' : 'Send to CEO / admin' }));
     formBox.appendChild(el('div', { class: 'md-types' }, Object.keys(TYPES).map(function (k) {
       return el('button', { type: 'button', class: 'md-type' + (k === t ? ' on' : ''), style: '--c:' + TYPES[k].c, 'data-type': k, onclick: function () { state.compose = k; renderForm(); } },
         [el('span', { class: 'i', text: TYPES[k].icon }), TYPES[k].label]);
     })));
-    // Everyone in the company, grouped by role (Admins also get "All admins" / "Everyone").
-    var to = el('select', { id: 'md-to' });
-    if (state.canGroups) {
-      to.appendChild(el('optgroup', { label: 'Groups' }, [el('option', { value: '__ADMINS', text: 'All admins' }), el('option', { value: '__EVERYONE', text: 'Everyone (all users)' })]));
-    } else to.appendChild(el('option', { value: '', text: 'Choose…' }));
-    var ROLE_GROUP = { SUPER_ADMIN: 'MD / Super Admin', ADMIN: 'Admins', MANAGER: 'Managers', ACCOUNTS: 'Accounts', SALES_ENGINEER: 'Sales engineers', SALES: 'Sales' };
-    Object.keys(ROLE_GROUP).forEach(function (r) {
-      var us = state.users.filter(function (u) { return u.role === r; });
-      if (us.length) to.appendChild(el('optgroup', { label: ROLE_GROUP[r] }, us.map(function (u) { return el('option', { value: u.id, text: u.name + (u.department ? ' · ' + u.department : '') }); })));
-    });
-    if (state.toPick) { to.value = state.toPick; state.toPick = null; }
     var prio = el('select', { id: 'md-prio' }, ['NORMAL', 'HIGH', 'URGENT'].map(function (p) { return el('option', { value: p, text: PRIO[p][0] }); }));
-    var g = el('div', { class: 'md-grid' }, [field('To', to), field('Priority', prio)]);
+    var g = el('div', { class: 'md-grid' }, [recipientPicker(), field('Priority', prio)]);
     var inp = {};
+    var ctx = { customerName: '', customerId: null, lines: null };
     function add(key, label, attrs, wide) {
       attrs = attrs || {}; attrs.id = 'md-' + key;
       inp[key] = attrs.tag === 'textarea' ? el('textarea', attrs) : el('input', attrs);
       g.appendChild(field(label, inp[key], wide));
       return inp[key];
+    }
+    var qid = null;
+    function copyQuote(q) {
+      api('GET', '/md-desk/quotations/' + encodeURIComponent(q.id)).then(function (j) {
+        ctx.lines = j.data.items.map(function (x) { return { itemCode: x.itemCode || '', productName: x.productName || '', quantity: x.quantity || '', price: x.price || '', discount: x.discount || '' }; });
+        if (!ctx.lines.length) ctx.lines = null;
+        qid = q.id;
+        if (inp.quotationNo) inp.quotationNo.value = q.quotationNumber || '';
+        if (inp.amount) inp.amount.value = q.totalAmount != null ? Number(q.totalAmount).toFixed(2) : '';
+        if (!ctx.customerName && q.customerName) { ctx.customerName = q.customerName; var ci = document.getElementById('md-customerName'); if (ci) ci.value = q.customerName; }
+        ctx.redraw(); toast('Copied ' + j.data.items.length + ' item(s) from ' + q.quotationNumber);
+      }).catch(function (e) { toast(e.message, 'err'); });
     }
     if (t === 'MESSAGE') {
       add('title', 'Subject (optional)', { placeholder: 'e.g. Sakthi Auto payment follow-up' }, true);
@@ -166,22 +328,20 @@
       add('dueDate', 'Due date', { type: 'date', min: today() });
       add('details', 'Details', { tag: 'textarea', placeholder: 'What exactly needs to be done', rows: 3 }, true);
     } else if (t === 'PRICE') {
-      add('customerName', 'Customer', { placeholder: 'Customer name' }, true);
-      add('itemCode', 'Item code', { placeholder: 'e.g. CNMG120408' });
-      add('productName', 'Product / description', { placeholder: 'e.g. Turning insert' });
-      add('price', 'Price given (₹)', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal' });
-      add('discount', 'Discount %', { type: 'number', step: '0.01', min: '0', max: '100', inputmode: 'decimal' });
+      g.appendChild(customerPicker(ctx, copyQuote));
+      g.appendChild(linesEditor(ctx));
       add('details', 'Notes', { tag: 'textarea', placeholder: 'Validity, quantity, conditions…', rows: 2 }, true);
     } else {
-      var pick = el('input', { id: 'md-qpick', placeholder: 'Search a quotation no. or customer…', autocomplete: 'off' });
+      g.appendChild(customerPicker(ctx, copyQuote));
+      var pick = el('input', { id: 'md-qpick', placeholder: 'Or search any quotation no. / customer…', autocomplete: 'off' });
       var sugg = el('div', { class: 'md-sugg', hidden: true });
       var qs = el('div', { class: 'md-qs' }, [pick, sugg]);
       g.appendChild(field('Pick from Quotations (optional)', qs, true));
       add('quotationNo', 'Quotation no.', { placeholder: 'e.g. TMS/Q/26/101' });
-      add('amount', 'Quotation value (₹)', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal' });
-      add('customerName', 'Customer', { placeholder: 'Customer name' }, true);
-      add('details', 'Notes', { tag: 'textarea', placeholder: 'Items, delivery, terms, follow-up…', rows: 2 }, true);
-      var qid = null, tmr;
+      add('amount', 'Quotation value (₹)', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'blank = total of the items' });
+      g.appendChild(linesEditor(ctx));
+      add('details', 'Notes', { tag: 'textarea', placeholder: 'Delivery, terms, follow-up…', rows: 2 }, true);
+      var tmr;
       pick.addEventListener('input', function () {
         clearTimeout(tmr);
         tmr = setTimeout(function () {
@@ -189,28 +349,31 @@
             var list = j.data.quotations || [];
             clear(sugg); sugg.hidden = !list.length;
             list.forEach(function (q) {
-              sugg.appendChild(el('button', { type: 'button', onclick: function () {
-                qid = q.id; inp.quotationNo.value = q.quotationNumber || ''; inp.customerName.value = q.customerName || '';
-                inp.amount.value = q.totalAmount != null ? Number(q.totalAmount).toFixed(2) : ''; pick.value = q.quotationNumber; sugg.hidden = true;
-              } }, [el('b', { text: q.quotationNumber + ' ' }), (q.customerName || '') + ' ', el('small', { text: money(q.totalAmount) + ' · ' + dmy(q.date) + (q.byName ? ' · ' + q.byName : '') })]));
+              sugg.appendChild(el('button', { type: 'button', onclick: function () { pick.value = q.quotationNumber; sugg.hidden = true; copyQuote(q); } },
+                [el('b', { text: q.quotationNumber + ' ' }), (q.customerName || '') + ' ', el('small', { text: money(q.totalAmount) + ' · ' + dmy(q.date) + (q.byName ? ' · ' + q.byName : '') })]));
             });
           }).catch(function () {});
         }, 250);
       });
       pick.addEventListener('focus', function () { pick.dispatchEvent(new Event('input')); });
       document.addEventListener('click', function (e) { if (!qs.contains(e.target)) sugg.hidden = true; });
-      inp._qid = function () { return qid; };
     }
     formBox.appendChild(g);
     var send = el('button', { class: 'md-btn pri', type: 'button', id: 'md-send', text: 'Send ' + TYPES[t].label.toLowerCase() });
     send.onclick = function () {
-      var body = { type: t, toId: to.value.charAt(0) === '_' ? '' : to.value, toGroup: to.value === '__EVERYONE' ? 'EVERYONE' : 'ADMINS', priority: prio.value };
-      if (!to.value) { toast('Pick who to send it to.', 'err'); return; }
-      Object.keys(inp).forEach(function (k) { if (k[0] !== '_') body[k] = inp[k].value.trim(); });
-      if (inp._qid) body.quotationId = inp._qid();
+      var picked = Object.keys(state.toSel);
+      if (!picked.length) { toast('Pick who to send it to.', 'err'); return; }
+      var grp = picked.filter(function (k) { return k.charAt(0) === '_'; })[0];
+      var body = { type: t, toIds: grp ? [] : picked, toGroup: grp === '__EVERYONE' ? 'EVERYONE' : 'ADMINS', priority: prio.value };
+      Object.keys(inp).forEach(function (k) { body[k] = inp[k].value.trim(); });
+      if (t === 'PRICE' || t === 'QUOTATION') {
+        body.customerName = ctx.customerName || ''; body.customerId = ctx.customerId || '';
+        body.items = (ctx.lines || []).filter(function (l) { return String(l.itemCode).trim() || String(l.productName).trim() || String(l.price).trim(); });
+        if (qid) body.quotationId = qid;
+      }
       send.disabled = true;
       api('POST', '/md-desk', body).then(function (j) {
-        toast(j.message || 'Sent'); state.compose = t; renderForm();
+        toast(j.message || 'Sent'); state.compose = t; state.toSel = {}; renderForm();
         state.tab = 'sent'; state.status = ''; load();
       }).catch(function (e) { toast(e.message, 'err'); send.disabled = false; });
     };
@@ -304,9 +467,20 @@
       ]));
       var facts = [];
       if (i.type === 'TASK') facts.push(['Due date', i.dueDate ? dmy(i.dueDate) + (i.overdue ? ' (overdue)' : '') : '—']);
-      if (i.type === 'PRICE') facts.push(['Customer', i.customerName], ['Item code', i.itemCode || '—'], ['Product', i.productName || '—'], ['Price given', money(i.price)], ['Discount', i.discount != null ? Number(i.discount) + ' %' : '—']);
+      if (i.type === 'PRICE' && i.items && i.items.length > 1) facts.push(['Customer', i.customerName], ['Items', String(i.items.length)]);
+      else if (i.type === 'PRICE') facts.push(['Customer', i.customerName], ['Item code', i.itemCode || '—'], ['Product', i.productName || '—'], ['Price given', money(i.price)], ['Discount', i.discount != null ? Number(i.discount) + ' %' : '—']);
       if (i.type === 'QUOTATION') facts.push(['Quotation no.', i.quotationNo], ['Customer', i.customerName], ['Value', i.amount != null ? money(i.amount) : '—']);
       if (facts.length) dlg.appendChild(el('div', { class: 'md-facts' }, facts.map(function (f) { return el('div', {}, [el('span', { text: f[0] }), f[1] || '—']); })));
+      if (i.items && i.items.length) {
+        dlg.appendChild(el('div', { style: 'overflow-x:auto' }, [el('table', { class: 'md-qtable', id: 'md-items' }, [
+          el('thead', {}, [el('tr', {}, ['#', 'Item code', 'Product', 'Qty', 'Price', 'Disc %', 'Net'].map(function (h, k) { return el('th', { class: k >= 3 ? 'md-n' : '', text: h }); }))]),
+          el('tbody', {}, i.items.map(function (l, k) {
+            return el('tr', {}, [el('td', { text: String(k + 1) }), el('td', {}, [el('b', { text: l.itemCode || '—' })]), el('td', { text: l.productName || '' }),
+              el('td', { class: 'md-n', text: l.quantity != null ? String(l.quantity) : '—' }), el('td', { class: 'md-n', text: money(l.price) }),
+              el('td', { class: 'md-n', text: l.discount != null ? Number(l.discount) + ' %' : '—' }), el('td', { class: 'md-n' }, [el('b', { text: money(l.net) })])]);
+          }))
+        ])]));
+      }
       if (i.details) dlg.appendChild(el('div', { class: 'md-body', text: i.details }));
       var th = el('div', { class: 'md-thread', id: 'md-thread' });
       replies.forEach(function (r) {
@@ -349,8 +523,8 @@
   function mountPage(content) {
     injectCss();
     root = el('div', { class: 'md-wrap' });
-    root.appendChild(el('div', { class: 'md-head' }, [el('h1', { text: 'MD desk' }),
-      el('p', { text: 'Direct line from the MD — messages, important tasks, prices given and new quotations given, to anyone in the company. Replies come back here.' })]));
+    root.appendChild(el('div', { class: 'md-head' }, [el('h1', { text: 'CEO Desk' }),
+      el('p', { text: 'Direct line from the CEO — messages, important tasks, prices and quotations given (with items, prices and discounts) to one or many people at once. Replies come back here.' })]));
     formBox = el('div', { class: 'md-card', id: 'md-compose' });
     tabsBox = el('div', { class: 'md-tabs' });
     listBox = el('div', { class: 'md-list', id: 'md-list' });

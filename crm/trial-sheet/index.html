@@ -344,7 +344,7 @@ details.fmt ul{margin:6px 0 0 18px}
 :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 </style>
-<link rel="stylesheet" href="/motion.css?v=20261013a"/></head>
+<link rel="stylesheet" href="/motion.css?v=20261013b"/></head>
 <body>
 <div id="toasts" aria-live="polite"></div>
 
@@ -1451,6 +1451,7 @@ function newCmpTool() {
     vc: '', rpm: '', sd: 'vc', src: {},
     price: '', numEdges: '', cycle: '',
     toolType: '', tsize: '', holeDepth: '', tapDepth: '', holeType: '', regrind: '',
+    cutType: '', insCode: '', noseR: '', chipBr: '', entry: '', ae: '', len: '',
     edges: Array.from({ length: CMP_EDGES }, newCmpEdge)
   };
 }
@@ -1529,9 +1530,52 @@ function cmpTerms(R) {
     used: 'Inserts used / year (pcs)', usedChart: 'Inserts used per year (pcs)', costOf: 'Cost of Inserts',
     fewer: 'fewer inserts per year', avgPc: 'Average pieces / edge', avgMin: 'Average minutes / edge', unit: 'edge' };
 }
+const CMP_TURN_TYPES = ['OD roughing', 'OD finishing', 'ID boring', 'Facing', 'Profiling', 'Other'];
+const CMP_MILL_TYPES = ['Face mill', 'Shoulder mill', 'Slot / side mill', 'High-feed mill', 'Copy / profile mill', 'Solid end mill', 'Other'];
+/* Table feed Vf (mm/min) and cutting time per pass, worked out from the typed data. */
+function cmpVf(R, t) {
+  const rpm = num(t.rpm), f = num(t.feed);
+  if (!(rpm > 0) || !(f > 0)) return null;
+  if (R.op === 'milling') { const z = num(t.pockets); return z > 0 ? f * z * rpm : null; }
+  return f * rpm;
+}
+function cmpCutTime(R, t) { const vf = cmpVf(R, t), L = num(t.len); return (vf > 0 && L > 0) ? L / vf : null; }
+function cmpTurnMillRows(R) {
+  const op = R.op, mill = op === 'milling';
+  const tool = mill ? [
+    { g: 'tool', key: 'toolDia', label: 'Cutter diameter (mm)', num: true, ph: 'e.g. 63' },
+    { g: 'tool', key: 'cutType', label: 'Cutter type', sel: CMP_MILL_TYPES },
+    { g: 'tool', key: 'insCode', label: 'Insert ISO code', ph: 'e.g. SEKT 1204' },
+    { g: 'tool', key: 'insertGrade', label: 'Insert (grade)' },
+    { g: 'tool', key: 'toolHolder', label: 'Arbor / holder' },
+    { g: 'tool', key: 'pockets', label: 'No. of pockets in cutter (Z)', num: true, ph: 'e.g. 6' },
+    { g: 'tool', key: 'entry', label: 'Entry angle (°)', num: true, ph: 'e.g. 45 / 90' }
+  ] : [
+    { g: 'tool', key: 'cutType', label: op === 'boring' ? 'Boring type' : 'Turning type', sel: CMP_TURN_TYPES },
+    { g: 'tool', key: 'insCode', label: 'Insert ISO code', ph: 'e.g. CNMG 120408' },
+    { g: 'tool', key: 'insertGrade', label: 'Insert (grade)' },
+    { g: 'tool', key: 'noseR', label: 'Nose radius, r\u03b5 (mm)', num: true, ph: 'e.g. 0.8' },
+    { g: 'tool', key: 'chipBr', label: 'Chip breaker', ph: 'e.g. PM / MF' },
+    { g: 'tool', key: 'toolHolder', label: op === 'boring' ? 'Boring bar / holder' : 'Tool holder', ph: 'e.g. PCLNR 2525M12' },
+    { g: 'tool', key: 'toolDia', label: op === 'boring' ? 'Boring bar diameter (mm)' : 'Tool diameter (mm)', num: true, ph: 'only if no component dia' }
+  ];
+  const cut = [
+    { g: 'cut', key: 'vc', label: 'Cutting speed, Vc (m/min)', num: true, speed: true },
+    { g: 'cut', key: 'rpm', label: 'RPM', num: true, speed: true },
+    { g: 'cut', key: 'feed', label: cmpFeedLabel(R), num: true },
+    { g: 'cut', key: 'ap', label: 'Depth of cut, ap (mm)', num: true }
+  ];
+  if (mill) cut.push({ g: 'cut', key: 'ae', label: 'Width of cut, ae (mm)', num: true });
+  cut.push({ g: 'cut', key: 'len', label: 'Length of cut (mm)', num: true });
+  cut.push({ g: 'cut', key: 'vf', label: 'Table feed, Vf (mm/min)', calc: t => { const v = cmpVf(R, t); return v === null ? '' : String(Math.round(v)); } });
+  cut.push({ g: 'cut', key: 'ctime', label: 'Cutting time / pass (min)', calc: t => { const v = cmpCutTime(R, t); return v === null ? '' : String(Math.round(v * 100) / 100); } });
+  cut.push({ g: 'cut', key: 'coolant', label: 'Coolant', sel: ['Yes', 'No'] });
+  return tool.concat(cut);
+}
 /* Tool + cutting-condition rows that apply to the report's operation (screen, sheet, PDF, Excel). */
 function cmpSpecRows(R) {
   const op = R.op, hole = cmpIsHole(R), tap = op === 'tapping';
+  if (op === 'turning' || op === 'boring' || op === 'milling') return cmpTurnMillRows(R);
   const rows = [{ g: 'tool', key: 'toolDia', label: tap ? 'Tap diameter (mm)' : (op === 'drilling' ? 'Drill diameter (mm)' : 'Tool diameter (mm)'), num: true, ph: hole ? 'e.g. 8.5' : 'e.g. 50' }];
   if (hole) rows.push({ g: 'tool', key: 'toolType', label: tap ? 'Tap type' : 'Drill type', sel: CMP_TOOL_TYPES[op] });
   rows.push({ g: 'tool', key: 'insertGrade', label: hole ? (tap ? 'Tap' : 'Drill') + ' (make / grade / coating)' : 'Insert (grade)' });
@@ -1835,8 +1879,9 @@ function buildCmpModel(R) {
   const toolRow = (label, fn) => ({ label: label, cells: R.tools.map((t, i) => fn(t, i)) });
   const groups = [];
   const spec = cmpSpecRows(R), T = cmpTerms(R);
-  groups.push({ id: 'tool', title: 'Tool', rows: spec.filter(x => x.g === 'tool').map(x => toolRow(x.label, t => mkCell(t[x.key]))) });
-  groups.push({ id: 'cut', title: 'Cutting condition', rows: spec.filter(x => x.g === 'cut').map(x => toolRow(x.label, t => mkCell(t[x.key]))) });
+  const specCell = x => t => x.calc ? mkCell(x.calc(t), { calc: true }) : mkCell(t[x.key]);
+  groups.push({ id: 'tool', title: 'Tool', rows: spec.filter(x => x.g === 'tool').map(x => toolRow(x.label, specCell(x))) });
+  groups.push({ id: 'cut', title: 'Cutting condition', rows: spec.filter(x => x.g === 'cut').map(x => toolRow(x.label, specCell(x))) });
   const lifeRows = [];
   for (let e = 0; e < CMP_EDGES; e++) {
     if (!R.tools.some(t => t.edges[e].pc !== '' || t.edges[e].min !== '')) continue;
@@ -3098,6 +3143,7 @@ async function buildCmpXlsxBlob(R) {
 
   const spec = cmpSpecRows(R), T = cmpTerms(R);
   const specXl = x => addRow(x.label, (cell, t) => {
+    if (x.calc) { const cv = num(x.calc(t)); cell.value = cv; cell.fill = CALC_FILL; cell.font = F(); cell.alignment = { horizontal: 'center', vertical: 'middle' }; return; }
     const v = x.num ? num(t[x.key]) : null;
     cell.value = x.num ? (v === null ? (t[x.key] || null) : v) : (t[x.key] || null);
     if (x.num) cell.numFmt = x.key === 'pockets' ? '0' : '0.0#';
@@ -3470,7 +3516,13 @@ function onCmpFormInput(e) {
   const R = S.R; R[f] = el.value;
   if (f === 'dia') { recalcCmpAll(R); renderCmpMatrix(); }
   else if (f === 'opCost' || f === 'changeMin' || f === 'production') { refreshCmpFacts(); }
-  else if (f === 'op') { recalcCmpAll(R); renderCmpMatrix(); }
+  else if (f === 'op') {
+    /* a type picked for the old operation (e.g. "OD roughing") does not carry over to milling / drilling… */
+    const typeKey = { toolType: 1, cutType: 1 }; const valid = {};
+    cmpSpecRows(R).forEach(x => { if (typeKey[x.key]) valid[x.key] = x.sel; });
+    R.tools.forEach(t => Object.keys(typeKey).forEach(k => { if (t[k] && !(valid[k] && valid[k].indexOf(t[k]) !== -1)) t[k] = ''; }));
+    recalcCmpAll(R); renderCmpMatrix();
+  }
   else if (f === 'customer' || f === 'workpiece') { updateTitle(); }
   markDirty();
 }
@@ -3557,7 +3609,7 @@ function renderCmpMatrix() {
   const T = cmpTerms(R), spec = cmpSpecRows(R);
   { const l = $('#c-changeMin-l'); if (l) l.textContent = (T.hole ? 'Tool' : 'Insert') + ' change time (min)';
     const ch = $('#cmp-chart-hint'); if (ch) ch.innerHTML = T.hole ? 'Cost per component ( CPC ) = (' + T.noun + ' price + regrind cost &times; regrinds) &divide; total tool life per ' + T.noun : 'Cost per component ( CPC ) = insert price &divide; total tool life per insert'; }
-  const specRow = x => row(x.label, (t, i) => cmpMatCell(R, t, i, x.key, x.sel ? { label: x.label, kind: 'select', options: x.sel } : { label: x.label, numeric: !!x.num, ph: x.speed ? (cmpDiaFor(R, t) ? '' : 'needs diameter') : (x.ph || '') }));
+  const specRow = x => x.calc ? row(x.label, (t, i) => '<td class="tc t' + i + ' src-calc" data-r="' + x.key + '">' + esc(x.calc(t) || '\u2013') + '</td>') : row(x.label, (t, i) => cmpMatCell(R, t, i, x.key, x.sel ? { label: x.label, kind: 'select', options: x.sel } : { label: x.label, numeric: !!x.num, ph: x.speed ? (cmpDiaFor(R, t) ? '' : 'needs diameter') : (x.ph || '') }));
   h += grp('Tool');
   spec.filter(x => x.g === 'tool').forEach(x => { h += specRow(x); });
   h += grp('Cutting condition');
@@ -3643,6 +3695,7 @@ function commitCmpInput(el) {
       if (inp) inp.placeholder = cmpDiaFor(R, t) ? '' : 'needs diameter';
     });
   } else if (k === 'numEdges' || k === 'price' || k === 'cycle' || k === 'pockets' || k === 'regrind') { refreshCmpFacts(); }
+  cmpSpecRows(R).filter(x => x.calc).forEach(x => { const td = $('#cmp-matrix td[data-r="' + x.key + '"].t' + ti); if (td) td.textContent = x.calc(t) || '\u2013'; });
   markDirty();
 }
 function commitCmpSelect(el) {

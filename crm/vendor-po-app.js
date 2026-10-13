@@ -96,6 +96,8 @@
       '.po-t th{background:#1a4fa0;color:#fff;font-size:.72rem;padding:.45rem .35rem;text-align:center;white-space:nowrap}',
       '.po-t td{border-bottom:1px solid #ececec;padding:.3rem;vertical-align:top}.po-t td.n{text-align:right;white-space:nowrap;font-weight:600}.po-t tr:nth-child(even) td{background:#f9fafb}.dark .po-t tr:nth-child(even) td{background:#0f172a55}',
       '.po-t input{padding:.3rem .4rem;font-size:.8rem}.po-t .c{min-width:120px}.po-t .d{min-width:200px}.po-t .s{width:70px}.po-t .m{width:88px}',
+      '.po-t .po-brand{display:block;width:100%;margin-top:.25rem;border:1px solid #cbd5e1;border-radius:.45rem;padding:.25rem .35rem;font-size:.78rem;background:#fff;color:inherit}.dark .po-t .po-brand{background:#0f172a;border-color:#334155}',
+      '.po-t .po-cust{margin-top:.25rem;font-size:.78rem;background:#f8fafc}',
       '.po-tot{display:flex;justify-content:flex-end;margin-top:.5rem}.po-tot table{font-size:.88rem;min-width:300px}.po-tot td{padding:.3rem .6rem;text-align:right}.po-tot tr.g td{background:#eff6ff;font-weight:800;color:#166534;font-size:1rem}.dark .po-tot tr.g td{background:#1e3a8a33}',
       '.po-acts{display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap;margin-top:1rem;position:sticky;bottom:0;background:linear-gradient(180deg,transparent,#f8fafc 35%);padding:.6rem 0}.dark .po-acts{background:linear-gradient(180deg,transparent,#0f172a 35%)}',
       '.po-badge{display:inline-block;padding:.05rem .5rem;border-radius:999px;font-size:.72rem;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent)}',
@@ -176,6 +178,7 @@
   }
 
   // ── editor ───────────────────────────────────────────────────────────
+  var BRANDS = [];   // shared brand list (GET /options?list=brand), filled when an editor opens
   /** Opens the PO editor in box. id = existing PO, or null with prefill (vendorId / data read from a PDF). */
   function openEditor(box, id, prefill, done) {
     css();
@@ -183,7 +186,8 @@
     Promise.all([
       id ? api('GET', '/purchase-orders/' + encodeURIComponent(id)).then(function (j) { return j.data.order; }) : Promise.resolve(null),
       api('GET', '/vendors').then(function (j) { return j.data.vendors; }),
-      profiles()
+      profiles(),
+      api('GET', '/options?list=brand').then(function (j) { BRANDS = (j.data.options || []).map(function (o) { return o.value; }); }).catch(function () {})
     ]).then(function (r) { build(box, r[0], r[1], r[2], prefill || {}, done); }).catch(function (e) { clear(box).appendChild(el('div', { class: 'vd-empty', text: e.message })); });
   }
 
@@ -200,7 +204,7 @@
       notes: src.notes || '', signName: src.signName || me().name || '', signDesignation: src.signDesignation || 'Authorised Signatory', status: src.status || 'DRAFT',
       items: (src.items && src.items.length ? src.items : [{}, {}, {}]).map(function (i) {
         return { itemCode: i.itemCode || '', description: i.description || '', brand: i.brand || '', quantity: i.quantity == null ? '' : i.quantity, unit: i.unit || 'Nos',
-                 unitPrice: i.unitPrice == null ? '' : i.unitPrice, discount: i.discount == null ? '' : i.discount, delivery: i.delivery || '' };
+                 unitPrice: i.unitPrice == null ? '' : i.unitPrice, discount: i.discount == null ? '' : i.discount, delivery: i.delivery || '', customerName: i.customerName || '' };
       })
     };
     if (!po && pre.vendorId && !pre.vendorName) fillVendor(pre.vendorId);
@@ -322,8 +326,10 @@
         }
         var code = inp('itemCode', 'c');
         suggest(code, it, function () { render(); });
+        var cust = inp('customerName', 'd po-cust'); cust.placeholder = 'Customer (for whom)'; cust.title = 'Customer this item is for — kept on the PO record, not printed for the vendor';
+        custSuggest(cust, it);
         return el('tr', { 'data-line': idx }, [
-          el('td', { class: 'n', text: String(idx + 1) }), el('td', {}, [code]), el('td', {}, [inp('description', 'd')]),
+          el('td', { class: 'n', text: String(idx + 1) }), el('td', {}, [code, brandSel(it)]), el('td', {}, [inp('description', 'd'), cust]),
           el('td', {}, [inp('quantity', 's', 'number')]), el('td', {}, [inp('unit', 's')]), el('td', {}, [inp('unitPrice', 'm', 'number')]), el('td', {}, [inp('discount', 's', 'number')]),
           netTd, amtTd, el('td', {}, [inp('delivery', 'm')]),
           el('td', {}, [el('button', { class: 'vd-btn sm red', type: 'button', title: 'Remove line', text: '✕', onclick: function () { F.items.splice(idx, 1); if (!F.items.length) F.items.push({ unit: 'Nos' }); render(); } })])
@@ -371,6 +377,58 @@
       }).catch(function (e) { toast(e.message, 'err'); }).then(function () { btn.disabled = false; });
     }
 
+    /** Brand per line: the vendor's brands + every brand in use (products, vendors, added by hand);
+        "＋ Other…" asks for a new one and saves it to the shared list for everyone. */
+    function brandOptions() {
+      var v = vendorById(F.vendorId), own = v && v.brands ? String(v.brands).split(/[,\/;]+/).map(function (x) { return x.trim(); }).filter(Boolean) : [];
+      var seen = {}, out = [];
+      own.concat(BRANDS).concat(F.items.map(function (i) { return i.brand; })).forEach(function (b) { if (b && !seen[b.toLowerCase()]) { seen[b.toLowerCase()] = 1; out.push(b); } });
+      return { own: own, all: out };
+    }
+    function brandSel(it) {
+      var o = brandOptions();
+      var sel = el('select', { class: 'po-brand', 'data-k': 'brand', title: 'Brand' }, [el('option', { value: '', text: 'Brand…' })]);
+      if (o.own.length) sel.appendChild(el('optgroup', { label: 'This vendor' }, o.own.map(function (b) { return el('option', { value: b, text: b }); })));
+      var rest = o.all.filter(function (b) { return o.own.indexOf(b) === -1; });
+      if (rest.length) sel.appendChild(el('optgroup', { label: 'All brands' }, rest.map(function (b) { return el('option', { value: b, text: b }); })));
+      sel.appendChild(el('option', { value: '__other', text: '＋ Other (type new)…' }));
+      sel.value = it.brand || '';
+      sel.addEventListener('change', function () {
+        if (sel.value !== '__other') { it.brand = sel.value; return; }
+        var b = (prompt('New brand name (it will be added to the list for everyone):') || '').trim();
+        if (!b) { sel.value = it.brand || ''; return; }
+        api('POST', '/options', { list: 'brand', label: b }).then(function (j) {
+          var v = j.data.option.value; if (BRANDS.indexOf(v) === -1) BRANDS.push(v);
+          it.brand = v; toast((j.message || 'Added') + ': ' + v); render();
+        }).catch(function (e) { toast(e.message, 'err'); sel.value = it.brand || ''; });
+      });
+      return sel;
+    }
+    function custSuggest(input, it) {
+      var box = null, t = null;
+      function close() { if (box) box.remove(); box = null; }
+      input.addEventListener('input', function () {
+        clearTimeout(t); var q = input.value.trim();
+        if (q.length < 2) { close(); return; }
+        t = setTimeout(function () {
+          api('GET', '/customers?limit=8&search=' + encodeURIComponent(q)).then(function (j) {
+            if (document.activeElement !== input) return;
+            close(); var list = (j.data && j.data.items) || [];
+            if (!list.length) return;
+            box = el('div', { class: 'po-sugg' });
+            list.forEach(function (c) {
+              box.appendChild(el('button', { type: 'button', onmousedown: function (e) { e.preventDefault(); it.customerName = c.companyName; input.value = c.companyName; close(); } },
+                [el('b', { text: c.companyName }), el('div', { style: 'color:#64748b;font-size:.74rem', text: [c.contactPerson, c.location].filter(Boolean).join(' · ') })]));
+            });
+            var rc = input.getBoundingClientRect();
+            box.style.left = (window.scrollX + rc.left) + 'px'; box.style.top = (window.scrollY + rc.bottom + 3) + 'px';
+            document.body.appendChild(box);
+          }).catch(function () {});
+        }, 220);
+      });
+      input.addEventListener('blur', function () { setTimeout(close, 150); });
+    }
+
     /** Item code box: suggestions from the vendor's price list, then the product list. */
     function suggest(input, it, after) {
       var box = null, t = null;
@@ -394,7 +452,7 @@
             list.slice(0, 12).forEach(function (x) {
               box.appendChild(el('button', { type: 'button', onmousedown: function (e) {
                 e.preventDefault();
-                it.itemCode = x.code; if (!it.description) it.description = x.desc;
+                it.itemCode = x.code; if (!it.description) it.description = x.desc; if (x.brand && !it.brand) it.brand = x.brand;
                 if (x.price != null && (it.unitPrice === '' || it.unitPrice == null)) it.unitPrice = x.price;
                 if (x.disc != null && (it.discount === '' || it.discount == null)) it.discount = x.disc;
                 close(); after();

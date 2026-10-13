@@ -76,7 +76,7 @@
     "Upload": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"17 8 12 3 7 8"}],["line",{"x1":"12","x2":"12","y1":"3","y2":"15"}]]
   };
   // Sidebar label -> icon. Keep in sync with the React layout chunk.
-  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee","Chat": "MessageSquare","Vendors": "Truck","MD desk": "Briefcase","Product catalogue": "BookOpen","Accounts": "Calculator"};
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee","Chat": "MessageSquare","Vendors": "Truck","CEO Desk": "Briefcase","Product catalogue": "BookOpen","Accounts": "Calculator"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -101,7 +101,7 @@
     { label: 'Tasks',                 href: '/tasks/',          icon: 'timer',     section: 'Operations' },
     { label: 'Leave',                 href: '/leaves/',         icon: 'calendar',  section: 'Operations' },
     { label: 'Chat',                  href: '/chat/',           icon: 'chat',      section: 'Operations' },
-    { label: 'MD desk',               href: '/md-desk/',        icon: 'brief',     section: 'Operations' }
+    { label: 'CEO Desk',              href: '/md-desk/',        icon: 'brief',     section: 'Operations' }
   ];
   var ADMIN_NAV = [
     { label: 'Live tracking', href: '/admin/live-tracking/', icon: 'nav',      roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
