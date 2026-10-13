@@ -1760,7 +1760,7 @@ body.theme-apj { background: #0a1628; }
   color: var(--muted, #64748b);
 }
 </style>
-<script src="/fuel-expense-app.js?v=20261013b" defer></script><script src="/attendance-all-app.js?v=20261013b" defer></script><script src="/appointments-reminder-app.js?v=20261013b" defer></script><script src="/crm-global.js?v=20261013b" defer></script><script src="/product-suggest.js?v=20261013b" defer></script><script src="/quote-notes.js?v=20261013b" defer></script><link rel="stylesheet" href="/motion.css?v=20261013b"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261013c" defer></script><script src="/attendance-all-app.js?v=20261013c" defer></script><script src="/appointments-reminder-app.js?v=20261013c" defer></script><script src="/crm-global.js?v=20261013c" defer></script><script src="/product-suggest.js?v=20261013c" defer></script><script src="/quote-notes.js?v=20261013c" defer></script><link rel="stylesheet" href="/motion.css?v=20261013c"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 <script>
 const API_BASE = 'https://api.apjtech.in/api';
@@ -1799,10 +1799,11 @@ async function prLoadIntoQuotation(company) {
   var setItems = company === 'APJ' ? window.apj_setItemsFromPR : window.tms_setItemsFromPR;
   if (!g || !setItems) return;
   var no = (g('pr-no').value || '').trim().toUpperCase();
-  if (!no) { alert('Enter the price request number, e.g. PR-2610-0007'); g('pr-no').focus(); return; }
+  if (!no) { alert('Enter the price request or approval number, e.g. PR-2610-0007 or ACC-2610-0001'); g('pr-no').focus(); return; }
   g('pr-no').value = no;
   try {
-    var res = await apiFetch('/price-requests/by-no/' + encodeURIComponent(no));
+    // PRJ- / TUP- / ACC- = Projects, Tooled-up, Machine accessories approvals; PR- = price requests
+    var res = await apiFetch((/^(PRJ|TUP|ACC)-/.test(no) ? '/tooling/by-no/' : '/price-requests/by-no/') + encodeURIComponent(no));
     var d = res.data;
     if (d.customer && !g('to-customerId').value) {
       g('to-customerId').value = d.customer.id; g('to-name').value = d.customer.companyName || '';
@@ -1958,8 +1959,8 @@ function quotationServerToLocal(q) {
                                 placeholder="Enq. Ref. No." /></label>
                     </div>
                     <div class="form-row cols-1">
-                        <label class="field">Price request no. <small style="font-weight:400;color:#64748b">(optional — loads the approved prices)</small>
-                            <span style="display:flex;gap:8px"><input type="text" id="pr-no" placeholder="e.g. PR-2610-0007" style="flex:1" />
+                        <label class="field">Price request / approval no. <small style="font-weight:400;color:#64748b">(optional — PR, Project, Tooled-up or Accessories no.; loads the approved prices)</small>
+                            <span style="display:flex;gap:8px"><input type="text" id="pr-no" placeholder="e.g. PR-2610-0007 / ACC-2610-0001" style="flex:1" />
                             <button type="button" class="btn" style="white-space:nowrap" onclick="prLoadIntoQuotation('TMS')">Load approved prices</button></span></label>
                     </div>
                     <div class="form-row cols-1">
@@ -3794,8 +3795,8 @@ curY += 10;
           </div>
           <div class="form-grid cols-1">
             <div class="field">
-              <span class="field-label">Price request no. <small style="font-weight:400;opacity:.7">(optional — loads the approved prices)</small></span>
-              <div style="display:flex;gap:8px"><input type="text" id="pr-no" placeholder="e.g. PR-2610-0007" style="flex:1" />
+              <span class="field-label">Price request / approval no. <small style="font-weight:400;opacity:.7">(optional — PR, Project, Tooled-up or Accessories no.; loads the approved prices)</small></span>
+              <div style="display:flex;gap:8px"><input type="text" id="pr-no" placeholder="e.g. PR-2610-0007 / ACC-2610-0001" style="flex:1" />
               <button type="button" class="btn btn-outline-teal" style="white-space:nowrap" onclick="prLoadIntoQuotation('APJ')">Load approved prices</button></div>
             </div>
           </div>

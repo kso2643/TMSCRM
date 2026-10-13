@@ -76,7 +76,7 @@
     "Upload": [["path",{"d":"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"}],["polyline",{"points":"17 8 12 3 7 8"}],["line",{"x1":"12","x2":"12","y1":"3","y2":"15"}]]
   };
   // Sidebar label -> icon. Keep in sync with the React layout chunk.
-  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee","Chat": "MessageSquare","Vendors": "Truck","CEO Desk": "Briefcase","Product catalogue": "BookOpen","Accounts": "Calculator"};
+  var ICON_FOR = {"Dashboard": "LayoutDashboard","Customers": "Building2","Customer map": "MapPin","Meetings & follow-ups": "Handshake","Products": "Package","Quotations": "FileText","Orders": "ClipboardList","Trials": "FlaskConical","Stock": "Boxes","Analytics": "TrendingUp","Attendance": "Clock","Fuel expense": "Fuel","Appointments": "CalendarCheck","Tasks": "ListChecks","Leave": "CalendarOff","Live tracking": "Radio","Categories": "Tags","Users": "Users","HR": "Contact","Payroll": "Wallet","Approvals": "ShieldCheck","Reports": "BarChart3","Activity logs": "Activity","Location history": "Route","CPR & weekly review": "Target","Price requests": "BadgeIndianRupee","Chat": "MessageSquare","Vendors": "Truck","CEO Desk": "Briefcase","Projects": "Building2","Tooled-up": "Boxes","Machine accessories": "ListChecks","Product catalogue": "BookOpen","Accounts": "Calculator"};
 
   // Same list the React layout renders, plus the standalone pages. Roles
   // on the Admin-section items mirror what the API actually enforces —
@@ -92,6 +92,9 @@
     { label: 'Orders',                href: '/orders/',         icon: 'clipboard', section: 'Sales' },
     { label: 'Trials',                href: '/trials/',         icon: 'flask',     section: 'Sales' },
     { label: 'Price requests',        href: '/price-requests/', icon: 'tag',       section: 'Sales' },
+    { label: 'Projects',              href: '/projects/',       icon: 'layers',    section: 'Sales' },
+    { label: 'Tooled-up',             href: '/tooled-up/',      icon: 'package',   section: 'Sales' },
+    { label: 'Machine accessories',   href: '/machine-accessories/', icon: 'clipboard', section: 'Sales' },
     { label: 'CPR & weekly review',   href: '/cpr/',            icon: 'target',    section: 'Sales' },
     { label: 'Stock',                 href: '/stock/',          icon: 'layers',    section: 'Sales' },
     { label: 'Analytics',             href: '/analytics/',      icon: 'chart',     section: 'Reports' },

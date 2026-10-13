@@ -1,3 +1,42 @@
+# Update — 13 Oct (c): Projects, Tooled-up and Machine accessories pages
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:**
+  - `api/controllers/ToolingController.php`
+  - `crm/tooling-app.js`
+  - the folders `crm/projects/`, `crm/tooled-up/` and `crm/machine-accessories/`
+  - a new React sidebar file `layout-d84a1f6e2c9b7053.js`
+- **Database:** the new tables are created automatically on first use: `ToolingRequest`, `ToolingMachine`, `ToolingItem`, `ToolingPriceLog` and `ToolingChecklist`.
+
+Three new pages under **Sales**: **Projects**, **Tooled-up** and **Machine accessories**. They work the same way:
+
+1. **Engineer creates a request:**
+   - Search and pick the **customer**, add a title and notes.
+   - Add one or more **machines**: VMC, HMC, CNC lathe, VTL, or **Other** (a box opens to type the machine, e.g. Turn-mill). Enter the make / model and the number of machines.
+   - Each machine shows its **checklist** by category. **Tick** what the customer needs and enter the **quantity**:
+     - VMC and HMC use the VMC accessories checklist (88 items: tool holders, collets, cutting tools, measuring, work holding, storage, hand tools, maintenance, inspection, consumables).
+     - CNC and VTL use a turning list.
+   - **+ Add component** adds anything that is not on the list by hand.
+   - **Save draft**, or **Send for approval**.
+2. **Admin approves:**
+   - Enters the **item code, brand / spec, price and discount** for each line (the quantity can be corrected too).
+   - **Approve & give number** generates the number:
+     - **PRJ-yymm-nnnn** for projects
+     - **TUP-yymm-nnnn** for tooled-up
+     - **ACC-yymm-nnnn** for accessories
+   - **Reject** (with a note) sends it back to the engineer to fix and re-send.
+3. **Quotation:**
+   - On the Quotations page (TMS or APJ), enter that number in the **"Price request / approval no."** box and press **Load approved prices**.
+   - Every item comes in with its item code, description (item + machine), quantity, price and discount.
+4. **Negotiation (after approval):**
+   - **🤝 Negotiate prices / discounts.** An admin's change applies at once. An engineer's change is sent to the admin as a proposal (status *Negotiation*) and the admin approves or turns it down.
+   - A note is required for every change. The **Price & negotiation history** shows old → new price and discount, who changed it and why.
+   - The quotation always uses the latest approved prices.
+5. **Lists and checklists:**
+   - Status tiles: Draft / Waiting for approval / Approved / Negotiation / Rejected.
+   - Admins have an **engineer filter**; engineers see only their own requests.
+   - Admins can **upload their own checklist** (Excel: Category, Item) per machine type under **☑ Checklists**, download the current list, or go back to the built-in one.
+
 # Update — 13 Oct (b): turning & milling in the savings report, PO brand + customer per item, CEO Desk, Users page
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

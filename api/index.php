@@ -90,6 +90,7 @@ require __DIR__ . '/controllers/SupplierQuoteController.php';
 require __DIR__ . '/controllers/CatalogController.php';
 require __DIR__ . '/controllers/OptionController.php';
 require __DIR__ . '/controllers/QuoteFollowController.php';
+require __DIR__ . '/controllers/ToolingController.php';   // projects / tooled-up / machine accessories
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
@@ -493,6 +494,23 @@ try {
         match (true) {
             $method === 'GET'  && $c1 === '' => $ctrl->index(),
             $method === 'POST' && $c1 === '' => $ctrl->create(),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'tooling') {
+        $ctrl = new ToolingController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                         => $ctrl->index(),
+            $method === 'GET'    && $c1 === 'checklist'                => $ctrl->checklist(),
+            $method === 'POST'   && $c1 === 'checklist'                => $ctrl->uploadChecklist(),
+            $method === 'GET'    && $c1 === 'by-no' && $c2 !== ''      => $ctrl->byNumber($c2),
+            $method === 'POST'   && $c1 === ''                         => $ctrl->create(),
+            $method === 'GET'    && $c1 !== '' && $c2 === ''           => $ctrl->show($c1),
+            $method === 'PUT'    && $c1 !== '' && $c2 === ''           => $ctrl->update($c1),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''           => $ctrl->delete($c1),
+            $method === 'POST'   && $c2 === 'submit'                   => $ctrl->submit($c1),
+            $method === 'PATCH'  && $c2 === 'prices'                   => $ctrl->prices($c1),
+            $method === 'POST'   && $c2 === 'negotiate'                => $ctrl->negotiate($c1),
             default => sendError('Route not found', 404),
         };
     }
