@@ -643,6 +643,52 @@ class StockController
         $this->checkStatus();
     }
 
+    // POST /api/products/stock/count — weekly stock check: the counted Nos for many items at one place
+    // { locType, state, counts: [{ id, quantity }], note } → each changed quantity is set directly, and the
+    // check is recorded (who, when, how many counted / changed). Admin / Manager.
+    public function count(): void
+    {
+        $auth=authenticate(); require_manager($auth);
+        $b=request_body();
+        [$lt,$ls]=StockLedger::location($b['locType']??'HAND',$b['state']??'');
+        $counts=(array)($b['counts']??[]);
+        if(!$counts) sendError('Enter the counted quantity for at least one item.',400);
+        if(count($counts)>5000) sendError('Too many rows at once.',400);
+        $ids=array_values(array_filter(array_map(fn($c)=>(string)($c['id']??''),$counts)));
+        $lv=StockLedger::levels($ids);
+        $note=mb_substr(trim((string)($b['note']??'')),0,200);
+        $counted=0;$changed=0;$diffs=[];
+        foreach($counts as $c){
+            $id=(string)($c['id']??''); if($id==='') continue;
+            if(!isset($c['quantity'])||$c['quantity']===''||!is_numeric($c['quantity'])) continue;
+            $q=(float)$c['quantity'];
+            if($q<0) sendError('Counted quantities cannot be negative.',400);
+            $s=db()->prepare('SELECT itemCode FROM `Stock` WHERE id=?');$s->execute([$id]);$code=$s->fetchColumn();
+            if($code===false) continue;
+            $counted++;
+            $now=$this->levelAt($lv[$id]??null,$lt,$ls);
+            if(abs($now-$q)<0.0001) continue;
+            StockLedger::setLevel($id,$lt,$ls,$q,'COUNT',$auth['id'],null,'Stock check'.($note!==''?': '.$note:''));
+            $changed++; $diffs[]=['itemCode'=>$code,'was'=>$now,'counted'=>$q];
+        }
+        if(!$counted) sendError('Enter the counted quantity for at least one item.',400);
+        $where=StockLedger::label($lt,$ls);
+        db()->prepare('INSERT INTO `StockCheck` (id,checkDate,userId,note,createdAt) VALUES (?,?,?,?,?)')
+            ->execute([gen_id(),date('Y-m-d'),$auth['id'],mb_substr("$where: $counted counted, $changed changed".($note!==''?" — $note":''),0,255),now_sql()]);
+        log_activity($auth['id'],'STOCK_COUNTED','Stock',null,['location'=>$where,'counted'=>$counted,'changed'=>$changed]);
+        sendSuccess(['counted'=>$counted,'changed'=>$changed,'diffs'=>$diffs,'location'=>$where],
+            "Stock check saved — $counted item(s) counted at $where, $changed quantity(ies) changed");
+    }
+
+    /** Quantity of one item at a place, from StockLedger::levels() output. */
+    private function levelAt($levels,string $lt,string $ls): float
+    {
+        if(!$levels) return 0.0;
+        if($lt==='STATE') return (float)($levels['states'][$ls]??0);
+        if($lt==='LOCAL') return (float)($levels['local'][$ls]??0);
+        return (float)($levels[$lt]??0);
+    }
+
     // POST /api/products/stock/entry — add stock by hand: { itemCode, itemName?, brand?, locType, state, quantity, mode: add|set, note }
     // Creates the item when the code is new.
     public function entry(): void
@@ -666,6 +712,7 @@ class StockController
         } elseif(trim((string)($b['brand']??''))!==''){
             db()->prepare('UPDATE `Stock` SET brand=?, isActive=1 WHERE id=?')->execute([mb_substr(trim($b['brand']),0,100),$id]);
         }
+        if($created) product_register($code,(string)$b['itemName'],['brand'=>$b['brand']??null,'price'=>$b['netPrice']??null]);   // new item → Products too
         $q=(float)$b['quantity']; $note=trim((string)($b['note']??''))?:'Added by hand';
         if(($b['mode']??'add')==='set') StockLedger::setLevel($id,$lt,$ls,$q,'ADJUST',$auth['id'],null,$note);
         else StockLedger::addLevel($id,$lt,$ls,$q,'ADJUST',$auth['id'],null,$note);
@@ -685,6 +732,7 @@ class StockController
         $id=gen_id();
         db()->prepare('INSERT INTO `Stock` (id,itemCode,itemName,itemType,productMaster,productFamily,productSubfamily,itemGroup,categoryCode,categoryId,brand,availableStock,reservedStock,minimumStock,netPrice,xceedLp,edd,rad,location,isActive,lastUpdated,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,1,?,?)')
            ->execute([$id,$data['itemCode'],$data['itemName'],$data['itemType'],$data['productMaster'],$data['productFamily'],$data['productSubfamily'],$data['itemGroup'],$data['categoryCode'],$data['categoryId'],$data['brand'],$data['minimumStock']??0,$data['netPrice']??0,$data['xceedLp']??0,$data['edd'],$data['rad'],$data['location'],now_sql(),now_sql()]);
+        product_register($data['itemCode'],(string)$data['itemName'],['brand'=>$data['brand']??null,'price'=>$data['netPrice']??null]);   // also in Products
         // Opening quantity goes to the chosen place (Hand stock by default).
         if(!empty($data['availableStock'])){
             [$lt,$ls]=StockLedger::location($b['locType']??'HAND',$b['state']??'');

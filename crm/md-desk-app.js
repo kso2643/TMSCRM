@@ -497,7 +497,7 @@
       };
       dlg.appendChild(ta);
       var acts = el('div', { class: 'md-acts' });
-      if (i.fromId === state.me || state.role === 'SUPER_ADMIN') {
+      if (state.role === 'SUPER_ADMIN') {   // only the Super Admin deletes CEO Desk items
         acts.appendChild(el('button', { class: 'md-btn red', type: 'button', text: 'Delete', onclick: function () {
           if (!confirm('Delete “' + i.title + '”?')) return;
           api('DELETE', '/md-desk/' + encodeURIComponent(i.id)).then(function () { toast('Deleted'); close(); }).catch(function (e) { toast(e.message, 'err'); });

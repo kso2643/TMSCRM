@@ -66,6 +66,10 @@
   };
   var STATUS = { DRAFT: ['Draft', '#64748b'], SUBMITTED: ['Waiting for approval', '#d97706'], APPROVED: ['Approved', '#16a34a'], NEGOTIATION: ['Negotiation', '#7c3aed'], REJECTED: ['Rejected', '#dc2626'] };
   var MACHINES = [['VMC', 'VMC'], ['HMC', 'HMC'], ['CNC', 'CNC lathe'], ['VTL', 'VTL'], ['OTHER', 'Other (type it)']];
+  var TOOL_TYPES = ['Face mill cutter', 'Shoulder / side mill cutter', 'High-feed cutter', 'End mill', 'Drill', 'Tap', 'Reamer', 'Boring bar / head', 'Insert', 'Holder', 'Other'];
+  var SPEC_PH = { 'End mill': 'Ø10, 4 flutes, LOC 22, OAL 72, AlTiN', 'Drill': 'Ø8.5, 5×D, coolant through, 140°', 'Tap': 'M10×1.5, spiral flute, HSS-E / 6H', 'Reamer': 'Ø12 H7, 6 flutes',
+    'Face mill cutter': 'Ø63, 45° entry, insert SEKT1204', 'Shoulder / side mill cutter': 'Ø50, 90°, insert APMT1604', 'High-feed cutter': 'Ø52, insert LOMU', 'Boring bar / head': 'Ø20–28 range, BT40', 'Insert': 'CNMG120408, grade, chip breaker', 'Holder': 'BT40 ER32 70L' };
+  function isCutter(t) { return /cutter/i.test(t || ''); }
   var LOGK = { ADMIN: 'Price changed', NEGOTIATED: 'Negotiated', PROPOSED: 'Proposed by engineer', APPROVED: 'Approved', NEGO_OK: 'Negotiation approved', REJECTED: 'Rejected' };
 
   function css() {
@@ -106,6 +110,11 @@
       '.tl-log{display:flex;flex-direction:column;gap:.35rem;max-height:320px;overflow:auto}.tl-log div{font-size:.82rem;border-left:3px solid var(--c,#94a3b8);padding:.2rem .5rem;background:#f8fafc;border-radius:0 .4rem .4rem 0}.dark .tl-log>div{background:#0f172a}',
       '.tl-modal{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:2147483400;display:flex;align-items:flex-start;justify-content:center;padding:6vh 1rem;overflow:auto}',
       '.tl-dlg{background:#fff;border-radius:1rem;max-width:560px;width:100%;padding:1.2rem}.dark .tl-dlg{background:#1e293b}.tl-dlg h3{margin:0 0 .8rem}',
+      '.tl-tool{border:1px solid #e2e8f0;border-radius:.6rem;padding:.55rem;margin-top:.45rem;background:#fff}.dark .tl-tool{background:#1e293b;border-color:#334155}',
+      '.tl-tg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.4rem;margin-bottom:.35rem}@media (max-width:1100px){.tl-tg{grid-template-columns:repeat(2,minmax(0,1fr))}}',
+      '.tl-tg .tl-f input,.tl-tg .tl-f select{padding:.32rem .45rem;font-size:.82rem}',
+      '.tl-files{border:1px dashed #cbd5e1;border-radius:.6rem;padding:.3rem .7rem .6rem;margin:.6rem 0}.tl-file{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.25rem 0;font-size:.85rem}',
+      '.tl-file a{color:#1d4ed8;font-weight:600;text-decoration:none}.tl-file a:hover{text-decoration:underline}',
       '.tl-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;transition:opacity .25s,transform .25s;max-width:90vw}',
       '.tl-toast.in{opacity:1;transform:translate(-50%,0)}.tl-toast.err{background:#b91c1c}'
     ].join('\n');
@@ -187,12 +196,15 @@
       id: q ? q.id : null, customerId: q ? q.customerId : null, customerName: q ? q.customerName : '', title: q ? q.title || '' : '', notes: q ? q.notes || '' : '',
       machines: q ? q.machines.map(fromServer) : [blankMachine()]
     };
-    function blankMachine() { return { machineType: 'VMC', machineOther: '', make: '', count: 1, ticks: {}, custom: [] }; }
+    function blankMachine() { return { machineType: 'VMC', machineOther: '', make: '', count: 1, ticks: {}, custom: [], tools: [] }; }
+    F.pending = [];   // files picked before the first save — uploaded right after it
     function fromServer(m) {
-      var list = listFor(m.machineType), known = {}, mm = { machineType: m.machineType, machineOther: m.machineOther || '', make: m.make || '', count: m.count || 1, ticks: {}, custom: [] };
+      var list = listFor(m.machineType), known = {}, mm = { machineType: m.machineType, machineOther: m.machineOther || '', make: m.make || '', count: m.count || 1, ticks: {}, custom: [], tools: [] };
       Object.keys(list).forEach(function (c) { list[c].forEach(function (i) { known[c + '||' + i] = 1; }); });
       m.items.forEach(function (it) {
         var k = it.category + '||' + it.item;
+        if (it.toolType || it.operation || it.rpm || it.vc || it.feed) { mm.tools.push({ id: it.id, operation: it.operation || '', toolType: it.toolType || '', item: it.item, itemCode: it.itemCode || '', brand: it.brand || '', qty: qn(it.quantity),
+          price: it.price != null ? qn(it.price) : '', rpm: it.rpm || '', feed: it.feed || '', vc: it.vc || '', pockets: it.pockets || '', holder: it.holder || '', toolSpec: it.toolSpec || '' }); return; }
         if (!it.custom && known[k]) mm.ticks[k] = { qty: qn(it.quantity), id: it.id };
         else mm.custom.push({ category: it.category || '', item: it.item, qty: qn(it.quantity), id: it.id });
       });
@@ -231,6 +243,7 @@
         el('div', { class: 'tl-f w2' }, [el('label', { text: 'Title (optional)' }), title]),
         el('div', { class: 'tl-f w' }, [el('label', { text: 'Notes' }), notes])
       ]));
+      card.appendChild(filesBox(q && F.id ? q : null, true, F, function (nq) { q = nq; draw(); }));
       card.appendChild(el('h2', { style: 'margin:1rem 0 .5rem', text: 'Machines' }));
       F.machines.forEach(function (m, mi) { card.appendChild(machineCard(m, mi)); });
       card.appendChild(el('button', { class: 'tl-btn', type: 'button', id: 'tl-add-machine', text: '+ Add another machine', onclick: function () { F.machines.push(blankMachine()); draw(); } }));
@@ -301,7 +314,43 @@
       });
       own.appendChild(el('button', { class: 'tl-btn sm', type: 'button', 'data-add-comp': String(mi), style: 'margin-top:.4rem', text: '+ Add component', onclick: function () { m.custom.push({ category: '', item: '', qty: '1' }); draw(); var r = box.querySelectorAll('[data-ck=item]'); if (r.length) r[r.length - 1].focus(); } }));
       box.appendChild(own);
+      if (S.type === 'PROJECT' || m.tools.length) box.appendChild(toolSection(m, mi));
       return box;
+    }
+    /* Projects: the tools selected for each operation, with cutting data and specification */
+    function toolSection(m, mi) {
+      var sec = el('div', { class: 'tl-tools', 'data-tools': String(mi) }, [el('div', { style: 'font-weight:700;font-size:.85rem;margin-top:.8rem', text: '🔧 Tool selection (operation-wise)' })]);
+      m.tools.forEach(function (t, ti) {
+        function f(key, label, attrs) {
+          var i = el('input', Object.assign({ value: t[key] || '', 'data-tk': key }, attrs || {}));
+          i.oninput = function () { t[key] = i.value; };
+          return el('div', { class: 'tl-f' }, [el('label', { text: label }), i]);
+        }
+        var type = el('select', { 'data-tk': 'toolType' }, [el('option', { value: '', text: 'Choose…' })].concat(TOOL_TYPES.map(function (x) { return el('option', { value: x, text: x }); })));
+        type.value = t.toolType;
+        type.onchange = function () { t.toolType = type.value; draw(); };
+        var card = el('div', { class: 'tl-tool', 'data-tool': String(ti) }, [
+          el('div', { class: 'tl-tg' }, [
+            f('operation', 'Operation', { placeholder: 'e.g. Face milling, Ø8.5 drilling, M10 tapping' }),
+            el('div', { class: 'tl-f' }, [el('label', { text: 'Tool type' }), type]),
+            f('item', 'Tool selected *', { placeholder: 'e.g. Face mill Ø63 45°' }),
+            f('itemCode', 'Item code', { placeholder: 'e.g. SE445-63' }),
+            f('brand', 'Brand', { placeholder: 'e.g. Taegutec' }),
+            f('qty', 'Qty', { type: 'number', min: '0', step: 'any' }),
+            f('price', 'Price ₹', { type: 'number', min: '0', step: '0.01' })
+          ]),
+          el('div', { class: 'tl-tg' }, [
+            f('rpm', 'RPM', { inputmode: 'decimal' }), f('feed', 'Feed (mm/rev, fz or Vf)', { placeholder: 'e.g. 0.15 fz' }), f('vc', 'Cutting speed Vc (m/min)', { inputmode: 'decimal' }),
+            isCutter(t.toolType) ? f('pockets', 'No. of pockets', { inputmode: 'numeric', placeholder: 'e.g. 5' }) : null,
+            f('holder', 'Holder', { placeholder: 'e.g. BT40 FMA 22×60' }),
+            el('div', { class: 'tl-f w2' }, [el('label', { text: 'Specification' }), (function () { var i = el('input', { value: t.toolSpec || '', 'data-tk': 'toolSpec', placeholder: SPEC_PH[t.toolType] || 'Diameter, length, flutes, coating, grade…' }); i.oninput = function () { t.toolSpec = i.value; }; return i; })()]),
+            el('div', { style: 'align-self:end' }, [el('button', { class: 'tl-btn sm red', type: 'button', text: '✕ Remove', onclick: function () { m.tools.splice(ti, 1); draw(); } })])
+          ])
+        ]);
+        sec.appendChild(card);
+      });
+      sec.appendChild(el('button', { class: 'tl-btn sm', type: 'button', 'data-add-tool': String(mi), style: 'margin-top:.4rem', text: '+ Add tool', onclick: function () { m.tools.push({ toolType: '', qty: '1' }); draw(); } }));
+      return sec;
     }
     function body(submit) {
       return {
@@ -310,6 +359,11 @@
           var items = [];
           Object.keys(m.ticks).forEach(function (k) { var p = k.split('||'); items.push({ category: p[0], item: p[1], quantity: m.ticks[k].qty, id: m.ticks[k].id || '' }); });
           m.custom.forEach(function (c) { if ((c.item || '').trim()) items.push({ category: c.category || 'Other', item: c.item, quantity: c.qty, custom: true, id: c.id || '' }); });
+          (m.tools || []).forEach(function (t) {
+            if (!(t.item || '').trim()) return;
+            items.push({ category: t.toolType || 'Tool', item: t.item, quantity: t.qty || 1, custom: true, id: t.id || '', operation: t.operation, toolType: t.toolType || 'Other', itemCode: t.itemCode, brand: t.brand,
+              price: t.price === '' ? undefined : t.price, rpm: t.rpm, feed: t.feed, vc: t.vc, pockets: isCutter(t.toolType) ? t.pockets : '', holder: t.holder, toolSpec: t.toolSpec });
+          });
           return { machineType: m.machineType, machineOther: m.machineOther, make: m.make, count: m.count, items: items };
         })
       };
@@ -318,11 +372,64 @@
       if (!F.customerName) { toast('Pick the customer.', 'err'); document.getElementById('tl-customer').focus(); return; }
       btn.disabled = true;
       (F.id ? api('PUT', '/tooling/' + F.id, body(submit)) : api('POST', '/tooling', body(submit))).then(function (j) {
+        var rid = j.data.request.id, files = F.pending.splice(0);
+        return files.reduce(function (p, x) { return p.then(function (last) { var fd = new FormData(); fd.append('file', x.file); fd.append('kind', x.kind); return api('POST', '/tooling/' + rid + '/files', fd).catch(function (e) { toast(x.file.name + ': ' + e.message, 'err'); return last; }); }); }, Promise.resolve(j))
+          .then(function (last) { return files.length ? api('GET', '/tooling/' + rid).then(function (k) { return { message: j.message + (files.length ? ' · ' + files.length + ' file(s) attached' : ''), data: { request: k.data.request } }; }) : j; });
+      }).then(function (j) {
         toast(j.message); F.id = j.data.request.id;
         if (submit) view(j.data.request); else { q = j.data.request; F.machines = q.machines.map(fromServer); draw(); try { history.replaceState(null, '', '#' + F.id); } catch (e) {} }
       }).catch(function (e) { toast(e.message, 'err'); btn.disabled = false; });
     }
     draw();
+  }
+
+  // ── project files: 3D (STEP / IGES), 2D drawings (DWG / DXF / PDF), PDFs, images, Office, ZIP ──
+  var FILE_KIND = { '3D': ['3D model', '#7c3aed'], '2D': ['2D drawing', '#2563eb'], PDF: ['PDF', '#dc2626'], IMAGE: ['Image', '#0891b2'], DOC: ['Document', '#b45309'], ZIP: ['ZIP', '#475569'], OTHER: ['File', '#475569'] };
+  function fileSize(n) { n = +n || 0; return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+  function openFile(q, f, download) {
+    fetch(API + '/api/tooling/' + q.id + '/files/' + f.id + (download ? '?download=1' : ''), { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
+      if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Could not open the file'); });
+      return r.blob().then(function (b) {
+        var u = URL.createObjectURL(b);
+        if (!download && /^(application\/pdf|image\/)/.test(b.type)) { window.open(u, '_blank'); setTimeout(function () { URL.revokeObjectURL(u); }, 60000); return; }
+        var a = el('a', { href: u, download: f.fileName }); document.body.appendChild(a); a.click(); a.remove();
+      });
+    }).catch(function (e) { toast(e.message, 'err'); });
+  }
+  function filesBox(q, canEdit, F, onChange) {
+    var box = el('div', { class: 'tl-files', id: 'tl-files' }, [el('div', { style: 'font-weight:700;font-size:.88rem;margin:.6rem 0 .35rem', text: '📎 Project files — 3D (STEP), 2D drawings, PDF' })]);
+    var files = (q && q.files) || [];
+    files.forEach(function (f) {
+      var K = FILE_KIND[f.kind] || FILE_KIND.OTHER;
+      box.appendChild(el('div', { class: 'tl-file', 'data-file': f.fileName }, [
+        el('span', { class: 'tl-badge', style: '--c:' + K[1], text: K[0] }),
+        el('a', { href: '#', text: f.fileName, onclick: function (e) { e.preventDefault(); openFile(q, f, false); } }),
+        el('span', { class: 'tl-sub', text: fileSize(f.size) + ' · ' + (f.uploadedByName || '') + ' · ' + when(f.createdAt) }),
+        el('button', { class: 'tl-btn sm', type: 'button', text: '⬇', title: 'Download', onclick: function () { openFile(q, f, true); } }),
+        canEdit ? el('button', { class: 'tl-btn sm red', type: 'button', text: '✕', title: 'Remove', onclick: function () {
+          if (!confirm('Remove ' + f.fileName + '?')) return;
+          api('DELETE', '/tooling/' + q.id + '/files/' + f.id).then(function (j) { toast(j.message); onChange(j.data.request); }).catch(function (e) { toast(e.message, 'err'); });
+        } }) : null
+      ]));
+    });
+    (F && F.pending || []).forEach(function (x, i) {
+      box.appendChild(el('div', { class: 'tl-file' }, [el('span', { class: 'tl-badge', style: '--c:#64748b', text: 'to upload' }), el('span', { text: x.file.name }), el('span', { class: 'tl-sub', text: fileSize(x.file.size) }),
+        el('button', { class: 'tl-btn sm red', type: 'button', text: '✕', onclick: function () { F.pending.splice(i, 1); onChange(q); } })]));
+    });
+    if (!files.length && !(F && F.pending.length)) box.appendChild(el('div', { class: 'tl-sub', text: 'No files yet.' }));
+    if (canEdit) {
+      var kind = el('select', { id: 'tl-file-kind' }, [['', 'Type: from the file'], ['3D', '3D model (STEP / IGES)'], ['2D', '2D drawing'], ['PDF', 'PDF'], ['DOC', 'Document'], ['OTHER', 'Other']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+      var inp = el('input', { type: 'file', id: 'tl-file-input', multiple: true, accept: '.step,.stp,.igs,.iges,.x_t,.sldprt,.stl,.prt,.dwg,.dxf,.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.docx,.pptx,.zip' });
+      inp.onchange = function () {
+        var list = Array.prototype.slice.call(inp.files);
+        if (!list.length) return;
+        if (F && !F.id) { list.forEach(function (fl) { F.pending.push({ file: fl, kind: kind.value }); }); onChange(q); return; }   // uploaded after the first save
+        list.reduce(function (p, fl) { return p.then(function (last) { var fd = new FormData(); fd.append('file', fl); fd.append('kind', kind.value); return api('POST', '/tooling/' + q.id + '/files', fd).then(function (j) { return j; }).catch(function (e) { toast(fl.name + ': ' + e.message, 'err'); return last; }); }); }, Promise.resolve(null))
+          .then(function (j) { if (j) { toast(list.length + ' file(s) uploaded'); onChange(j.data.request); } });
+      };
+      box.appendChild(el('div', { style: 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.4rem' }, [kind, inp, el('span', { class: 'tl-sub', text: 'STEP, IGES, DWG, DXF, PDF, images, Excel / Word / PPT, ZIP — up to 50 MB each' })]));
+    }
+    return box;
   }
 
   // ── view: prices (admin), approval, negotiation, history ─────────────
@@ -347,6 +454,7 @@
         el('button', { class: 'tl-btn sm', type: 'button', text: '← Back to list', onclick: showList })
       ]));
       if (q.notes) card.appendChild(el('div', { style: 'margin:.6rem 0;white-space:pre-wrap;font-size:.88rem', text: q.notes }));
+      card.appendChild(filesBox(q, mine || S.isAdmin, null, function (nq) { q = nq; draw(); }));
       if (q.adminNote) card.appendChild(el('div', { style: 'margin:.4rem 0;font-size:.85rem;color:#475569', text: 'Admin note: ' + q.adminNote }));
       if (q.requestNo) card.appendChild(el('div', { class: 'tl-sub', style: 'margin:.4rem 0', html: null }, ['To quote: open ', el('a', { href: '/quotations/', text: 'Quotations' }), ', enter ', el('b', { text: q.requestNo }), ' in the "Price request / approval no." box and press "Load approved prices" — every item comes in with its price and discount.']));
       if (q.status === 'NEGOTIATION') card.appendChild(el('div', { class: 'tl-sub', style: 'color:#7c3aed;font-weight:600;margin:.3rem 0', text: q.proposals + ' new price(s) proposed by the engineer — ' + (S.isAdmin ? 'check them below and approve or turn down.' : 'waiting for the admin.') }));
@@ -354,7 +462,9 @@
       q.machines.forEach(function (m) {
         card.appendChild(el('h2', { style: 'margin:1rem 0 .4rem;font-size:.95rem', text: '🛠 ' + m.label }));
         var rows = m.items.map(function (it) {
-          var tds = [el('td', { class: 'tl-sub', text: it.category || '' }), el('td', {}, [el('b', { text: it.item }), it.custom ? el('span', { class: 'tl-sub', text: ' (added)' }) : null])];
+          var tdet = [it.operation ? 'Op: ' + it.operation : null, it.brand, it.rpm ? 'RPM ' + it.rpm : null, it.feed ? 'Feed ' + it.feed : null, it.vc ? 'Vc ' + it.vc : null,
+            it.pockets ? 'Z ' + it.pockets : null, it.holder ? 'Holder ' + it.holder : null, it.toolSpec].filter(Boolean).join(' · ');
+          var tds = [el('td', { class: 'tl-sub', text: it.category || '' }), el('td', {}, [el('b', { text: it.item }), it.custom && !it.toolType ? el('span', { class: 'tl-sub', text: ' (added)' }) : null, tdet ? el('div', { class: 'tl-sub', 'data-tooldet': '', text: tdet }) : null])];
           var prop = (it.proposedPrice != null || it.proposedDiscount != null) ? el('span', { class: 'tl-prop', text: 'proposed: ' + money(it.proposedPrice) + (it.proposedDiscount != null ? ' −' + qn(it.proposedDiscount) + '%' : '') }) : null;
           if (pricing) {
             tds.push(el('td', {}, [el('input', { class: 'n', 'data-p': 'quantity', 'data-id': it.id, type: 'number', min: '0', step: 'any', value: qn(it.quantity) })]));

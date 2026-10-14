@@ -283,6 +283,62 @@
     };
   }
 
+  // ── weekly stock check: type the counted Nos for every item at one place ──
+  function countDialog() {
+    var loc = locPicker('HAND');
+    var q = el('input', { type: 'search', id: 'st-cnt-search', placeholder: 'Filter by code, name or brand…' });
+    var onlyDiff = el('input', { type: 'checkbox', id: 'st-cnt-diff' });
+    var note = el('input', { id: 'st-cnt-note', placeholder: 'Note (optional), e.g. weekly count — rack B' });
+    var box = el('div', { id: 'st-cnt-list', style: 'max-height:52vh;overflow:auto;border:1px solid #e2e8f0;border-radius:.6rem;margin-top:.6rem' }, [el('p', { class: 'hint', style: 'padding:1rem', text: 'Loading all items…' })]);
+    var sum = el('p', { class: 'hint', id: 'st-cnt-sum', style: 'margin:.5rem 0 0' });
+    var msg = el('div');
+    var all = [], counted = {};
+    var save = el('button', { class: 'st-btn pri', id: 'st-cnt-save', text: 'Save stock check' });
+    var d = dialog('Stock check — count in Nos', 'Pick the place, then type the quantity you counted for each item. Only the rows you fill are saved; the stock is set to exactly the counted Nos and the check is recorded.',
+      el('div', {}, [el('div', { class: 'st-grid' }, loc.nodes.concat([field('Note', note, false, true)])),
+        el('div', { style: 'display:flex;gap:.7rem;align-items:center;margin-top:.6rem;flex-wrap:wrap' }, [q, el('label', { style: 'font-size:.82rem;display:flex;gap:.3rem;align-items:center' }, [onlyDiff, 'Only rows that differ'])]),
+        box, sum, msg]),
+      [el('button', { class: 'st-btn', text: 'Close', onclick: function () { d.close(); } }), save], true);
+    function where() { return loc.get(); }
+    function draw() {
+      var l = where(), f = q.value.trim().toLowerCase(), nDiff = 0, nFill = 0;
+      var tb = el('tbody');
+      all.forEach(function (it) {
+        var now = qtyAt(it, l) || 0, c = counted[it.id], filled = c !== undefined && c !== '';
+        var diff = filled ? Number(c) - now : 0;
+        if (filled) nFill++; if (filled && diff) nDiff++;
+        if (f && (it.itemCode + ' ' + it.itemName + ' ' + (it.brand || '')).toLowerCase().indexOf(f) === -1) return;
+        if (onlyDiff.checked && !(filled && diff)) return;
+        var inp = el('input', { type: 'number', min: '0', step: 'any', 'data-count': it.itemCode, value: filled ? c : '', placeholder: qty(now), style: 'width:90px;border:1px solid #cbd5e1;border-radius:.4rem;padding:.25rem .4rem;text-align:right;background:#fff;color:inherit' });
+        var dTd = el('td', { style: 'text-align:right;font-weight:700;' + (diff > 0 ? 'color:#15803d' : diff < 0 ? 'color:#b91c1c' : 'color:#94a3b8'), text: filled ? (diff > 0 ? '+' : '') + qty(diff) : '' });
+        inp.oninput = function () { counted[it.id] = inp.value; var dd = inp.value === '' ? 0 : Number(inp.value) - now; dTd.textContent = inp.value === '' ? '' : (dd > 0 ? '+' : '') + qty(dd); dTd.style.color = dd > 0 ? '#15803d' : dd < 0 ? '#b91c1c' : '#94a3b8'; counts(); };
+        tb.appendChild(el('tr', {}, [el('td', {}, [el('b', { text: it.itemCode })]), el('td', { text: it.itemName }), el('td', { text: it.brand || '' }),
+          el('td', { style: 'text-align:right', text: qty(now) }), el('td', { style: 'text-align:right' }, [inp]), dTd]));
+      });
+      clear(box).appendChild(el('table', { class: 'st-t', style: 'width:100%;font-size:.82rem' }, [el('thead', {}, [el('tr', {}, ['Item code', 'Item', 'Brand', 'Now (Nos)', 'Counted (Nos)', 'Difference'].map(function (h, i) { return el('th', { style: 'position:sticky;top:0;background:#f8fafc;padding:.4rem;text-align:' + (i >= 3 ? 'right' : 'left'), text: h }); }))]), tb]));
+      counts();
+      function counts() {
+        var a = 0, b = 0; all.forEach(function (it) { var c = counted[it.id]; if (c !== undefined && c !== '') { a++; if (Number(c) !== (qtyAt(it, where()) || 0)) b++; } });
+        sum.textContent = a + ' item(s) counted · ' + b + ' will change · ' + all.length + ' items in the list';
+      }
+    }
+    q.oninput = draw; onlyDiff.onchange = draw;
+    d.box.querySelectorAll('[data-loc-type],[data-loc-state],[data-loc-city],[data-loc-city-other]').forEach(function (x) { x.addEventListener('change', draw); });
+    api('GET', '/products/stock?limit=5000').then(function (j) { all = j.data.items || []; draw(); }).catch(function (e) { clear(box).appendChild(el('div', { class: 'st-err', text: e.message })); });
+    save.onclick = function () {
+      clear(msg);
+      var l = where();
+      if (l.locType === 'STATE' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Choose the state.' }));
+      if (l.locType === 'LOCAL' && !l.state) return msg.appendChild(el('div', { class: 'st-err', text: 'Enter the city.' }));
+      var rows = Object.keys(counted).filter(function (k) { return counted[k] !== ''; }).map(function (k) { return { id: k, quantity: Number(counted[k]) }; });
+      if (!rows.length) return msg.appendChild(el('div', { class: 'st-err', text: 'Type the counted quantity for at least one item.' }));
+      save.disabled = true;
+      api('POST', '/products/stock/count', { locType: l.locType, state: l.state, counts: rows, note: note.value.trim() })
+        .then(function (j) { d.close(); toast(j.message); loadAll(); })
+        .catch(function (e) { save.disabled = false; msg.appendChild(el('div', { class: 'st-err', text: e.message })); });
+    };
+  }
+
   // ── add stock by hand (existing item or a new one) ──────────────────
   function addStockDialog() {
     var code = el('input', { id: 'st-add-code', list: 'st-codes', placeholder: 'Type or pick the item code', autocomplete: 'off' });
@@ -521,6 +577,7 @@
         el('div', { class: 'st-actions' }, [
           el('button', { class: 'st-btn', id: 'st-template', text: '⬇ Template', onclick: function () { download('/products/stock/template', 'stock-upload-template.xlsx').catch(function (e) { toast(e.message, 'err'); }); } }),
           canEdit ? el('button', { class: 'st-btn', id: 'st-add-stock', text: '+ Add stock', onclick: addStockDialog }) : null,
+          canCheck ? el('button', { class: 'st-btn', id: 'st-count', text: '🗂 Stock check (count)', onclick: countDialog }) : null,
           canEdit ? el('a', { class: 'st-btn', id: 'st-inward', href: '/vendors/#/inward', text: '⇩ Inward from supplier' }) : null,
           canEdit ? el('button', { class: 'st-btn pri', id: 'st-upload', text: '⬆ Upload stock', onclick: uploadDialog }) : null
         ])

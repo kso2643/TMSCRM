@@ -33,6 +33,7 @@
   var PR_BADGE = { PENDING: 'badge-yellow', APPROVED: 'badge-green', REJECTED: 'badge-red' };
 
   function token() { try { return localStorage.getItem('crm_token'); } catch (e) { return null; } }
+  function isSuperAdmin() { try { return (JSON.parse(localStorage.getItem('crm_user') || 'null') || {}).role === 'SUPER_ADMIN'; } catch (e) { return false; } }
   function currentUser() {
     try { return JSON.parse(localStorage.getItem('crm_user') || 'null'); } catch (e) { return null; }
   }
@@ -826,7 +827,7 @@
               actions.appendChild(up); actions.appendChild(down);
             }
             actions.appendChild(el('button', { class: 'tx-link ml-2', text: 'Edit', onclick: function () { openTaskDialog(t, load); } }));
-            actions.appendChild(el('button', {
+            if (isSuperAdmin()) actions.appendChild(el('button', {
               class: 'tx-link tx-danger ml-2', text: 'Delete',
               onclick: function () { if (confirm('Delete “' + t.title + '”?')) run('DELETE', '/tasks/' + t.id); }
             }));

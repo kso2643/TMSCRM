@@ -34,6 +34,7 @@
   function currentUser() {
     try { return JSON.parse(localStorage.getItem('crm_user') || 'null'); } catch (e) { return null; }
   }
+  function isSuperAdminUser() { var u = currentUser(); return !!u && u.role === 'SUPER_ADMIN'; }
   function isAdmin() {
     var u = currentUser();
     return !!u && ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(u.role) !== -1; // matches is_admin_tier()
@@ -56,6 +57,14 @@
     st.id = 'orders-extra-css';
     st.textContent = [
       '.ox-nowrap{white-space:nowrap}',
+      /* locked header row + customer column: the list scrolls under them both ways */
+      '.ox-scroll{max-height:calc(100vh - 230px);overflow:auto}',
+      '.ox-lock thead th{position:sticky;top:0;z-index:3;background:#f8fafc;box-shadow:inset 0 -1px 0 #e2e8f0}.dark .ox-lock thead th{background:#1e293b}',
+      '.ox-lock thead th:nth-child(-n+2),.ox-lock tr.table-row>td:nth-child(-n+2){position:sticky;background:#fff;z-index:2}.ox-lock thead th:nth-child(-n+2){z-index:4;background:#f8fafc}',
+      '.dark .ox-lock tr.table-row>td:nth-child(-n+2){background:#0f172a}.dark .ox-lock thead th:nth-child(-n+2){background:#1e293b}',
+      '.ox-lock thead th:nth-child(1),.ox-lock tr.table-row>td:nth-child(1){left:0;min-width:34px;width:34px}',
+      '.ox-lock thead th:nth-child(2),.ox-lock tr.table-row>td:nth-child(2){left:34px;box-shadow:inset -1px 0 0 #e2e8f0}',
+      '.ox-lock tr.table-row:hover>td:nth-child(-n+2){background:#f8fafc}.dark .ox-lock tr.table-row:hover>td:nth-child(-n+2){background:#1e293b}',
       '.ox-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;align-items:end}',
       '@media(min-width:768px){.ox-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}',
       '@media(min-width:1280px){.ox-filters{grid-template-columns:repeat(8,minmax(0,1fr))}}',
@@ -406,8 +415,8 @@
           if (open) tbody.appendChild(expandedRow(o, heads.length));
         });
       }
-      var scroller = el('div', { class: 'overflow-x-auto' }, [
-        el('table', { class: 'w-full text-sm' }, [
+      var scroller = el('div', { class: 'overflow-x-auto ox-scroll' }, [
+        el('table', { class: 'w-full text-sm ox-lock' }, [
           el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [
             el('tr', {}, heads.map(function (h) { return el('th', { class: 'table-head text-left px-3 py-3 ox-nowrap', text: h }); }))
           ]),
@@ -428,7 +437,7 @@
       for (var i = 0; i < panels.length; i++) panels[i].style.width = Math.max(260, w - 32) + 'px';
     }
     window.addEventListener('resize', function () {
-      var sc = body.querySelector('.overflow-x-auto');
+      var sc = body.querySelector('.ox-scroll');
       if (sc) fitExpanded(sc);
     });
 
@@ -1425,7 +1434,7 @@
           kids.push(el('button', { class: 'btn-secondary', text: 'Cancel', onclick: function () { editing = false; render(); } }));
           kids.push(el('button', { class: 'btn-primary', text: 'Save', onclick: submitEdit }));
         } else {
-          if (canEdit) kids.push(el('button', { class: 'text-red-500 text-sm font-medium mr-auto', text: 'Delete', onclick: confirmDelete }));
+          if (isSuperAdminUser()) kids.push(el('button', { class: 'text-red-500 text-sm font-medium mr-auto', text: 'Delete', onclick: confirmDelete }));
           if (canEdit) kids.push(el('button', { class: 'btn-secondary', text: 'Edit', onclick: function () { editing = true; render(); } }));
           kids.push(el('button', { class: 'btn-primary', text: 'Close', onclick: close }));
         }

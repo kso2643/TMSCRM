@@ -503,7 +503,7 @@ $tail",
     public function delete(string $id): void
     {
         $auth = authenticate();
-        require_admin($auth);
+        if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can delete tasks.', 403);
         $row = $this->fetchRow($id);
         if (!$row) sendError('Task not found.', 404);
         db()->prepare('DELETE FROM `AdminTask` WHERE id=?')->execute([$id]);

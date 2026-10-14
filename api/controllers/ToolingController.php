@@ -62,6 +62,13 @@ $t"],
   `itemCode` VARCHAR(120) NULL, `spec` VARCHAR(500) NULL, `price` DECIMAL(14,2) NULL, `discount` DECIMAL(6,2) NULL,
   `proposedPrice` DECIMAL(14,2) NULL, `proposedDiscount` DECIMAL(6,2) NULL,
   PRIMARY KEY (`id`), KEY `ToolingItem_req` (`requestId`)
+$t", 'columns' => ['operation' => 'VARCHAR(120) NULL', 'toolType' => 'VARCHAR(40) NULL', 'brand' => 'VARCHAR(100) NULL', 'rpm' => 'VARCHAR(30) NULL',
+                   'feed' => 'VARCHAR(30) NULL', 'vc' => 'VARCHAR(30) NULL', 'pockets' => 'VARCHAR(20) NULL', 'holder' => 'VARCHAR(160) NULL', 'toolSpec' => 'VARCHAR(500) NULL']],
+            'ToolingFile' => ['create' => "CREATE TABLE IF NOT EXISTS `ToolingFile` (
+  `id` VARCHAR(30) NOT NULL, `requestId` VARCHAR(30) NOT NULL, `kind` VARCHAR(10) NOT NULL DEFAULT 'OTHER', `fileName` VARCHAR(255) NOT NULL,
+  `storedName` VARCHAR(80) NOT NULL, `size` INT NOT NULL DEFAULT 0, `note` VARCHAR(255) NULL, `uploadedById` VARCHAR(30) NULL,
+  `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`), KEY `ToolingFile_req` (`requestId`)
 $t"],
             'ToolingPriceLog' => ['create' => "CREATE TABLE IF NOT EXISTS `ToolingPriceLog` (
   `id` VARCHAR(30) NOT NULL, `requestId` VARCHAR(30) NOT NULL, `itemId` VARCHAR(30) NULL, `userId` VARCHAR(30) NOT NULL, `kind` VARCHAR(12) NOT NULL,
@@ -177,6 +184,8 @@ $t"],
         unset($mm);
         $l = db()->prepare('SELECT l.*, u.name AS userName FROM `ToolingPriceLog` l LEFT JOIN `User` u ON u.id=l.userId WHERE l.requestId=? ORDER BY l.createdAt DESC, l.id DESC'); $l->execute([$r['id']]);
         $r['machines'] = $machines; $r['log'] = $l->fetchAll();
+        $f = db()->prepare('SELECT f.id, f.kind, f.fileName, f.size, f.note, f.createdAt, u.name AS uploadedByName FROM `ToolingFile` f LEFT JOIN `User` u ON u.id=f.uploadedById WHERE f.requestId=? ORDER BY f.createdAt');
+        $f->execute([$r['id']]); $r['files'] = $f->fetchAll();
         $r['total'] = round($total, 2); $r['itemCount'] = $n; $r['pricedCount'] = $priced; $r['proposals'] = $proposals;
         $r['typeLabel'] = self::TYPES[$r['type']][0] ?? $r['type']; $r['statusLabel'] = self::STATUSES[$r['status']] ?? $r['status'];
         return $r;
@@ -254,8 +263,14 @@ $t"],
                 if ($name === '') continue;
                 $qty = self::num($it['quantity'] ?? 1, 'Quantity');
                 if ($qty === null || $qty <= 0) sendError('Machine ' . ($k + 1) . ', "' . $name . '": enter the quantity.', 400);
+                $str = fn($k, $n) => mb_substr(trim((string) ($it[$k] ?? '')), 0, $n) ?: null;
+                $price = array_key_exists('price', $it) ? self::num($it['price'], 'Price') : null;
                 $items[] = ['category' => mb_substr(trim((string) ($it['category'] ?? '')), 0, 80) ?: 'Other', 'item' => $name, 'custom' => !empty($it['custom']) ? 1 : 0,
-                            'quantity' => $qty, 'unit' => mb_substr(trim((string) ($it['unit'] ?? '')), 0, 20) ?: 'Nos', 'id' => (string) ($it['id'] ?? '')];
+                            'quantity' => $qty, 'unit' => mb_substr(trim((string) ($it['unit'] ?? '')), 0, 20) ?: 'Nos', 'id' => (string) ($it['id'] ?? ''),
+                            // tool selection details (Projects): operation, tool type, code, brand, cutting data, holder, specification
+                            'operation' => $str('operation', 120), 'toolType' => $str('toolType', 40), 'itemCode' => $str('itemCode', 120), 'brand' => $str('brand', 100),
+                            'rpm' => $str('rpm', 30), 'feed' => $str('feed', 30), 'vc' => $str('vc', 30), 'pockets' => $str('pockets', 20), 'holder' => $str('holder', 160),
+                            'toolSpec' => $str('toolSpec', 500), 'price' => $price];
             }
             $machines[] = ['machineType' => $mt, 'machineOther' => $mt === 'OTHER' ? mb_substr($other, 0, 80) : null, 'make' => mb_substr(trim((string) ($m['make'] ?? '')), 0, 120) ?: null, 'count' => $cnt, 'items' => $items];
         }
@@ -273,7 +288,8 @@ $t"],
         db()->prepare('DELETE FROM `ToolingItem` WHERE requestId=?')->execute([$rid]);
         db()->prepare('DELETE FROM `ToolingMachine` WHERE requestId=?')->execute([$rid]);
         $im = db()->prepare('INSERT INTO `ToolingMachine` (id,requestId,sortOrder,machineType,machineOther,make,count) VALUES (?,?,?,?,?,?,?)');
-        $ii = db()->prepare('INSERT INTO `ToolingItem` (id,requestId,machineId,sortOrder,category,item,custom,quantity,unit,itemCode,spec,price,discount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $ii = db()->prepare('INSERT INTO `ToolingItem` (id,requestId,machineId,sortOrder,category,item,custom,quantity,unit,itemCode,spec,price,discount,
+            operation,toolType,brand,rpm,feed,vc,pockets,holder,toolSpec) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?)');
         $n = 0;
         foreach ($machines as $k => $m) {
             $mid = gen_id();
@@ -281,7 +297,8 @@ $t"],
             foreach ($m['items'] as $it) {
                 $o = ($it['id'] !== '' && isset($old[$it['id']])) ? $old[$it['id']] : null;
                 $ii->execute([$o ? $it['id'] : gen_id(), $rid, $mid, $n++, $it['category'], $it['item'], $it['custom'], $it['quantity'], $it['unit'],
-                    $o['itemCode'] ?? null, $o['spec'] ?? null, $o['price'] ?? null, $o['discount'] ?? null]);
+                    $it['itemCode'] ?? ($o['itemCode'] ?? null), $o['spec'] ?? null, $it['price'] ?? ($o['price'] ?? null), $o['discount'] ?? null,
+                    $it['operation'], $it['toolType'], $it['brand'], $it['rpm'], $it['feed'], $it['vc'], $it['pockets'], $it['holder'], $it['toolSpec']]);
             }
         }
     }
@@ -446,13 +463,73 @@ $t"],
         $items = [];
         foreach ($r['machines'] as $m) foreach ($m['items'] as $it) {
             if ($it['price'] === null) continue;
-            $items[] = ['itemCode' => $it['itemCode'] ?: '', 'productName' => $it['item'] . ($it['spec'] ? ' — ' . $it['spec'] : '') . ' (' . $m['label'] . ')',
+            $detail = array_filter([$it['brand'] ?? null, $it['toolSpec'] ?? null, !empty($it['operation']) ? 'for ' . $it['operation'] : null]);
+            $items[] = ['itemCode' => $it['itemCode'] ?: '', 'productName' => $it['item'] . ($it['spec'] ? ' — ' . $it['spec'] : '') . ($detail ? ' — ' . implode(', ', $detail) : '') . ' (' . $m['label'] . ')',
                         'quantity' => $it['quantity'], 'approvedPrice' => $it['price'], 'approvedDiscount' => $it['discount'] ?? 0, 'brand' => null];
         }
         if (!$items) sendError("$no has no priced items.", 400);
         $c = null;
         if ($r['customerId']) { $q = db()->prepare('SELECT id, companyName, address, location, contactPerson FROM `Customer` WHERE id=?'); $q->execute([$r['customerId']]); $c = $q->fetch() ?: null; }
         sendSuccess(['requestNo' => $no, 'customer' => $c, 'items' => $items, 'pending' => 0, 'rejected' => 0, 'negotiating' => $r['status'] === 'NEGOTIATION' ? $r['proposals'] : 0, 'kind' => $r['typeLabel']]);
+    }
+
+    private const FILE_EXT = ['step' => '3D', 'stp' => '3D', 'igs' => '3D', 'iges' => '3D', 'x_t' => '3D', 'sldprt' => '3D', 'stl' => '3D', 'prt' => '3D',
+        'dwg' => '2D', 'dxf' => '2D', 'pdf' => 'PDF', 'png' => 'IMAGE', 'jpg' => 'IMAGE', 'jpeg' => 'IMAGE', 'xlsx' => 'DOC', 'xls' => 'DOC', 'docx' => 'DOC', 'pptx' => 'DOC', 'zip' => 'ZIP'];
+
+    // POST /api/tooling/:id/files — 3D (STEP/IGES…), 2D drawing (DWG/DXF/PDF), PDF, images, Office, ZIP — up to 50 MB
+    public function uploadFile(string $id): void
+    {
+        $auth = authenticate();
+        $r = self::load($auth, $id);
+        if ($r['createdById'] !== $auth['id'] && !self::isAdmin($auth)) sendError('Only the engineer who raised it or an Admin can add files.', 403);
+        $f = $_FILES['file'] ?? null;
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('No file received (check the size — up to 50 MB).', 400);
+        if ($f['size'] > 50 * 1024 * 1024) sendError('The file is larger than 50 MB.', 400);
+        $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
+        if (!isset(self::FILE_EXT[$ext])) sendError('This file type is not allowed. Use STEP / IGES / DWG / DXF / PDF / images / Excel / Word / PowerPoint / ZIP.', 400);
+        $kind = strtoupper((string) ($_POST['kind'] ?? '')) ?: self::FILE_EXT[$ext];
+        if (!in_array($kind, ['3D', '2D', 'PDF', 'IMAGE', 'DOC', 'ZIP', 'OTHER'], true)) $kind = self::FILE_EXT[$ext];
+        $dir = UPLOADS_PATH . '/tooling';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the file on the server.', 500);
+        $fid = gen_id(); $stored = $fid . '.' . $ext;
+        if (!move_uploaded_file($f['tmp_name'], "$dir/$stored") && !rename($f['tmp_name'], "$dir/$stored")) sendError('Could not save the file on the server.', 500);
+        $name = preg_replace('/[^\w.\- ()]+/u', '_', (string) $f['name']);
+        db()->prepare('INSERT INTO `ToolingFile` (id,requestId,kind,fileName,storedName,size,note,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?,?,?)')
+            ->execute([$fid, $id, $kind, mb_substr($name, 0, 255), $stored, (int) $f['size'], mb_substr(trim((string) ($_POST['note'] ?? '')), 0, 255) ?: null, $auth['id'], now_sql()]);
+        log_activity($auth['id'], 'TOOLING_FILE', 'ToolingRequest', $id, ['file' => $name]);
+        sendSuccess(['request' => self::full(self::load($auth, $id))], 'File uploaded', 201);
+    }
+
+    // GET /api/tooling/:id/files/:fid
+    public function downloadFile(string $id, string $fid): void
+    {
+        $auth = authenticate();
+        self::load($auth, $id);
+        $s = db()->prepare('SELECT * FROM `ToolingFile` WHERE id=? AND requestId=?'); $s->execute([$fid, $id]);
+        $f = $s->fetch();
+        if (!$f) sendError('File not found.', 404);
+        $path = UPLOADS_PATH . '/tooling/' . basename($f['storedName']);
+        if (!is_file($path)) sendError('The file is missing on the server.', 404);
+        $ext = strtolower(pathinfo($f['storedName'], PATHINFO_EXTENSION));
+        $types = ['pdf' => 'application/pdf', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg'];
+        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+        header('Content-Disposition: ' . (isset($types[$ext]) && !qp('download') ? 'inline' : 'attachment') . '; filename="' . str_replace('"', '', $f['fileName']) . '"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path); exit;
+    }
+
+    // DELETE /api/tooling/:id/files/:fid
+    public function deleteFile(string $id, string $fid): void
+    {
+        $auth = authenticate();
+        $r = self::load($auth, $id);
+        if ($r['createdById'] !== $auth['id'] && !self::isAdmin($auth)) sendError('Only the engineer who raised it or an Admin can remove files.', 403);
+        $s = db()->prepare('SELECT * FROM `ToolingFile` WHERE id=? AND requestId=?'); $s->execute([$fid, $id]);
+        $f = $s->fetch();
+        if (!$f) sendError('File not found.', 404);
+        @unlink(UPLOADS_PATH . '/tooling/' . basename($f['storedName']));
+        db()->prepare('DELETE FROM `ToolingFile` WHERE id=?')->execute([$fid]);
+        sendSuccess(['request' => self::full(self::load($auth, $id))], 'File removed');
     }
 
     // DELETE /api/tooling/:id
@@ -462,7 +539,9 @@ $t"],
         $r = self::load($auth, $id);
         $ok = $auth['role'] === 'SUPER_ADMIN' || ($r['createdById'] === $auth['id'] && in_array($r['status'], ['DRAFT', 'REJECTED', 'SUBMITTED'], true));
         if (!$ok) sendError('Only drafts / pending requests can be deleted by the engineer (the Super Admin can delete any).', 403);
-        foreach (['ToolingPriceLog', 'ToolingItem', 'ToolingMachine'] as $t) db()->prepare("DELETE FROM `$t` WHERE requestId=?")->execute([$id]);
+        $fs = db()->prepare('SELECT storedName FROM `ToolingFile` WHERE requestId=?'); $fs->execute([$id]);
+        foreach ($fs->fetchAll(PDO::FETCH_COLUMN) as $sn) @unlink(UPLOADS_PATH . '/tooling/' . basename($sn));
+        foreach (['ToolingPriceLog', 'ToolingItem', 'ToolingMachine', 'ToolingFile'] as $t) db()->prepare("DELETE FROM `$t` WHERE requestId=?")->execute([$id]);
         db()->prepare('DELETE FROM `ToolingRequest` WHERE id=?')->execute([$id]);
         log_activity($auth['id'], 'TOOLING_DELETED', 'ToolingRequest', $id, ['customer' => $r['customerName']]);
         sendSuccess([], 'Deleted');

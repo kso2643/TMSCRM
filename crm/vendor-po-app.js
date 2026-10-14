@@ -160,7 +160,7 @@
             el('td', { class: 'n' }, [
               el('button', { class: 'vd-btn sm', type: 'button', 'data-po-edit': o.poNumber, text: 'Edit', onclick: function () { opts.onOpen(o.id); } }), ' ',
               el('button', { class: 'vd-btn sm', type: 'button', 'data-po-pdf': o.poNumber, text: '⬇ PDF', onclick: function () { pdfFetch(o.id).catch(function (e) { toast(e.message, 'err'); }); } }), ' ',
-              el('button', { class: 'vd-btn sm red', type: 'button', 'data-po-del': o.poNumber, text: '✕', title: 'Delete', onclick: function () {
+              me().role !== 'SUPER_ADMIN' ? null : el('button', { class: 'vd-btn sm red', type: 'button', 'data-po-del': o.poNumber, text: '✕', title: 'Delete', onclick: function () {
                 if (!confirm('Delete purchase order ' + o.poNumber + '?')) return;
                 api('DELETE', '/purchase-orders/' + encodeURIComponent(o.id)).then(function (r) { toast(r.message); load(); }).catch(function (e) { toast(e.message, 'err'); });
               } })
@@ -354,7 +354,7 @@
       wrap.appendChild(sheet);
       // actions
       var acts = el('div', { class: 'po-acts' });
-      if (F.id) acts.appendChild(el('button', { class: 'vd-btn red', type: 'button', id: 'po-delete', style: 'margin-right:auto', text: 'Delete PO', onclick: function () {
+      if (F.id && me().role === 'SUPER_ADMIN') acts.appendChild(el('button', { class: 'vd-btn red', type: 'button', id: 'po-delete', style: 'margin-right:auto', text: 'Delete PO', onclick: function () {
         if (!confirm('Delete purchase order ' + F.poNumber + '?')) return;
         api('DELETE', '/purchase-orders/' + encodeURIComponent(F.id)).then(function (j) { toast(j.message); done(); }).catch(function (e) { toast(e.message, 'err'); });
       } }));

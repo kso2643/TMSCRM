@@ -196,6 +196,7 @@ class ProductController
             ($b['brand']??null)?:null,($b['grade']??null)?:null,($b['specification']??null)?:null,($b['productType']??null)?:null,
             now_sql(),now_sql(),
         ]);
+        product_register($itemCode, $productName, ['brand' => $b['brand'] ?? null, 'unit' => $b['unit'] ?? null]);   // also in Stock (0 Nos)
         $this->show($id);
     }
 

@@ -384,6 +384,10 @@ class OrderController
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         foreach ($items as $it) {
+            if (!$it['productId']) {   // typed in by hand → also added to Products and Stock
+                $reg = product_register($it['itemCode'], (string) $it['productName'], ['brand' => $it['brand'], 'unit' => $it['unit'], 'category' => $it['category']]);
+                if ($reg['id']) { $it['productId'] = $reg['id']; $it['itemCode'] = $reg['itemCode']; }
+            }
             $carry = $prev[$it['productId']] ?? null;
             $ins->execute([
                 gen_id(), $orderId, $it['productId'], $it['itemCode'], $it['productName'], $it['unit'], $it['category'], $it['brand'], $it['quantity'],
@@ -939,7 +943,7 @@ class OrderController
         $auth = authenticate();
         $row = $this->fetchRow($id);
         if (!$row) sendError('Order not found.', 404);
-        if (!$this->canEdit($auth, $row)) sendError('Not authorized to delete this order.', 403);
+        if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can delete orders.', 403);
 
         $this->deleteFileIfAny($row);
         db()->prepare('DELETE FROM `CustomerOrder` WHERE id=?')->execute([$id]); // items cascade

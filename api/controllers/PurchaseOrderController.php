@@ -222,6 +222,7 @@ $tail"],
     {
         db()->prepare('DELETE FROM `PurchaseOrderItem` WHERE poId=?')->execute([$id]);
         $ins = db()->prepare('INSERT INTO `PurchaseOrderItem` (id,poId,sortOrder,itemCode,description,brand,quantity,unit,unitPrice,discount,netPrice,totalPrice,delivery,customerName) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        foreach ($items as $it) if ($it['itemCode']) product_register($it['itemCode'], (string) ($it['description'] ?: $it['itemCode']), ['brand' => $it['brand'], 'unit' => $it['unit']]);
         foreach ($items as $k => $it) $ins->execute([gen_id(), $id, $k + 1, $it['itemCode'], $it['description'], $it['brand'], $it['quantity'], $it['unit'], $it['unitPrice'], $it['discount'], $it['netPrice'], $it['totalPrice'], $it['delivery'], $it['customerName']]);
     }
 
@@ -267,6 +268,7 @@ $tail"],
     public function delete(string $id): void
     {
         $auth = $this->guard();
+        if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can delete purchase orders.', 403);
         $old = $this->load($id);
         db()->prepare('DELETE FROM `PurchaseOrderItem` WHERE poId=?')->execute([$id]);
         db()->prepare('DELETE FROM `PurchaseOrder` WHERE id=?')->execute([$id]);

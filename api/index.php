@@ -61,6 +61,7 @@ require __DIR__ . '/includes/SchemaGuard.php';
 require __DIR__ . '/includes/ColumnGuess.php';
 require __DIR__ . '/includes/XlsxWriter.php';
 require __DIR__ . '/includes/XlsxReader.php';
+require __DIR__ . '/includes/ProductRegistry.php';  // new products typed anywhere → Products + Stock
 require __DIR__ . '/includes/StyledXlsxWriter.php';
 require __DIR__ . '/includes/SimplePdf.php';
 require __DIR__ . '/includes/ApjQuotationPdf.php';
@@ -263,6 +264,7 @@ try {
             $method === 'POST'  && $c1 === 'stock' && $c2 === 'entry'    => $sc->entry(),
             $method === 'GET'   && $c1 === 'stock' && $c2 === 'check'    => $sc->checkStatus(),
             $method === 'POST'  && $c1 === 'stock' && $c2 === 'check'    => $sc->checkDone(),
+            $method === 'POST'  && $c1 === 'stock' && $c2 === 'count'    => $sc->count(),
             $method === 'POST'  && $c1 === 'stock' && $c2 !== '' && $c3 === 'adjust'    => $sc->adjust($c2),
             $method === 'GET'   && $c1 === 'stock' && $c2 !== '' && $c3 === 'movements' => $sc->movements($c2),
             $method === 'POST'  && $c1 === 'stock' && $c2 === 'import'   => $sc->import(),
@@ -511,6 +513,9 @@ try {
             $method === 'POST'   && $c2 === 'submit'                   => $ctrl->submit($c1),
             $method === 'PATCH'  && $c2 === 'prices'                   => $ctrl->prices($c1),
             $method === 'POST'   && $c2 === 'negotiate'                => $ctrl->negotiate($c1),
+            $method === 'POST'   && $c2 === 'files' && $c3 === ''      => $ctrl->uploadFile($c1),
+            $method === 'GET'    && $c2 === 'files' && $c3 !== ''      => $ctrl->downloadFile($c1, $c3),
+            $method === 'DELETE' && $c2 === 'files' && $c3 !== ''      => $ctrl->deleteFile($c1, $c3),
             default => sendError('Route not found', 404),
         };
     }
@@ -534,6 +539,7 @@ try {
             $method === 'POST'   && $c1 === 'files' && $c2 === ''        => $ctrl->uploadFile(),
             $method === 'GET'    && $c1 === 'files' && $c2 !== ''        => $ctrl->downloadFile($c2),
             $method === 'DELETE' && $c1 === 'files' && $c2 !== ''        => $ctrl->deleteFile($c2),
+            $method === 'POST'   && $c1 === 'files' && $c2 !== ''        => $ctrl->updateFile($c2),
             $method === 'POST'   && $c1 === ''                           => $ctrl->create(),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''             => $ctrl->delete($c1),

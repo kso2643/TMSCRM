@@ -1,3 +1,40 @@
+# Update — 14 Oct (a): Super-Admin deletes, new products → Products + Stock, project files & tool selection, Catalogues & documents, stock check, locked order header
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:**
+  - `api/includes/ProductRegistry.php`
+  - `crm/documents-app.js` and `crm/documents/`
+  - a new React sidebar file `layout-e5b92c07d14a6f38.js`
+- **Database:** new columns are added automatically (tool details on `ToolingItem`; type / brands / notes on catalogue files) and a new `ToolingFile` table. Uploaded files go to `api/uploads/tooling/` and `api/uploads/catalogues/`.
+
+1. **Delete is Super Admin only** for CEO Desk items, tasks, quotations, orders and vendor POs. Other users no longer see the Delete buttons, and the server refuses the delete for them.
+2. **New products are added everywhere at once:**
+   - A product typed in by hand on an **order**, **quotation**, **vendor PO** or **stock entry** (and any product added on the Products page) is now also created in **Products** and **Stock** (0 Nos).
+   - An item with no code gets one automatically: MAN-0001, MAN-0002…
+   - The new product can be edited on the Products page. Existing products are reused, never duplicated.
+3. **Projects:**
+   - **Project files:** attach 3D models (STEP / IGES / X_T…), 2D drawings (DWG / DXF / PDF), PDFs, images, Office files or ZIP, up to 50 MB each.
+     - Files picked before the first save upload right after it.
+     - Open / download / remove at any time (engineer who raised it or an Admin).
+   - **Tool selection (operation-wise)** for each machine:
+     - operation, tool type, tool selected, item code, brand, qty, price
+     - RPM, feed, cutting speed Vc
+     - **no. of pockets** (only for cutters)
+     - holder
+     - **specification**, with a hint for each type (end mill, drill, tap, reamer, cutter, insert…)
+   - The admin sees all of it when pricing.
+   - The quotation description includes the brand, specification and operation.
+4. **Catalogues & documents** replaces the **Categories** page (the old link redirects):
+   - Upload brand catalogues (PDF), presentations (PPT), reports, price lists, datasheets (Excel / Word / images / ZIP), with several brands per file.
+   - Filter by type and brand, and search.
+   - Everyone can open / download. Admins can upload, **edit** (title, brands, type, notes, replace the file) and **delete**.
+   - The same files appear in the Product catalogue page's PDF tab.
+5. **Orders page:** the **header row and the customer column are locked**, so they stay in place while the list scrolls down or sideways.
+6. **Stock → 🗂 Stock check (count):**
+   - Pick the place (Hand / Local city / State), type the **counted Nos** for each item (filter, "only rows that differ") and save.
+   - Each quantity is set directly to what was counted, the change shows in the item's history, and the check is recorded (who, when, how many counted / changed).
+   - Admin / Manager.
+
 # Update — 13 Oct (c): Projects, Tooled-up and Machine accessories pages
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

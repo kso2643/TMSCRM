@@ -54,7 +54,7 @@ class CatalogController
   `fileName` VARCHAR(255) NOT NULL, `storedName` VARCHAR(80) NOT NULL, `size` INT NOT NULL DEFAULT 0,
   `uploadedById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `ProductCatalogueFile_brand_idx` (`brand`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"],
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", 'columns' => ['docType' => "VARCHAR(16) NULL", 'brands' => 'VARCHAR(500) NULL', 'notes' => 'TEXT NULL', 'updatedAt' => 'DATETIME NULL']],
         ];
     }
 
@@ -336,32 +336,85 @@ class CatalogController
         sendSuccess(['saved' => $done, 'errors' => array_slice($errors, 0, 30)], "$done " . strtolower(self::TYPES[$type]) . ($done === 1 ? '' : 's') . ' saved' . ($errors ? ', ' . count($errors) . ' row(s) skipped' : ''));
     }
 
-    // ── catalogue PDFs ────────────────────────────────────────────────
+    // ── catalogues & documents (PDF catalogues, presentations, reports, price lists…) ──
+    public const DOC_TYPES = ['CATALOGUE' => 'Catalogue', 'PRESENTATION' => 'Presentation (PPT)', 'REPORT' => 'Report', 'PRICE_LIST' => 'Price list', 'DATASHEET' => 'Datasheet', 'OTHER' => 'Other'];
+    private const DOC_EXT = ['pdf' => 'application/pdf', 'ppt' => 'application/vnd.ms-powerpoint', 'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'xls' => 'application/vnd.ms-excel', 'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'csv' => 'text/csv',
+        'doc' => 'application/msword', 'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'zip' => 'application/zip'];
+
     public function files(): void
     {
         self::auth();
         $rows = db()->query('SELECT f.*, u.name AS uploadedBy FROM `ProductCatalogueFile` f LEFT JOIN `User` u ON u.id=f.uploadedById ORDER BY f.brand, f.createdAt DESC')->fetchAll();
-        sendSuccess(['files' => $rows]);
+        foreach ($rows as &$r) {
+            $r['docType'] = $r['docType'] ?: 'CATALOGUE';
+            $r['brandList'] = array_values(array_filter(array_map('trim', explode(',', (string) ($r['brands'] ?: $r['brand'])))));
+            $r['ext'] = strtolower(pathinfo($r['storedName'], PATHINFO_EXTENSION));
+        }
+        unset($r);
+        sendSuccess(['files' => $rows, 'docTypes' => self::DOC_TYPES]);
+    }
+
+    private static function brandFields(): array
+    {
+        $raw = (string) ($_POST['brands'] ?? ($_POST['brand'] ?? ''));
+        $list = array_values(array_unique(array_filter(array_map(fn($x) => mb_substr(trim($x), 0, 100), preg_split('/[,;\/]+/', $raw)))));
+        return [$list ? $list[0] : null, $list ? mb_substr(implode(', ', $list), 0, 500) : null];
+    }
+
+    /** Validates an uploaded document → [extension, stored file name, safe original name]. */
+    private static function storeDoc(array $f, string $id): array
+    {
+        if ($f['size'] > 60 * 1024 * 1024) sendError('The file is larger than 60 MB.', 400);
+        $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
+        if (!isset(self::DOC_EXT[$ext])) sendError('Upload a PDF, PowerPoint, Excel, Word, image or ZIP file.', 400);
+        if ($ext === 'pdf' && strpos((string) file_get_contents($f['tmp_name'], false, null, 0, 5), '%PDF') !== 0) sendError('This is not a valid PDF file.', 400);
+        $dir = UPLOADS_PATH . '/catalogues';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the file on the server.', 500);
+        $stored = $id . '.' . $ext;
+        if (!(@move_uploaded_file($f['tmp_name'], "$dir/$stored") || @rename($f['tmp_name'], "$dir/$stored"))) sendError('Could not save the file on the server.', 500);
+        return [$ext, $stored, mb_substr(preg_replace('/[^\w.\- ()]+/u', '_', (string) $f['name']), 0, 255)];
+    }
+
+    // POST /api/catalog/files/:id — edit title / brands / type / notes; a new "file" replaces the old one
+    public function updateFile(string $id): void
+    {
+        $auth = self::auth(true);
+        $s = db()->prepare('SELECT * FROM `ProductCatalogueFile` WHERE id=?'); $s->execute([$id]);
+        $old = $s->fetch();
+        if (!$old) sendError('File not found.', 404);
+        $sets = ['updatedAt=?']; $vals = [now_sql()];
+        if (isset($_POST['title'])) { $t = mb_substr(trim((string) $_POST['title']), 0, 255); if ($t === '') sendError('Enter the title.', 400); $sets[] = 'title=?'; $vals[] = $t; }
+        if (isset($_POST['brands']) || isset($_POST['brand'])) { [$b1, $bl] = self::brandFields(); $sets[] = 'brand=?'; $vals[] = $b1; $sets[] = 'brands=?'; $vals[] = $bl; }
+        if (isset($_POST['docType'])) { $d = strtoupper((string) $_POST['docType']); $sets[] = 'docType=?'; $vals[] = isset(self::DOC_TYPES[$d]) ? $d : 'OTHER'; }
+        if (isset($_POST['notes'])) { $sets[] = 'notes=?'; $vals[] = trim((string) $_POST['notes']) ?: null; }
+        $f = $_FILES['file'] ?? null;
+        if ($f && $f['error'] === UPLOAD_ERR_OK) {
+            [$ext, $stored, $name] = self::storeDoc($f, gen_id());
+            @unlink(UPLOADS_PATH . '/catalogues/' . basename($old['storedName']));
+            array_push($sets, 'storedName=?', 'fileName=?', 'size=?'); array_push($vals, $stored, $name, (int) $f['size']);
+        }
+        $vals[] = $id;
+        db()->prepare('UPDATE `ProductCatalogueFile` SET ' . implode(',', $sets) . ' WHERE id=?')->execute($vals);
+        log_activity($auth['id'], 'CATALOGUE_FILE_EDITED', 'ProductCatalogueFile', $id);
+        sendSuccess(['id' => $id], 'Saved');
     }
 
     public function uploadFile(): void
     {
         $auth = self::auth(true);
         $f = $_FILES['file'] ?? null;
-        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('Choose the catalogue PDF.', 400);
-        if ($f['size'] > 60 * 1024 * 1024) sendError('The PDF is larger than 60 MB.', 400);
-        if (strpos((string) file_get_contents($f['tmp_name'], false, null, 0, 5), '%PDF') !== 0) sendError('Upload the catalogue as a PDF file.', 400);
-        $dir = UPLOADS_PATH . '/catalogues';
-        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the file on the server.', 500);
-        $id = gen_id(); $stored = $id . '.pdf';
-        if (!(@move_uploaded_file($f['tmp_name'], "$dir/$stored") || @rename($f['tmp_name'], "$dir/$stored"))) sendError('Could not save the file on the server.', 500);
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('Choose the file (PDF, PowerPoint, Excel, Word…).', 400);
+        $id = gen_id();
+        [$ext, $stored, $name] = self::storeDoc($f, $id);
         $type = strtoupper((string) ($_POST['type'] ?? '')); if (!isset(self::TYPES[$type])) $type = null;
-        $name = mb_substr(preg_replace('/[^\w.\- ()]+/u', '_', (string) $f['name']), 0, 255);
-        $title = mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 255) ?: preg_replace('/\.pdf$/i', '', $name);
-        db()->prepare('INSERT INTO `ProductCatalogueFile` (id,brand,catType,title,fileName,storedName,size,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?,?,?)')
-            ->execute([$id, mb_substr(trim((string) ($_POST['brand'] ?? '')), 0, 100) ?: null, $type, $title, $name, $stored, (int) $f['size'], $auth['id'], now_sql()]);
+        $doc = strtoupper((string) ($_POST['docType'] ?? '')); if (!isset(self::DOC_TYPES[$doc])) $doc = in_array($ext, ['ppt', 'pptx'], true) ? 'PRESENTATION' : 'CATALOGUE';
+        [$b1, $bl] = self::brandFields();
+        $title = mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 255) ?: preg_replace('/\.[a-z0-9]+$/i', '', $name);
+        db()->prepare('INSERT INTO `ProductCatalogueFile` (id,brand,brands,catType,docType,title,notes,fileName,storedName,size,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+            ->execute([$id, $b1, $bl, $type, $doc, $title, trim((string) ($_POST['notes'] ?? '')) ?: null, $name, $stored, (int) $f['size'], $auth['id'], now_sql()]);
         log_activity($auth['id'], 'CATALOGUE_PDF_UPLOADED', 'ProductCatalogueFile', $id, ['title' => $title]);
-        sendSuccess(['id' => $id], 'Catalogue uploaded', 201);
+        sendSuccess(['id' => $id], self::DOC_TYPES[$doc] . ' uploaded', 201);
     }
 
     public function downloadFile(string $id): void
@@ -372,7 +425,7 @@ class CatalogController
         $path = $f ? UPLOADS_PATH . '/catalogues/' . basename($f['storedName']) : '';
         if (!$f || !is_file($path)) sendError('Catalogue not found.', 404);
         while (ob_get_level()) ob_end_clean();
-        header('Content-Type: application/pdf');
+        header('Content-Type: ' . (self::DOC_EXT[strtolower(pathinfo($f['storedName'], PATHINFO_EXTENSION))] ?? 'application/octet-stream'));
         header('Content-Length: ' . filesize($path));
         header('Content-Disposition: ' . (qp('download') ? 'attachment' : 'inline') . '; filename="' . str_replace('"', '', $f['fileName']) . '"');
         readfile($path); exit;

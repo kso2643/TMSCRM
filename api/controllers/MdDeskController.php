@@ -359,7 +359,7 @@ $tail"],
     {
         $auth = self::auth();
         $item = self::load($auth, $id);
-        if ($item['fromId'] !== $auth['id'] && $auth['role'] !== 'SUPER_ADMIN') sendError('Only the sender can delete this.', 403);
+        if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can delete CEO Desk items.', 403);
         db()->prepare('DELETE FROM `MdDeskReply` WHERE itemId=?')->execute([$id]);
         db()->prepare('DELETE FROM `MdDeskRead` WHERE itemId=?')->execute([$id]);
         db()->prepare('DELETE FROM `MdDeskItem` WHERE id=?')->execute([$id]);

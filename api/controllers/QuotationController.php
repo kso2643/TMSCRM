@@ -324,6 +324,7 @@ class QuotationController
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         foreach (array_values($calcedItems) as $pos => $ci) {
+            if (!$ci['productId'] && trim((string) $ci['itemCode']) !== '') { $reg = product_register($ci['itemCode'], (string) ($ci['productName'] ?: $ci['description']), ['unit' => $ci['unit'], 'category' => $ci['category'], 'price' => $ci['unitPrice']]); $ci['productId'] = $reg['id']; }
             $ins->execute([
                 gen_id(), $id, $ci['productId'], $ci['itemCode'], $ci['productName'],
                 $ci['description'], $ci['category'], $ci['unit'],
@@ -398,6 +399,7 @@ class QuotationController
                  quantity,unitPrice,discount,netPrice,totalPrice,delivery,hsnCode,notes,sortOrder,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             foreach (array_values($calcedItems) as $pos => $ci) {
+                if (!$ci['productId'] && trim((string) $ci['itemCode']) !== '') { $reg = product_register($ci['itemCode'], (string) ($ci['productName'] ?: $ci['description']), ['unit' => $ci['unit'], 'category' => $ci['category'], 'price' => $ci['unitPrice']]); $ci['productId'] = $reg['id']; }
                 $ins->execute([
                     gen_id(), $id, $ci['productId'], $ci['itemCode'], $ci['productName'],
                     $ci['description'], $ci['category'], $ci['unit'],
@@ -415,7 +417,8 @@ class QuotationController
     // DELETE /api/quotations/:id
     public function delete(string $id): void
     {
-        $auth = authenticate(); require_admin($auth);
+        $auth = authenticate();
+        if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can delete quotations.', 403);
         $d = db()->prepare('DELETE FROM `Quotation` WHERE id=?');
         if (!$d->execute([$id]) || $d->rowCount() === 0) sendError('Quotation not found.', 404);
         sendSuccess([], 'Quotation deleted');

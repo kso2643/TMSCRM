@@ -160,6 +160,14 @@
     return { close: close };
   }
 
+  // Deleting a quotation is for the Super Admin only (the API refuses others too)
+  (function () {
+    var u = {}; try { u = JSON.parse(localStorage.getItem('crm_user') || 'null') || {}; } catch (e) {}
+    if (u.role === 'SUPER_ADMIN' || !/^\/quotations\/?/.test(location.pathname)) return;
+    var st = document.createElement('style');
+    st.textContent = 'button[onclick^="tms_deleteQuotation"],button[onclick^="apj_deleteQuotation"]{display:none!important}';
+    document.head.appendChild(st);
+  })();
   window.QuoteNotes = { open: open, badge: badge, STATUS: STATUS, api: api };
 
   // ── Quotations page: notes button + status on each saved quotation, side tab while editing ──
