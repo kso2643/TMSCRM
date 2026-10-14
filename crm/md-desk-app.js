@@ -22,6 +22,20 @@
       });
     });
   }
+  function upload(path, file) {
+    var fd = new FormData(); fd.append('file', file);
+    return fetch(API + '/api' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || '') }, body: fd }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.success === false) throw new Error((j && j.message) || 'Upload failed (' + r.status + ')'); return j; });
+    });
+  }
+  function fileUrl(itemId, f, dl) { return API + '/api/md-desk/' + encodeURIComponent(itemId) + '/files/' + encodeURIComponent(f.id) + (dl ? '?download=1' : ''); }
+  function blobOf(url) {
+    return fetch(url, { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) { if (!r.ok) throw new Error('Could not load the file (' + r.status + ')'); return r.blob(); });
+  }
+  function saveBlob(blob, name) {
+    var u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name || 'file'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(u); }, 2000);
+  }
   function el(tag, attrs, kids) {
     var n = document.createElement(tag); attrs = attrs || {};
     Object.keys(attrs).forEach(function (k) {
@@ -58,7 +72,7 @@
   var TYPES = {
     MESSAGE:   { icon: '💬', label: 'Message',          c: '#2563eb' },
     TASK:      { icon: '📌', label: 'Important task',   c: '#b45309' },
-    PRICE:     { icon: '₹',  label: 'Price given',      c: '#0f766e' },
+    PRICE:     { icon: '₹',  label: 'Get price',        c: '#0f766e' },
     QUOTATION: { icon: '📄', label: 'New quotation',    c: '#7c3aed' }
   };
   var PRIO = { URGENT: ['Urgent', '#dc2626'], HIGH: ['High', '#d97706'], NORMAL: ['Normal', '#64748b'] };
@@ -132,7 +146,18 @@
       '.md-l2{display:grid;grid-template-columns:repeat(4,1fr);gap:.35rem;margin-top:.35rem}.md-l2 label{font-size:.68rem;color:#64748b;font-weight:600;display:flex;flex-direction:column;gap:.1rem}',
       '.md-f .md-line input{padding:.32rem .45rem;font-size:.82rem}.md-net{font-size:.85rem;font-weight:700;color:#0f172a;padding:.32rem 0}.dark .md-net{color:#e2e8f0}',
       '.md-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;transition:opacity .25s,transform .25s;max-width:90vw}',
-      '.md-toast.in{opacity:1;transform:translate(-50%,0)}.md-toast.err{background:#b91c1c}'
+      '.md-toast.in{opacity:1;transform:translate(-50%,0)}.md-toast.err{background:#b91c1c}',
+      '.md-files{display:flex;flex-wrap:wrap;gap:.6rem;margin:.5rem 0}',
+      '.md-file{width:132px;border:1px solid #e2e8f0;border-radius:.6rem;background:#fff;overflow:hidden;font-size:.74rem;display:flex;flex-direction:column}.dark .md-file{background:#0f172a;border-color:#334155}',
+      '.md-thumb{position:relative;height:92px;display:flex;align-items:center;justify-content:center;background:#f1f5f9;font-size:2rem;cursor:pointer;border:0;padding:0;width:100%;color:inherit}.dark .md-thumb{background:#1e293b}',
+      '.md-thumb img{width:100%;height:100%;object-fit:cover}.md-thumb .eye{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.45);color:#fff;font-size:1.5rem;opacity:0;transition:opacity .15s}',
+      '.md-thumb:hover .eye,.md-thumb:focus .eye{opacity:1}',
+      '.md-file .nm{padding:.3rem .4rem 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}.md-file .ac{display:flex;gap:.2rem;padding:.3rem .4rem .4rem}.md-file .ac button{flex:1;padding:.2rem;font-size:.72rem;justify-content:center}',
+      '.md-lb{position:fixed;inset:0;background:rgba(15,23,42,.85);z-index:2147483550;display:flex;flex-direction:column}.md-lb .bar{display:flex;gap:.5rem;align-items:center;padding:.6rem .9rem;color:#fff;font-weight:600}.md-lb .bar b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.md-lb .pic{flex:1;display:flex;align-items:center;justify-content:center;padding:1rem;overflow:auto}.md-lb img{max-width:100%;max-height:100%;box-shadow:0 10px 30px rgba(0,0,0,.5);background:#fff}',
+      '.md-pend{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.35rem}.md-pend span{display:inline-flex;align-items:center;gap:.3rem;background:#f1f5f9;border-radius:.4rem;padding:.15rem .4rem;font-size:.76rem}.md-pend img{width:28px;height:28px;object-fit:cover;border-radius:.25rem}.dark .md-pend span{background:#0f172a}',
+      '.md-gp{width:100%;border-collapse:collapse;font-size:.82rem}.md-gp th{font-size:.68rem;text-transform:uppercase;color:#64748b;text-align:left;padding:.3rem}.md-gp td{padding:.25rem}.md-gp input{width:100%;border:1px solid #cbd5e1;border-radius:.4rem;padding:.3rem .4rem;font-size:.8rem;background:#fff;color:inherit}.dark .md-gp input{background:#0f172a;border-color:#334155}',
+      '.md-ppl{display:flex;flex-wrap:wrap;gap:.3rem;margin:.25rem 0}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -142,7 +167,7 @@
 
   // ── compose ─────────────────────────────────────────────────────────
   function field(label, input, wide) { return el('div', { class: 'md-f' + (wide ? ' w' : '') }, [el('label', { text: label }), input]); }
-  /* Who to send to: tick several people (each gets their own copy), or — for
+  /* Who to send to: tick several people (ONE shared task they all see), or — for
      Admins / CEO — a whole group. Picked people show as chips. */
   function recipientPicker() {
     var sel = state.toSel;
@@ -189,7 +214,50 @@
     }
     search.oninput = draw;
     draw();
-    return el('div', { class: 'md-f w' }, [el('label', { text: 'To (pick one or more)' }), chips, search, list]);
+    return el('div', { class: 'md-f w' }, [el('label', { text: 'Assign to (pick one or more — one shared task)' }), chips, search, list]);
+  }
+
+  /* Report to: tick any users who should be kept informed (they see the item,
+     its replies and when it is done). All users are listed. */
+  function reportToPicker() {
+    var sel = state.rptSel;
+    var chips = el('div', { class: 'md-chips', id: 'md-rpt-chips' });
+    var search = el('input', { type: 'search', id: 'md-rpt-search', placeholder: 'Search users…', autocomplete: 'off' });
+    var list = el('div', { class: 'md-plist', id: 'md-rpt-list', style: 'max-height:160px' });
+    var byId = {}; (state.allUsers || []).forEach(function (u) { byId[u.id] = u; });
+    function draw() {
+      clear(chips);
+      var ks = Object.keys(sel);
+      if (!ks.length) chips.appendChild(el('span', { class: 'md-sub', text: 'Optional — tick who this should be reported to.' }));
+      ks.forEach(function (k) { chips.appendChild(el('span', { class: 'md-chip', style: 'background:#ede9fe;color:#5b21b6' }, ['📋 ' + (byId[k] ? byId[k].name : k), el('button', { type: 'button', text: '×', 'aria-label': 'Remove', onclick: function () { delete sel[k]; draw(); } })])); });
+      clear(list);
+      var q = search.value.trim().toLowerCase();
+      (state.allUsers || []).filter(function (u) { return !q || u.name.toLowerCase().indexOf(q) !== -1; }).forEach(function (u) {
+        var cb = el('input', { type: 'checkbox', 'data-rpt': u.id }); cb.checked = !!sel[u.id];
+        cb.onchange = function () { if (cb.checked) sel[u.id] = true; else delete sel[u.id]; draw(); };
+        list.appendChild(el('label', { class: 'md-pitem' }, [cb, el('span', {}, [u.name, el('small', { text: ' ' + String(u.role || '').replace('_', ' ').toLowerCase() })])]));
+      });
+    }
+    search.oninput = draw; draw();
+    return el('div', { class: 'md-f w' }, [el('label', {}, [el('input', { type: 'checkbox', id: 'md-rpt-on', checked: Object.keys(sel).length ? true : null, style: 'width:auto;margin-right:.35rem;vertical-align:-2px', onchange: function (e) { box.style.display = e.target.checked ? '' : 'none'; if (!e.target.checked) { Object.keys(sel).forEach(function (k) { delete sel[k]; }); draw(); } } }), 'Report to']),
+      (function () { box = el('div', { id: 'md-rpt-box', style: Object.keys(sel).length ? '' : 'display:none' }, [chips, search, list]); return box; })()]);
+    var box;
+  }
+
+  /* Attach files while composing — uploaded right after the item is sent. */
+  function attachPicker() {
+    var inpF = el('input', { type: 'file', id: 'md-files', multiple: true, accept: 'image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx', style: 'width:100%' });
+    var pend = el('div', { class: 'md-pend', id: 'md-pend' });
+    function draw() {
+      clear(pend);
+      state.pendFiles.forEach(function (f, k) {
+        var img = /^image\//.test(f.type) ? el('img', { src: URL.createObjectURL(f), alt: '' }) : el('b', { text: /\.pdf$/i.test(f.name) ? '📕' : /\.(xlsx?|csv)$/i.test(f.name) ? '📗' : '📄' });
+        pend.appendChild(el('span', {}, [img, f.name, el('button', { type: 'button', class: 'md-link', text: '✕', onclick: function () { state.pendFiles.splice(k, 1); draw(); } })]));
+      });
+    }
+    inpF.onchange = function () { Array.prototype.forEach.call(inpF.files, function (f) { state.pendFiles.push(f); }); inpF.value = ''; draw(); };
+    draw();
+    return el('div', { class: 'md-f w' }, [el('label', { text: 'Attach screenshot / image / PDF / Excel (optional)' }), inpF, pend]);
   }
 
   /* Customer box: type to search the customer list; picking one also lists that
@@ -236,12 +304,12 @@
   /* Item lines: item code (suggests from products), product, qty, price, discount → net. */
   function linesEditor(ctx) {
     var wrap = el('div', { class: 'md-f w' });
-    function blank() { return { itemCode: '', productName: '', quantity: '', price: '', discount: '' }; }
+    function blank() { return { itemCode: '', productName: '', quantity: '', price: '', discount: '', supplier: '' }; }
     if (!ctx.lines || !ctx.lines.length) ctx.lines = [blank()];
     function net(l) { var p = parseFloat(l.price), d = parseFloat(l.discount) || 0; return isNaN(p) ? null : Math.round(p * (1 - d / 100) * 100) / 100; }
     function draw() {
       clear(wrap);
-      wrap.appendChild(el('label', { text: 'Items — code, price and discount' }));
+      wrap.appendChild(el('label', { text: ctx.getPrice ? 'Items to get the price for — price, discount and supplier can be left blank for the assignee to fill' : 'Items — code, price and discount' }));
       var tb = el('div', { class: 'md-lines', id: 'md-lines' });
       ctx.lines.forEach(function (l, i) {
         var netEl = el('span', { class: 'md-net', text: net(l) == null ? '—' : money(net(l)) });
@@ -272,6 +340,7 @@
         tb.appendChild(el('div', { class: 'md-line', 'data-row': String(i) }, [
           el('div', { class: 'md-l1' }, [el('span', { class: 'md-ln', text: String(i + 1) }), el('div', { class: 'md-qs', style: 'flex:0 0 38%' }, [code, sg]), prod,
             el('button', { type: 'button', class: 'md-btn sm red', title: 'Remove item', text: '✕', onclick: function () { ctx.lines.splice(i, 1); if (!ctx.lines.length) ctx.lines.push(blank()); draw(); if (ctx.onTotal) ctx.onTotal(); } })]),
+          ctx.getPrice ? el('div', { class: 'md-l2', style: 'grid-template-columns:1fr' }, [el('label', {}, ['Supplier (optional)', f('supplier', 'Supplier / vendor to ask')])]) : null,
           el('div', { class: 'md-l2' }, [
             el('label', {}, ['Qty', f('quantity', 'Qty', { type: 'number', min: '0', step: 'any', inputmode: 'decimal' })]),
             el('label', {}, ['Price ₹', f('price', '0.00', { type: 'number', min: '0', step: '0.01', inputmode: 'decimal' })]),
@@ -292,6 +361,8 @@
     clear(formBox);
     var t = state.compose;
     if (!state.toSel) state.toSel = {};
+    if (!state.rptSel) state.rptSel = {};
+    if (!state.pendFiles) state.pendFiles = [];
     if (state.toPick) { state.toSel = {}; state.toSel[state.toPick] = true; state.toPick = null; }
     formBox.appendChild(el('h2', { text: state.canGroups ? 'Send to staff' : 'Send to CEO / admin' }));
     formBox.appendChild(el('div', { class: 'md-types' }, Object.keys(TYPES).map(function (k) {
@@ -328,9 +399,14 @@
       add('dueDate', 'Due date', { type: 'date', min: today() });
       add('details', 'Details', { tag: 'textarea', placeholder: 'What exactly needs to be done', rows: 3 }, true);
     } else if (t === 'PRICE') {
-      g.appendChild(customerPicker(ctx, copyQuote));
+      // Get price: a task to get the price from the supplier
+      ctx.getPrice = true;
+      add('title', 'Task (optional)', { placeholder: 'e.g. Get price from Sandvik for these inserts' }, true);
+      var cp = customerPicker(ctx, copyQuote); cp.querySelector('label').textContent = 'For customer (optional)';
+      g.appendChild(cp);
       g.appendChild(linesEditor(ctx));
-      add('details', 'Notes', { tag: 'textarea', placeholder: 'Validity, quantity, conditions…', rows: 2 }, true);
+      add('dueDate', 'Need the price by', { type: 'date', min: today() });
+      add('details', 'Notes', { tag: 'textarea', placeholder: 'Quantity, delivery, target price, conditions…', rows: 2 }, true);
     } else {
       g.appendChild(customerPicker(ctx, copyQuote));
       var pick = el('input', { id: 'md-qpick', placeholder: 'Or search any quotation no. / customer…', autocomplete: 'off' });
@@ -358,23 +434,29 @@
       pick.addEventListener('focus', function () { pick.dispatchEvent(new Event('input')); });
       document.addEventListener('click', function (e) { if (!qs.contains(e.target)) sugg.hidden = true; });
     }
+    g.appendChild(reportToPicker());
+    g.appendChild(attachPicker());
     formBox.appendChild(g);
     var send = el('button', { class: 'md-btn pri', type: 'button', id: 'md-send', text: 'Send ' + TYPES[t].label.toLowerCase() });
     send.onclick = function () {
       var picked = Object.keys(state.toSel);
       if (!picked.length) { toast('Pick who to send it to.', 'err'); return; }
       var grp = picked.filter(function (k) { return k.charAt(0) === '_'; })[0];
-      var body = { type: t, toIds: grp ? [] : picked, toGroup: grp === '__EVERYONE' ? 'EVERYONE' : 'ADMINS', priority: prio.value };
+      var body = { type: t, toIds: grp ? [] : picked, toGroup: grp === '__EVERYONE' ? 'EVERYONE' : 'ADMINS', priority: prio.value, reportTo: Object.keys(state.rptSel) };
       Object.keys(inp).forEach(function (k) { body[k] = inp[k].value.trim(); });
       if (t === 'PRICE' || t === 'QUOTATION') {
         body.customerName = ctx.customerName || ''; body.customerId = ctx.customerId || '';
-        body.items = (ctx.lines || []).filter(function (l) { return String(l.itemCode).trim() || String(l.productName).trim() || String(l.price).trim(); });
+        body.items = (ctx.lines || []).filter(function (l) { return String(l.itemCode).trim() || String(l.productName).trim() || String(l.price == null ? '' : l.price).trim(); });
         if (qid) body.quotationId = qid;
       }
       send.disabled = true;
       api('POST', '/md-desk', body).then(function (j) {
-        toast(j.message || 'Sent'); state.compose = t; state.toSel = {}; renderForm();
-        state.tab = 'sent'; state.status = ''; load();
+        var files = state.pendFiles.slice(), id = j.data.item.id, msg = j.message || 'Sent', bad = 0;
+        return files.reduce(function (p, f) { return p.then(function () { return upload('/md-desk/' + encodeURIComponent(id) + '/files', f).catch(function (e) { bad++; toast(f.name + ': ' + e.message, 'err'); }); }); }, Promise.resolve()).then(function () {
+          if (!bad) toast(msg + (files.length ? ' · ' + files.length + ' file' + (files.length > 1 ? 's' : '') + ' attached' : ''));
+          state.compose = t; state.toSel = {}; state.rptSel = {}; state.pendFiles = []; renderForm();
+          state.tab = 'sent'; state.status = ''; load();
+        });
       }).catch(function (e) { toast(e.message, 'err'); send.disabled = false; });
     };
     formBox.appendChild(el('div', { class: 'md-acts' }, [send]));
@@ -391,7 +473,7 @@
       if (state.type && i.type !== state.type) return false;
       if (state.status === 'OPEN' && i.status === 'DONE') return false;
       if (state.status === 'DONE' && i.status !== 'DONE') return false;
-      if (q && [i.title, i.details, i.customerName, i.itemCode, i.productName, i.quotationNo, i.fromName, i.toName].join(' ').toLowerCase().indexOf(q) === -1) return false;
+      if (q && [i.title, i.details, i.customerName, i.itemCode, i.productName, i.quotationNo, i.fromName, i.toName, (i.items || []).map(function (l) { return [l.itemCode, l.productName, l.supplier].join(' '); }).join(' ')].join(' ').toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
   }
@@ -407,7 +489,10 @@
   }
   function itemLine(i) {
     var T = TYPES[i.type] || TYPES.MESSAGE;
-    if (i.type === 'PRICE') return [i.customerName, i.itemCode || i.productName, money(i.price) + (i.discount != null ? ' · ' + Number(i.discount) + '% disc.' : '')].filter(Boolean).join(' · ');
+    if (i.type === 'PRICE') {
+      var ls = i.items || [], got = ls.filter(function (l) { return l.price != null; }).length;
+      return [i.customerName, ls.length > 1 ? ls.length + ' items' : (i.itemCode || i.productName), ls.length ? (got === ls.length ? '✓ all priced' : got + ' of ' + ls.length + ' priced') : (i.price != null ? money(i.price) : 'price pending')].filter(Boolean).join(' · ');
+    }
     if (i.type === 'QUOTATION') return [i.quotationNo, i.customerName, i.amount != null ? money(i.amount) : ''].filter(Boolean).join(' · ');
     return (i.details || '').slice(0, 140) || T.label;
   }
@@ -425,8 +510,9 @@
         when(i.createdAt),
         el('span', { class: 'md-badge', style: '--c:' + S[1], text: S[0] }),
         i.priority !== 'NORMAL' ? el('span', { class: 'md-badge', style: '--c:' + P[1], text: P[0] }) : null,
-        i.type === 'TASK' && i.dueDate ? el('span', { class: 'md-badge', style: '--c:' + (i.overdue ? '#dc2626' : '#475569'), text: (i.overdue ? 'Overdue · ' : 'Due ') + dmy(i.dueDate) }) : null,
-        +i.replyCount ? el('span', { text: '💬 ' + i.replyCount }) : null
+        i.dueDate ? el('span', { class: 'md-badge', style: '--c:' + (i.overdue ? '#dc2626' : '#475569'), text: (i.overdue ? 'Overdue · ' : 'Due ') + dmy(i.dueDate) }) : null,
+        i.reportToMe && !i.assignedToMe && i.toId !== state.me ? el('span', { class: 'md-badge', style: '--c:#7c3aed', text: '📋 Reported to you' }) : null,
+        +i.replyCount || +i.fileCount ? el('span', { text: (+i.replyCount ? '💬 ' + i.replyCount : '') + (+i.fileCount ? '  📎 ' + i.fileCount : '') }) : null
       ]);
       listBox.appendChild(el('button', { type: 'button', class: 'md-item' + (i.unread ? ' unread' : '') + (i.status === 'DONE' ? ' done' : ''), style: '--c:' + T.c, 'data-item': i.id, onclick: function () { open(i.id); } }, [
         el('span', { class: 'i', text: T.icon }),
@@ -466,22 +552,96 @@
         el('button', { class: 'md-btn sm', type: 'button', text: '✕', 'aria-label': 'Close', onclick: close })
       ]));
       var facts = [];
-      if (i.type === 'TASK') facts.push(['Due date', i.dueDate ? dmy(i.dueDate) + (i.overdue ? ' (overdue)' : '') : '—']);
-      if (i.type === 'PRICE' && i.items && i.items.length > 1) facts.push(['Customer', i.customerName], ['Items', String(i.items.length)]);
-      else if (i.type === 'PRICE') facts.push(['Customer', i.customerName], ['Item code', i.itemCode || '—'], ['Product', i.productName || '—'], ['Price given', money(i.price)], ['Discount', i.discount != null ? Number(i.discount) + ' %' : '—']);
+      if (i.type === 'TASK' || (i.type === 'PRICE' && i.dueDate)) facts.push([i.type === 'PRICE' ? 'Need price by' : 'Due date', i.dueDate ? dmy(i.dueDate) + (i.overdue ? ' (overdue)' : '') : '—']);
+      if (i.type === 'PRICE') facts.push(['Customer', i.customerName || '—'], ['Items', String((i.items || []).length || 1)], ['Priced', (i.items || []).filter(function (l) { return l.price != null; }).length + ' of ' + ((i.items || []).length || 1)]);
       if (i.type === 'QUOTATION') facts.push(['Quotation no.', i.quotationNo], ['Customer', i.customerName], ['Value', i.amount != null ? money(i.amount) : '—']);
+      function ppl(lbl, list, c) {
+        return el('div', { style: 'font-size:.8rem;margin-top:.3rem' }, [el('b', { text: lbl + ' ' }), el('span', { class: 'md-ppl', style: 'display:inline-flex' }, list.map(function (u) { return el('span', { class: 'md-chip', style: 'padding-right:.6rem;' + (c || ''), text: u.name }); }))]);
+      }
+      if (i.assignees && i.assignees.length) dlg.appendChild(ppl('Assigned to (shared task):', i.assignees));
+      if (i.reportTo && i.reportTo.length) dlg.appendChild(ppl('📋 Report to:', i.reportTo, 'background:#ede9fe;color:#5b21b6'));
       if (facts.length) dlg.appendChild(el('div', { class: 'md-facts' }, facts.map(function (f) { return el('div', {}, [el('span', { text: f[0] }), f[1] || '—']); })));
+      var canWork = state.role === 'SUPER_ADMIN' || state.role === 'ADMIN' || i.fromId === state.me || i.toId === state.me || (i.assignees || []).some(function (u) { return u.id === state.me; });
       if (i.items && i.items.length) {
-        dlg.appendChild(el('div', { style: 'overflow-x:auto' }, [el('table', { class: 'md-qtable', id: 'md-items' }, [
-          el('thead', {}, [el('tr', {}, ['#', 'Item code', 'Product', 'Qty', 'Price', 'Disc %', 'Net'].map(function (h, k) { return el('th', { class: k >= 3 ? 'md-n' : '', text: h }); }))]),
-          el('tbody', {}, i.items.map(function (l, k) {
-            return el('tr', {}, [el('td', { text: String(k + 1) }), el('td', {}, [el('b', { text: l.itemCode || '—' })]), el('td', { text: l.productName || '' }),
-              el('td', { class: 'md-n', text: l.quantity != null ? String(l.quantity) : '—' }), el('td', { class: 'md-n', text: money(l.price) }),
-              el('td', { class: 'md-n', text: l.discount != null ? Number(l.discount) + ' %' : '—' }), el('td', { class: 'md-n' }, [el('b', { text: money(l.net) })])]);
-          }))
-        ])]));
+        var gp = i.type === 'PRICE', itemsBox = el('div', { style: 'overflow-x:auto' });
+        var drawItems = function () {
+          clear(itemsBox).appendChild(el('table', { class: 'md-qtable', id: 'md-items' }, [
+            el('thead', {}, [el('tr', {}, ['#', 'Item code', 'Product', gp ? 'Supplier' : null, 'Qty', 'Price', 'Disc %', 'Net', gp ? 'Lead time' : null].filter(function (h) { return h !== null; }).map(function (h) { return el('th', { class: /Qty|Price|Disc|Net/.test(h) ? 'md-n' : '', text: h }); }))]),
+            el('tbody', {}, i.items.map(function (l, k) {
+              return el('tr', {}, [el('td', { text: String(k + 1) }), el('td', {}, [el('b', { text: l.itemCode || '—' })]), el('td', { text: l.productName || '' }),
+                gp ? el('td', { text: l.supplier || '—' }) : null,
+                el('td', { class: 'md-n', text: l.quantity != null ? String(l.quantity) : '—' }), el('td', { class: 'md-n', text: l.price != null ? money(l.price) : (gp ? '⏳ pending' : '—') }),
+                el('td', { class: 'md-n', text: l.discount != null ? Number(l.discount) + ' %' : '—' }), el('td', { class: 'md-n' }, [el('b', { text: money(l.net) })]),
+                gp ? el('td', { text: l.leadTime || '—' }) : null]);
+            }))
+          ]));
+          if (gp && canWork) itemsBox.appendChild(el('div', { class: 'md-acts', style: 'justify-content:flex-start' }, [el('button', { type: 'button', class: 'md-btn grn sm', id: 'md-fill-prices', text: '💰 Enter supplier prices', onclick: editPrices })]));
+        };
+        /* Get price: the assignee types the supplier, price, discount and lead time per line */
+        var editPrices = function () {
+          var rows = i.items.map(function (l) { return Object.assign({}, l); });
+          function inp(r, k, attrs) { var x = el('input', Object.assign({ value: r[k] == null ? '' : String(r[k]), 'data-gp': k }, attrs || {})); x.oninput = function () { r[k] = x.value; }; return x; }
+          clear(itemsBox).appendChild(el('table', { class: 'md-gp', id: 'md-gp' }, [
+            el('thead', {}, [el('tr', {}, ['Item', 'Supplier', 'Price ₹', 'Disc %', 'Lead time'].map(function (h) { return el('th', { text: h }); }))]),
+            el('tbody', {}, rows.map(function (r) {
+              return el('tr', {}, [el('td', {}, [el('b', { text: r.itemCode || '' }), el('div', { class: 'md-sub', text: (r.productName || '') + (r.quantity != null ? ' · qty ' + r.quantity : '') })]),
+                el('td', {}, [inp(r, 'supplier', { placeholder: 'Supplier' })]), el('td', { style: 'width:100px' }, [inp(r, 'price', { type: 'number', min: '0', step: '0.01', placeholder: '0.00' })]),
+                el('td', { style: 'width:80px' }, [inp(r, 'discount', { type: 'number', min: '0', max: '100', step: '0.01', placeholder: '0' })]), el('td', { style: 'width:110px' }, [inp(r, 'leadTime', { placeholder: 'e.g. 2 weeks' })])]);
+            }))
+          ]));
+          var save = el('button', { type: 'button', class: 'md-btn pri sm', id: 'md-gp-save', text: 'Save prices' });
+          save.onclick = function () {
+            save.disabled = true;
+            api('PATCH', '/md-desk/' + encodeURIComponent(i.id) + '/items', { items: rows }).then(function (k) { toast('Prices saved — the sender has been told'); draw(k); }).catch(function (e) { toast(e.message, 'err'); save.disabled = false; });
+          };
+          itemsBox.appendChild(el('div', { class: 'md-acts', style: 'justify-content:flex-start' }, [save, el('button', { type: 'button', class: 'md-btn sm', text: 'Cancel', onclick: drawItems })]));
+        };
+        drawItems();
+        dlg.appendChild(itemsBox);
       }
       if (i.details) dlg.appendChild(el('div', { class: 'md-body', text: i.details }));
+      // attachments: image thumbnails (👁 view, download), PDF viewer, Excel / Word download
+      var files = j.data.files || [];
+      var fbox = el('div', { class: 'md-files', id: 'md-files-box' });
+      files.forEach(function (f) {
+        var icon = f.kind === 'PDF' ? '📕' : f.kind === 'EXCEL' ? '📗' : f.kind === 'IMAGE' ? '🖼' : '📄';
+        var thumb = el('button', { type: 'button', class: 'md-thumb', 'data-file': f.id, title: 'View ' + f.fileName }, [el('span', { text: icon }), el('span', { class: 'eye', text: '👁' })]);
+        if (f.kind === 'IMAGE') blobOf(fileUrl(i.id, f)).then(function (b) { var u = URL.createObjectURL(b); thumb.replaceChild(el('img', { src: u, alt: f.fileName }), thumb.firstChild); f._url = u; }).catch(function () {});
+        function view() {
+          if (f.kind === 'PDF' && window.PdfView) return PdfView.show(fileUrl(i.id, f), { title: f.fileName, fileName: f.fileName });
+          if (f.kind !== 'IMAGE') return download();
+          var shown = function (u) {
+            var lb = el('div', { class: 'md-lb', id: 'md-lightbox' }, [el('div', { class: 'bar' }, [el('b', { text: f.fileName }),
+              el('button', { type: 'button', class: 'md-btn sm', text: '⬇ Download', onclick: download }),
+              el('button', { type: 'button', class: 'md-btn sm', text: '✕ Close', onclick: function () { lb.remove(); } })]),
+              el('div', { class: 'pic' }, [el('img', { src: u, alt: f.fileName })])]);
+            lb.addEventListener('click', function (e) { if (e.target === lb || e.target.className === 'pic') lb.remove(); });
+            document.body.appendChild(lb);
+          };
+          if (f._url) shown(f._url); else blobOf(fileUrl(i.id, f)).then(function (b) { f._url = URL.createObjectURL(b); shown(f._url); }).catch(function (e) { toast(e.message, 'err'); });
+        }
+        function download() { blobOf(fileUrl(i.id, f, true)).then(function (b) { saveBlob(b, f.fileName); }).catch(function (e) { toast(e.message, 'err'); }); }
+        thumb.onclick = view;
+        var canDel = f.uploadedById === state.me || i.fromId === state.me || state.role === 'SUPER_ADMIN';
+        fbox.appendChild(el('div', { class: 'md-file' }, [thumb, el('div', { class: 'nm', title: f.fileName, text: f.fileName }),
+          el('div', { class: 'md-sub', style: 'padding:0 .4rem', text: (f.uploadedByName || '') + ' · ' + Math.max(1, Math.round(f.size / 1024)) + ' KB' }),
+          el('div', { class: 'ac' }, [el('button', { type: 'button', class: 'md-btn sm', title: 'View', text: '👁', 'data-view': f.id, onclick: view }),
+            el('button', { type: 'button', class: 'md-btn sm', title: 'Download', text: '⬇', 'data-dl': f.id, onclick: download }),
+            canDel ? el('button', { type: 'button', class: 'md-btn sm red', title: 'Remove', text: '✕', onclick: function () {
+              if (!confirm('Remove ' + f.fileName + '?')) return;
+              api('DELETE', '/md-desk/' + encodeURIComponent(i.id) + '/files/' + encodeURIComponent(f.id)).then(function () { return api('GET', '/md-desk/' + encodeURIComponent(i.id)); }).then(draw).catch(function (e) { toast(e.message, 'err'); });
+            } }) : null])]));
+      });
+      var addF = el('input', { type: 'file', id: 'md-dlg-file', multiple: true, accept: 'image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx', style: 'display:none' });
+      addF.onchange = function () {
+        var fl = Array.prototype.slice.call(addF.files);
+        fl.reduce(function (p, f) { return p.then(function () { return upload('/md-desk/' + encodeURIComponent(i.id) + '/files', f); }); }, Promise.resolve())
+          .then(function () { toast(fl.length + ' file' + (fl.length > 1 ? 's' : '') + ' attached'); return api('GET', '/md-desk/' + encodeURIComponent(i.id)); }).then(draw).catch(function (e) { toast(e.message, 'err'); });
+      };
+      dlg.appendChild(el('div', { style: 'display:flex;align-items:center;gap:.5rem;margin-top:.6rem' }, [
+        el('span', { style: 'font-size:.75rem;font-weight:700;color:#64748b;text-transform:uppercase', text: 'Attachments' + (files.length ? ' (' + files.length + ')' : '') }),
+        el('button', { type: 'button', class: 'md-btn sm', id: 'md-attach', text: '📎 Add screenshot / PDF / Excel', onclick: function () { addF.click(); } }), addF]));
+      if (files.length) dlg.appendChild(fbox);
       var th = el('div', { class: 'md-thread', id: 'md-thread' });
       replies.forEach(function (r) {
         th.appendChild(el('div', { class: 'md-msg' + (r.userId === state.me ? ' me' : '') }, [el('div', { class: 'w', text: (r.userName || '—') + ' · ' + when(r.createdAt) }), el('div', { class: 't', text: r.body })]));
@@ -524,7 +684,7 @@
     injectCss();
     root = el('div', { class: 'md-wrap' });
     root.appendChild(el('div', { class: 'md-head' }, [el('h1', { text: 'CEO Desk' }),
-      el('p', { text: 'Direct line from the CEO — messages, important tasks, prices and quotations given (with items, prices and discounts) to one or many people at once. Replies come back here.' })]));
+      el('p', { text: 'Direct line from the CEO — messages, important tasks, get-price tasks (get the price from the supplier) and quotations, to one or many people as one shared task, with screenshots / PDF / Excel attached. Replies come back here.' })]));
     formBox = el('div', { class: 'md-card', id: 'md-compose' });
     tabsBox = el('div', { class: 'md-tabs' });
     listBox = el('div', { class: 'md-list', id: 'md-list' });
@@ -552,7 +712,7 @@
     if (location.hash === '#quotes') setTimeout(function () { showView('quotes'); }, 0);
     var origRender = renderList;
     renderList = function () { stSel.value = state.status; origRender(); };
-    api('GET', '/md-desk/recipients').then(function (j) { state.users = j.data.users || []; state.canGroups = !!j.data.canSendToGroups; renderForm(); }).catch(function () { renderForm(); });
+    api('GET', '/md-desk/recipients').then(function (j) { state.users = j.data.users || []; state.allUsers = j.data.allUsers || state.users; state.canGroups = !!j.data.canSendToGroups; renderForm(); }).catch(function () { renderForm(); });
     load().then(function () { var h = location.hash.slice(1); if (h && h !== 'quotes') open(decodeURIComponent(h)); });
     timer = setInterval(function () { if (document.visibilityState === 'visible' && !document.querySelector('.md-modal')) load(); }, 30000);
   }

@@ -196,7 +196,7 @@ class AlertFeedController
         if (true) {
             try { ensure_schema(MdDeskController::schema(), 'MD desk'); } catch (Throwable $e) {}
             [$toMe, $toMeP] = MdDeskController::toMeSql($auth);
-            $kinds = ['MESSAGE' => 'Message', 'TASK' => 'Important task', 'PRICE' => 'Price given', 'QUOTATION' => 'New quotation given'];
+            $kinds = ['MESSAGE' => 'Message', 'TASK' => 'Important task', 'PRICE' => 'Get price task', 'QUOTATION' => 'New quotation given'];
             foreach (self::rows(
                 "SELECT i.id, i.type, i.title, i.priority, i.dueDate, i.createdAt, f.name AS fromName FROM `MdDeskItem` i LEFT JOIN `User` f ON f.id=i.fromId
                  WHERE i.createdAt>? AND $toMe ORDER BY i.createdAt DESC LIMIT $per", array_merge([$since], $toMeP)) as $r) {
@@ -205,14 +205,14 @@ class AlertFeedController
             }
             foreach (self::rows(
                 "SELECT r.id, r.body, r.createdAt, r.itemId, i.title, u.name AS byName FROM `MdDeskReply` r JOIN `MdDeskItem` i ON i.id=r.itemId LEFT JOIN `User` u ON u.id=r.userId
-                 WHERE r.createdAt>? AND r.userId<>? AND (i.fromId=? OR i.toId=? OR (i.toId IS NULL AND EXISTS (SELECT 1 FROM `MdDeskReply` x WHERE x.itemId=i.id AND x.userId=?)))
-                 ORDER BY r.createdAt DESC LIMIT $per", [$since, $me, $me, $me, $me]) as $r) {
+                 WHERE r.createdAt>? AND r.userId<>? AND (i.fromId=? OR i.toId=? OR i.assignees LIKE ? OR i.reportTo LIKE ? OR (i.toId IS NULL AND EXISTS (SELECT 1 FROM `MdDeskReply` x WHERE x.itemId=i.id AND x.userId=?)))
+                 ORDER BY r.createdAt DESC LIMIT $per", [$since, $me, $me, $me, '%"' . $me . '"%', '%"' . $me . '"%', $me]) as $r) {
                 $add('md-reply-' . $r['id'], 'MD_DESK_REPLY', 'Reply from ' . ($r['byName'] ?: 'someone') . ' · ' . mb_substr($r['title'], 0, 60), mb_substr($r['body'], 0, 140),
                     '/md-desk/#' . rawurlencode($r['itemId']), $r['createdAt']);
             }
             foreach (self::rows(
                 "SELECT i.id, i.title, i.doneAt, d.name AS byName FROM `MdDeskItem` i LEFT JOIN `User` d ON d.id=i.doneById
-                 WHERE i.fromId=? AND i.status='DONE' AND i.doneAt>? AND i.doneById<>? ORDER BY i.doneAt DESC LIMIT $per", [$me, $since, $me]) as $r) {
+                 WHERE (i.fromId=? OR i.reportTo LIKE ? OR i.assignees LIKE ?) AND i.status='DONE' AND i.doneAt>? AND i.doneById<>? ORDER BY i.doneAt DESC LIMIT $per", [$me, '%"' . $me . '"%', '%"' . $me . '"%', $since, $me]) as $r) {
                 $add('md-done-' . $r['id'] . '-' . $r['doneAt'], 'MD_DESK_DONE', 'Done: ' . mb_substr($r['title'], 0, 70), 'Marked done by ' . ($r['byName'] ?: '—'),
                     '/md-desk/#' . rawurlencode($r['id']), $r['doneAt']);
             }

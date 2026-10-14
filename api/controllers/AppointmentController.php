@@ -13,6 +13,26 @@ class AppointmentController
             'seriesLen' => 'INT NULL',
         ];
         ensure_schema($schema, 'migration_appointments.sql');
+        // a reminder sent by hand carries its own message and who sent it
+        ensure_schema(['AppointmentAlert' => ['create' => '', 'columns' => ['note' => 'VARCHAR(255) NULL', 'sentById' => 'VARCHAR(30) NULL']]], 'Appointment reminders');
+    }
+
+    // POST /api/appointments/:id/remind { note } — remind the assigned engineer now (pops up on every page for them)
+    public function remind(string $id): void
+    {
+        $auth = authenticate();
+        $s = db()->prepare('SELECT a.id, a.assignedToId, a.userId, a.title, a.appointmentDate, c.companyName FROM `Appointment` a LEFT JOIN `Customer` c ON c.id=a.customerId WHERE a.id=?');
+        $s->execute([$id]);
+        $a = $s->fetch();
+        if (!$a) sendError('Appointment not found.', 404);
+        if (!is_admin_tier($auth['role']) && $a['userId'] !== $auth['id']) sendError('Only an admin or the person who booked it can send a reminder.', 403);
+        $to = $a['assignedToId'] ?: $a['userId'];
+        $note = mb_substr(trim((string) (request_body()['note'] ?? '')), 0, 255) ?: null;
+        db()->prepare("INSERT INTO `AppointmentAlert` (id,appointmentId,userId,alertType,isRead,createdAt,note,sentById) VALUES (?,?,?,?,0,?,?,?)")
+            ->execute([gen_id(), $id, $to, 'MANUAL_' . substr(gen_id(), -12), now_sql(), $note, $auth['id']]);
+        $u = db()->prepare('SELECT name FROM `User` WHERE id=?'); $u->execute([$to]);
+        log_activity($auth['id'], 'APPOINTMENT_REMINDER_SENT', 'Appointment', $id, ['to' => $to]);
+        sendSuccess([], 'Reminder sent to ' . ($u->fetchColumn() ?: 'the engineer'));
     }
 
     private const MAX_SERIES_DAYS = 31;
@@ -252,10 +272,11 @@ class AppointmentController
         $this->generateReminders($auth['id']);
 
         $s = db()->prepare(
-            "SELECT al.*, a.title, a.appointmentDate, a.appointmentTime, a.seriesDay, a.seriesLen, c.companyName
+            "SELECT al.*, a.title, a.appointmentDate, a.appointmentTime, a.seriesDay, a.seriesLen, c.companyName, sb.name AS sentByName
              FROM `AppointmentAlert` al
              JOIN `Appointment` a ON a.id=al.appointmentId
              LEFT JOIN `Customer` c ON c.id=a.customerId
+             LEFT JOIN `User` sb ON sb.id=al.sentById
              WHERE al.userId=? AND al.isRead=0
              ORDER BY al.createdAt DESC LIMIT 20"
         );

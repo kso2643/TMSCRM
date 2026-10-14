@@ -8,7 +8,8 @@
  * One item is one of:
  *   MESSAGE    a direct message
  *   TASK       an important task (priority + due date)
- *   PRICE      a price given to a customer (customer, item, price, discount)
+ *   PRICE      "Get price": get the price from the supplier (item lines; the assignee
+ *              fills supplier, price and discount per line). Customer optional.
  *   QUOTATION  a new quotation given (customer, quotation no, value)
  * sent to one person (any user), to all Admins (toId NULL, toGroup ADMINS)
  * or to everyone (toId NULL, toGroup EVERYONE). The Super Admin and Admins
@@ -31,6 +32,14 @@
  *   GET    /api/md-desk/:id              item + replies (marks it seen)
  *   POST   /api/md-desk/:id/reply        { body }
  *   PATCH  /api/md-desk/:id              { status: OPEN | DONE }
+ *   PATCH  /api/md-desk/:id/items        Get price: the assignee fills supplier / price / discount per line
+ *   POST   /api/md-desk/:id/files        attach a screenshot / image / PDF / Excel (multipart "file")
+ *   GET    /api/md-desk/:id/files/:fid   view / download (?download=1)
+ *   DELETE /api/md-desk/:id/files/:fid   uploader, sender or Super Admin
+ *
+ * Several people picked = ONE shared item (assignees JSON, toGroup PEOPLE): all of them
+ * see the same item, thread and status. "Report to" (reportTo JSON) = people who are
+ * kept informed: they see the item, its replies and when it is done.
  *   DELETE /api/md-desk/:id              sender or Super Admin
  */
 class MdDeskController
@@ -51,7 +60,13 @@ class MdDeskController
   `status` VARCHAR(10) NOT NULL DEFAULT 'OPEN', `seenAt` DATETIME NULL, `doneAt` DATETIME NULL, `doneById` VARCHAR(30) NULL,
   `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `updatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `MdDeskItem_to_idx` (`toId`), KEY `MdDeskItem_from_idx` (`fromId`), KEY `MdDeskItem_created_idx` (`createdAt`)
-$tail", 'columns' => ['toGroup' => "VARCHAR(10) NOT NULL DEFAULT 'ADMINS'", 'items' => 'MEDIUMTEXT NULL', 'customerId' => 'VARCHAR(30) NULL', 'batchId' => 'VARCHAR(30) NULL']],
+$tail", 'columns' => ['toGroup' => "VARCHAR(10) NOT NULL DEFAULT 'ADMINS'", 'items' => 'MEDIUMTEXT NULL', 'customerId' => 'VARCHAR(30) NULL', 'batchId' => 'VARCHAR(30) NULL',
+                'assignees' => 'MEDIUMTEXT NULL', 'reportTo' => 'MEDIUMTEXT NULL']],
+            'MdDeskFile' => ['create' => "CREATE TABLE IF NOT EXISTS `MdDeskFile` (
+  `id` VARCHAR(30) NOT NULL, `itemId` VARCHAR(30) NOT NULL, `fileName` VARCHAR(255) NOT NULL, `storedName` VARCHAR(80) NOT NULL,
+  `size` INT NOT NULL DEFAULT 0, `uploadedById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`), KEY `MdDeskFile_item` (`itemId`)
+$tail"],
             'MdDeskRead' => ['create' => "CREATE TABLE IF NOT EXISTS `MdDeskRead` (
   `itemId` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `readAt` DATETIME NOT NULL,
   PRIMARY KEY (`itemId`, `userId`)
@@ -83,7 +98,8 @@ $tail"],
     public static function toMeSql(array $auth): array
     {
         $groups = self::isAdmin($auth) ? "'ADMINS','EVERYONE'" : "'EVERYONE'";
-        return ["(i.toId=? OR (i.toId IS NULL AND i.toGroup IN ($groups) AND i.fromId<>?))", [$auth['id'], $auth['id']]];
+        $like = '%"' . $auth['id'] . '"%';
+        return ["(i.toId=? OR (i.toId IS NULL AND i.toGroup IN ($groups) AND i.fromId<>?) OR i.assignees LIKE ? OR i.reportTo LIKE ?)", [$auth['id'], $auth['id'], $like, $like]];
     }
 
     /** SQL condition (alias i) for the items $auth may see. */
@@ -111,10 +127,38 @@ $tail"],
         return self::shape($r);
     }
 
+    private static ?array $names = null;
+
+    private static function userName(string $id): string
+    {
+        if (self::$names === null) self::$names = db()->query('SELECT id, name FROM `User`')->fetchAll(PDO::FETCH_KEY_PAIR);
+        return self::$names[$id] ?? '—';
+    }
+
     private static function shape(array $r): array
     {
         $r['items'] = !empty($r['items']) ? (json_decode($r['items'], true) ?: []) : [];
+        foreach (['assignees', 'reportTo'] as $k) {
+            $ids = !empty($r[$k]) ? (json_decode($r[$k], true) ?: []) : [];
+            $r[$k] = array_map(fn($u) => ['id' => $u, 'name' => self::userName($u)], $ids);
+        }
+        if ($r['assignees'] && !$r['toId']) $r['toName'] = implode(', ', array_column($r['assignees'], 'name'));
         return $r;
+    }
+
+    private static function idsIn(array $people, string $id): bool
+    {
+        return in_array($id, array_column($people, 'id'), true);
+    }
+
+    /** List of user ids from the body → validated active users (not me). */
+    private static function userIds($raw, string $me): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(fn($x) => trim((string) $x), (array) $raw))));
+        if (count($ids) > 200) sendError('Too many people picked.', 400);
+        $chk = db()->prepare('SELECT id FROM `User` WHERE id=? AND isActive=1');
+        foreach ($ids as $u) { $chk->execute([$u]); if (!$chk->fetch()) sendError('One of the people picked is not an active user.', 400); }
+        return array_values(array_filter($ids, fn($u) => $u !== $me));
     }
 
     private static function money($v): ?float
@@ -132,7 +176,8 @@ $tail"],
         [$w, $p] = self::visible($auth);
         $s = db()->prepare("SELECT i.*, f.name AS fromName, f.role AS fromRole, t.name AS toName, d.name AS doneByName,
                 (SELECT COUNT(*) FROM `MdDeskReply` r WHERE r.itemId=i.id) AS replyCount,
-                (SELECT MAX(r.createdAt) FROM `MdDeskReply` r WHERE r.itemId=i.id) AS lastReplyAt
+                (SELECT MAX(r.createdAt) FROM `MdDeskReply` r WHERE r.itemId=i.id) AS lastReplyAt,
+                (SELECT COUNT(*) FROM `MdDeskFile` x WHERE x.itemId=i.id) AS fileCount
             FROM `MdDeskItem` i LEFT JOIN `User` f ON f.id=i.fromId LEFT JOIN `User` t ON t.id=i.toId LEFT JOIN `User` d ON d.id=i.doneById
             WHERE $w ORDER BY (i.status='DONE'), FIELD(i.priority,'URGENT','HIGH','NORMAL'), i.createdAt DESC LIMIT 500");
         $s->execute($p);
@@ -141,7 +186,11 @@ $tail"],
         $admin = self::isAdmin($auth);
         $items = array_map(function ($r) use ($auth, $read, $admin) {
             $r['mine'] = $r['fromId'] === $auth['id'];
-            $r['toMe'] = $r['toId'] === $auth['id'] || ($r['toId'] === null && $r['fromId'] !== $auth['id'] && ($r['toGroup'] === 'EVERYONE' || $admin));
+            $like = '"' . $auth['id'] . '"';
+            $r['assignedToMe'] = str_contains((string) $r['assignees'], $like);
+            $r['reportToMe'] = str_contains((string) $r['reportTo'], $like);
+            $r['toMe'] = $r['toId'] === $auth['id'] || $r['assignedToMe'] || $r['reportToMe']
+                || ($r['toId'] === null && $r['fromId'] !== $auth['id'] && ($r['toGroup'] === 'EVERYONE' || ($r['toGroup'] === 'ADMINS' && $admin)));
             $r['unread'] = $r['toMe'] && !isset($read[$r['id']]) && $r['status'] !== 'DONE';
             $r['overdue'] = $r['type'] === 'TASK' && $r['status'] !== 'DONE' && $r['dueDate'] && $r['dueDate'] < date('Y-m-d');
             return self::shape($r);
@@ -179,7 +228,9 @@ $tail"],
         $s = db()->prepare("SELECT id, name, role, department FROM `User` WHERE {$only}isActive=1 AND id<>?
             ORDER BY FIELD(role,'SUPER_ADMIN','ADMIN','MANAGER','ACCOUNTS','SALES_ENGINEER','SALES'), name");
         $s->execute([$auth['id']]);
-        sendSuccess(['users' => $s->fetchAll(), 'canSendToGroups' => self::isAdmin($auth)]);
+        $all = db()->prepare("SELECT id, name, role FROM `User` WHERE isActive=1 AND id<>? ORDER BY name");
+        $all->execute([$auth['id']]);
+        sendSuccess(['users' => $s->fetchAll(), 'allUsers' => $all->fetchAll(), 'canSendToGroups' => self::isAdmin($auth)]);
     }
 
     // GET /api/md-desk/quotations?q=
@@ -228,11 +279,13 @@ $tail"],
             $code = mb_substr(trim((string) ($it['itemCode'] ?? '')), 0, 120);
             $prod = mb_substr(trim((string) ($it['productName'] ?? '')), 0, 255);
             $qty = self::money($it['quantity'] ?? null); $price = self::money($it['price'] ?? null); $disc = self::money($it['discount'] ?? null);
+            $sup = mb_substr(trim((string) ($it['supplier'] ?? '')), 0, 150);
+            $lead = mb_substr(trim((string) ($it['leadTime'] ?? '')), 0, 60);
             if ($code === '' && $prod === '' && $price === null) continue;
             if ($code === '' && $prod === '') sendError('Line ' . ($k + 1) . ': enter the item code or product.', 400);
             if ($disc !== null && ($disc < 0 || $disc > 100)) sendError('Line ' . ($k + 1) . ': discount must be between 0 and 100 %.', 400);
             $net = $price === null ? null : round($price * (1 - ($disc ?? 0) / 100), 2);
-            $out[] = ['itemCode' => $code, 'productName' => $prod, 'quantity' => $qty, 'price' => $price, 'discount' => $disc, 'net' => $net];
+            $out[] = ['itemCode' => $code, 'productName' => $prod, 'quantity' => $qty, 'supplier' => $sup, 'leadTime' => $lead, 'price' => $price, 'discount' => $disc, 'net' => $net];
         }
         return array_slice($out, 0, 100);
     }
@@ -252,6 +305,7 @@ $tail"],
         $group = strtoupper(trim((string) ($b['toGroup'] ?? 'ADMINS')));
         if (!in_array($group, ['ADMINS', 'EVERYONE'], true)) $group = 'ADMINS';
         if (count($toIds) > 200) sendError('Too many people picked.', 400);
+        $reportTo = self::userIds($b['reportTo'] ?? [], $auth['id']);
         foreach ($toIds as $tid) {
             $s = db()->prepare('SELECT id, role FROM `User` WHERE id=? AND isActive=1');
             $s->execute([$tid]);
@@ -276,17 +330,13 @@ $tail"],
         $custId = trim((string) ($b['customerId'] ?? '')) ?: null;
 
         if ($type === 'PRICE') {
-            if ($cust === '') sendError('Enter the customer the price was given to.', 400);
-            if ($lines) {
-                // first line also fills the single-item columns (lists, alerts, older screens)
-                $f = $lines[0];
-                if ($code === '') $code = $f['itemCode']; if ($prod === '') $prod = $f['productName'];
-                if ($price === null) $price = $f['price']; if ($disc === null) $disc = $f['discount'];
-                foreach ($lines as $k => $l) if ($l['price'] === null) sendError('Line ' . ($k + 1) . ' (' . ($l['itemCode'] ?: $l['productName']) . '): enter the price.', 400);
-            }
-            if ($code === '' && $prod === '') sendError('Enter the item code or product.', 400);
-            if ($price === null) sendError('Enter the price given.', 400);
-            if ($title === '') $title = 'Price given · ' . (count($lines) > 1 ? count($lines) . ' items' : ($code ?: $prod)) . ' · ' . $cust;
+            // "Get price": a task to get the price from the supplier — price filled in later by the assignee
+            if (!$lines && ($code !== '' || $prod !== '')) $lines = self::itemLines([['itemCode' => $code, 'productName' => $prod, 'quantity' => $b['quantity'] ?? null, 'price' => $price, 'discount' => $disc]]);
+            if (!$lines) sendError('Enter at least one item (code or product) to get the price for.', 400);
+            $f = $lines[0];
+            if ($code === '') $code = $f['itemCode']; if ($prod === '') $prod = $f['productName'];
+            if ($price === null) $price = $f['price']; if ($disc === null) $disc = $f['discount'];
+            if ($title === '') $title = 'Get price · ' . (count($lines) > 1 ? count($lines) . ' items' : ($code ?: $prod)) . ($cust !== '' ? ' · ' . $cust : '');
         } elseif ($type === 'QUOTATION') {
             if ($cust === '') sendError('Enter the customer the quotation was given to.', 400);
             if ($qno === '') sendError('Enter the quotation number.', 400);
@@ -301,17 +351,18 @@ $tail"],
             $amount = 0.0; foreach ($lines as $l) $amount += ($l['net'] ?? 0) * ($l['quantity'] ?? 1);
             $amount = round($amount, 2);
         }
-        $now = now_sql(); $batch = count($toIds) > 1 ? gen_id() : null; $ids = [];
-        $ins = db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,customerId,itemCode,productName,price,discount,quotationId,quotationNo,amount,items,fromId,toId,toGroup,batchId,status,createdAt,updatedAt)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?)');
-        foreach ($toIds ?: [null] as $tid) {
-            $id = gen_id(); $ids[] = $id;
-            $ins->execute([$id, $type, mb_substr($title, 0, 255), $details ?: null, $prio, $type === 'TASK' ? $due : null, $cust ?: null, $custId, $code ?: null, $prod ?: null,
-                $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $lines ? json_encode($lines, JSON_UNESCAPED_UNICODE) : null,
-                $auth['id'], $tid, $tid ? 'ADMINS' : $group, $batch, $now, $now]);
-        }
-        log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $ids[0], ['type' => $type, 'title' => $title, 'to' => count($ids)]);
-        sendSuccess(['item' => self::load($auth, $ids[0]), 'count' => count($ids)], count($ids) > 1 ? 'Sent to ' . count($ids) . ' people' : 'Sent', 201);
+        $now = now_sql(); $id = gen_id();
+        // several people = one shared item (assignees); one person = toId; nobody = a group
+        $shared = count($toIds) > 1;
+        $reportTo = array_values(array_diff($reportTo, $toIds));
+        $ins = db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,customerId,itemCode,productName,price,discount,quotationId,quotationNo,amount,items,fromId,toId,toGroup,assignees,reportTo,status,createdAt,updatedAt)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?)');
+        $ins->execute([$id, $type, mb_substr($title, 0, 255), $details ?: null, $prio, in_array($type, ['TASK', 'PRICE'], true) ? $due : null, $cust ?: null, $custId, $code ?: null, $prod ?: null,
+            $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $lines ? json_encode($lines, JSON_UNESCAPED_UNICODE) : null,
+            $auth['id'], $shared ? null : ($toIds[0] ?? null), $shared ? 'PEOPLE' : ($toIds ? 'ADMINS' : $group),
+            $shared ? json_encode($toIds) : null, $reportTo ? json_encode($reportTo) : null, $now, $now]);
+        log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $id, ['type' => $type, 'title' => $title, 'to' => count($toIds), 'reportTo' => count($reportTo)]);
+        sendSuccess(['item' => self::load($auth, $id), 'count' => max(1, count($toIds))], $shared ? 'Sent to ' . count($toIds) . ' people (one shared task)' : 'Sent', 201);
     }
 
     // GET /api/md-desk/:id
@@ -326,7 +377,7 @@ $tail"],
         }
         $s = db()->prepare('SELECT r.*, u.name AS userName, u.role AS userRole FROM `MdDeskReply` r LEFT JOIN `User` u ON u.id=r.userId WHERE r.itemId=? ORDER BY r.createdAt');
         $s->execute([$id]);
-        sendSuccess(['item' => $item, 'replies' => $s->fetchAll()]);
+        sendSuccess(['item' => $item, 'replies' => $s->fetchAll(), 'files' => self::files($id)]);
     }
 
     // POST /api/md-desk/:id/reply
@@ -360,9 +411,108 @@ $tail"],
         $auth = self::auth();
         $item = self::load($auth, $id);
         if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can delete CEO Desk items.', 403);
+        $fs = db()->prepare('SELECT storedName FROM `MdDeskFile` WHERE itemId=?'); $fs->execute([$id]);
+        foreach ($fs->fetchAll(PDO::FETCH_COLUMN) as $sn) @unlink(UPLOADS_PATH . '/md-desk/' . basename($sn));
+        db()->prepare('DELETE FROM `MdDeskFile` WHERE itemId=?')->execute([$id]);
         db()->prepare('DELETE FROM `MdDeskReply` WHERE itemId=?')->execute([$id]);
         db()->prepare('DELETE FROM `MdDeskRead` WHERE itemId=?')->execute([$id]);
         db()->prepare('DELETE FROM `MdDeskItem` WHERE id=?')->execute([$id]);
         sendSuccess([], 'Deleted');
+    }
+
+    /** Who may work on an item: sender, assignee / direct recipient, Admins. */
+    private static function canWork(array $auth, array $item): bool
+    {
+        return self::isAdmin($auth) || $item['fromId'] === $auth['id'] || $item['toId'] === $auth['id'] || self::idsIn($item['assignees'], $auth['id']);
+    }
+
+    // PATCH /api/md-desk/:id/items — Get price: fill supplier, price, discount, lead time per line
+    public function updateItems(string $id): void
+    {
+        $auth = self::auth();
+        $item = self::load($auth, $id);
+        if (!self::canWork($auth, $item)) sendError('Only the people the task was given to (or the sender) can fill in the prices.', 403);
+        $lines = self::itemLines(request_body()['items'] ?? []);
+        if (!$lines) sendError('Enter at least one item.', 400);
+        $f = $lines[0]; $now = now_sql();
+        db()->prepare('UPDATE `MdDeskItem` SET items=?, itemCode=?, productName=?, price=?, discount=?, updatedAt=? WHERE id=?')
+            ->execute([json_encode($lines, JSON_UNESCAPED_UNICODE), $f['itemCode'] ?: null, $f['productName'] ?: null, $f['price'], $f['discount'], $now, $id]);
+        $priced = count(array_filter($lines, fn($l) => $l['price'] !== null));
+        $note = '💰 Prices updated: ' . $priced . ' of ' . count($lines) . ' item' . (count($lines) === 1 ? '' : 's') . ' priced' .
+            implode('', array_map(fn($l) => "\n• " . ($l['itemCode'] ?: $l['productName']) . ($l['supplier'] ? ' · ' . $l['supplier'] : '') .
+                ($l['price'] !== null ? ' · ₹' . number_format($l['price'], 2) . ($l['discount'] ? ' less ' . rtrim(rtrim(number_format($l['discount'], 2), '0'), '.') . '%' : '') : ' · (no price yet)') .
+                ($l['leadTime'] ? ' · ' . $l['leadTime'] : ''), $lines));
+        db()->prepare('INSERT INTO `MdDeskReply` (id,itemId,userId,body,createdAt) VALUES (?,?,?,?,?)')->execute([gen_id(), $id, $auth['id'], $note, $now]);
+        log_activity($auth['id'], 'MD_DESK_PRICES', 'MdDeskItem', $id, ['priced' => $priced]);
+        $this->show($id);
+    }
+
+    public const FILE_EXT = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp',
+        'pdf' => 'application/pdf', 'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xls' => 'application/vnd.ms-excel',
+        'csv' => 'text/csv', 'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'doc' => 'application/msword'];
+
+    private static function files(string $id): array
+    {
+        $s = db()->prepare('SELECT f.id, f.fileName, f.size, f.uploadedById, f.createdAt, u.name AS uploadedByName FROM `MdDeskFile` f LEFT JOIN `User` u ON u.id=f.uploadedById WHERE f.itemId=? ORDER BY f.createdAt');
+        $s->execute([$id]);
+        return array_map(function ($f) {
+            $ext = strtolower(pathinfo($f['fileName'], PATHINFO_EXTENSION));
+            $f['kind'] = in_array($ext, ['png', 'jpg', 'jpeg', 'gif', 'webp'], true) ? 'IMAGE' : ($ext === 'pdf' ? 'PDF' : (in_array($ext, ['xlsx', 'xls', 'csv'], true) ? 'EXCEL' : 'DOC'));
+            $f['size'] = (int) $f['size'];
+            return $f;
+        }, $s->fetchAll());
+    }
+
+    // POST /api/md-desk/:id/files — screenshot / image / PDF / Excel / Word, up to 25 MB
+    public function uploadFile(string $id): void
+    {
+        $auth = self::auth();
+        self::load($auth, $id);
+        $f = $_FILES['file'] ?? null;
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('No file received (check the size — up to 25 MB).', 400);
+        if ($f['size'] > 25 * 1024 * 1024) sendError('The file is larger than 25 MB.', 400);
+        $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
+        if (!isset(self::FILE_EXT[$ext])) sendError('Attach an image / screenshot, PDF, Excel or Word file.', 400);
+        $dir = UPLOADS_PATH . '/md-desk';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the file on the server.', 500);
+        $fid = gen_id(); $stored = $fid . '.' . $ext;
+        if (!move_uploaded_file($f['tmp_name'], "$dir/$stored") && !rename($f['tmp_name'], "$dir/$stored")) sendError('Could not save the file on the server.', 500);
+        $name = preg_replace('/[^\w.\- ()]+/u', '_', (string) $f['name']);
+        db()->prepare('INSERT INTO `MdDeskFile` (id,itemId,fileName,storedName,size,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?)')
+            ->execute([$fid, $id, mb_substr($name, 0, 255), $stored, (int) $f['size'], $auth['id'], now_sql()]);
+        db()->prepare('UPDATE `MdDeskItem` SET updatedAt=? WHERE id=?')->execute([now_sql(), $id]);
+        sendSuccess(['files' => self::files($id)], 'File attached', 201);
+    }
+
+    // GET /api/md-desk/:id/files/:fid
+    public function downloadFile(string $id, string $fid): void
+    {
+        $auth = self::auth();
+        self::load($auth, $id);
+        $s = db()->prepare('SELECT * FROM `MdDeskFile` WHERE id=? AND itemId=?'); $s->execute([$fid, $id]);
+        $f = $s->fetch();
+        if (!$f) sendError('File not found.', 404);
+        $path = UPLOADS_PATH . '/md-desk/' . basename($f['storedName']);
+        if (!is_file($path)) sendError('The file is missing on the server.', 404);
+        $ext = strtolower(pathinfo($f['storedName'], PATHINFO_EXTENSION));
+        $inline = in_array($ext, ['png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf'], true) && !qp('download');
+        header('Content-Type: ' . (self::FILE_EXT[$ext] ?? 'application/octet-stream'));
+        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . str_replace('"', '', $f['fileName']) . '"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path); exit;
+    }
+
+    // DELETE /api/md-desk/:id/files/:fid
+    public function deleteFile(string $id, string $fid): void
+    {
+        $auth = self::auth();
+        $item = self::load($auth, $id);
+        $s = db()->prepare('SELECT * FROM `MdDeskFile` WHERE id=? AND itemId=?'); $s->execute([$fid, $id]);
+        $f = $s->fetch();
+        if (!$f) sendError('File not found.', 404);
+        if ($f['uploadedById'] !== $auth['id'] && $item['fromId'] !== $auth['id'] && $auth['role'] !== 'SUPER_ADMIN') sendError('Only the person who attached it, the sender or the Super Admin can remove it.', 403);
+        @unlink(UPLOADS_PATH . '/md-desk/' . basename($f['storedName']));
+        db()->prepare('DELETE FROM `MdDeskFile` WHERE id=?')->execute([$fid]);
+        sendSuccess(['files' => self::files($id)], 'File removed');
     }
 }

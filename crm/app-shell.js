@@ -98,6 +98,7 @@
     { label: 'CPR & weekly review',   href: '/cpr/',            icon: 'target',    section: 'Sales' },
     { label: 'Stock',                 href: '/stock/',          icon: 'layers',    section: 'Sales' },
     { label: 'Analytics',             href: '/analytics/',      icon: 'chart',     section: 'Reports' },
+    { label: 'Sales report',          href: '/sales-report/',   icon: 'chart',     section: 'Reports' },
     { label: 'Attendance',            href: '/attendance/',     icon: 'clock',     section: 'Operations' },
     { label: 'Fuel expense',          href: '/fuel-expense/',   icon: 'fuel',      section: 'Operations' },
     { label: 'Appointments',          href: '/appointments/',   icon: 'appts',     section: 'Operations' },

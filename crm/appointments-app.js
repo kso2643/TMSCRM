@@ -127,6 +127,15 @@
   // ══════════════════════════════════════════════════════════════════
   // Customer picker — searchable dropdown over GET /api/customers
   // ══════════════════════════════════════════════════════════════════
+  /** Asks for an optional message and reminds the visit's engineer (pop-up on every page for them). */
+  function sendReminder(a, done) {
+    var who = a.assignedTo ? a.assignedTo.name : 'the engineer';
+    var note = window.prompt('Reminder to ' + who + ' — message (optional):', 'Please confirm the visit to ' + (a.customer ? a.customer.companyName : 'the customer'));
+    if (note === null) return;
+    api('POST', '/appointments/' + a.id + '/remind', { note: note.trim() }).then(function (j) { window.alert(j.message || 'Reminder sent'); if (done) done(); })
+      .catch(function (e) { window.alert(e.message); });
+  }
+
   function customerPicker(initial) {
     var wrap = el('div', { class: 'relative' });
     var selected = initial || null; // {id, companyName, contactPerson, contactNumber}
@@ -404,7 +413,12 @@
       });
     }
 
+    var remindBtn = existing && (isAdmin() || (me && existing.user && existing.user.id === me.id)) ? el('button', {
+      class: 'text-sm font-medium text-amber-700 dark:text-amber-300 hover:underline', type: 'button', 'data-remind': existing.id,
+      text: '🔔 Send reminder to engineer', onclick: function () { sendReminder(existing); }
+    }) : null;
     card.appendChild(el('div', { class: 'space-y-4' }, [
+      remindBtn,
       field('Customer', picker.el, { required: true }),
       field('Assign engineer', el('div', {}, [engSelect, assignMeBtn]), { required: true }),
       field('Title', titleInput, { required: true }),
@@ -1005,10 +1019,16 @@
             el('p', { class: 'text-xs text-slate-400 mt-0.5', text: 'Engineer: ' + (a.assignedTo ? a.assignedTo.name : '\u2014') }),
             a.notes ? el('p', { class: 'text-xs text-slate-500 dark:text-slate-400 mt-1.5 italic', text: a.notes }) : null
           ]),
-          canEdit ? el('button', {
-            class: 'text-xs text-primary dark:text-primary-300 font-medium shrink-0',
-            text: 'Edit', onclick: function () { openApptDialog(a, null, loadAndRenderBody); }
-          }) : null
+          el('div', { class: 'flex flex-col items-end gap-1 shrink-0' }, [
+            canEdit ? el('button', {
+              class: 'text-xs text-primary dark:text-primary-300 font-medium',
+              text: 'Edit', onclick: function () { openApptDialog(a, null, loadAndRenderBody); }
+            }) : null,
+            (isAdmin() || (me && a.user && a.user.id === me.id)) && a.status === 'SCHEDULED' ? el('button', {
+              class: 'text-xs text-amber-700 dark:text-amber-300 font-medium', 'data-remind': a.id,
+              text: '🔔 Remind', onclick: function () { sendReminder(a); }
+            }) : null
+          ])
         ]);
       });
     }

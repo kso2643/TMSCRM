@@ -78,7 +78,7 @@
   // app and as the newer hand-coded page. A React link would open the old one
   // (and a refresh the new one), so on React pages any click on such a link is
   // turned into a normal page load.
-  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/users|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue|projects|tooled-up|machine-accessories|documents|admin\/categories)\/?$/;
+  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/users|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue|projects|tooled-up|machine-accessories|documents|sales-report|admin\/categories)\/?$/;
   function hardLinks() {
     if (!window.__next_f) return; // only the compiled React pages need this
     document.addEventListener('click', function (e) {
@@ -873,6 +873,49 @@
     setInterval(function () { poll(false); }, POLL_MS);
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') poll(true); });
   }
+  // ── Sidebar sections (CRM, Sales, Reports, Operations, Admin) fold away ──
+  // Click a section heading to minimise / open it; the choice is remembered on
+  // this device. The page you are on stays visible even inside a folded section.
+  // Works on both sidebars (React pages and the hand-built pages use the same markup).
+  var SB_KEY = 'crm_sidebar_folded';
+  function sbFolded() { try { return JSON.parse(localStorage.getItem(SB_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function sbApply() {
+    var f = sbFolded();
+    Array.prototype.forEach.call(document.querySelectorAll('p.sidebar-section'), function (h) {
+      var name = (h.textContent || '').trim(), g = h.parentNode;
+      if (!g || !name) return;
+      if (!h.hasAttribute('data-sb')) {
+        h.setAttribute('data-sb', name); h.setAttribute('role', 'button'); h.setAttribute('tabindex', '0');
+        h.title = 'Click to minimise / open ' + name;
+      }
+      g.classList.toggle('sb-folded', !!f[name]);
+      h.setAttribute('aria-expanded', f[name] ? 'false' : 'true');
+    });
+  }
+  function sbToggle(h) {
+    var f = sbFolded(), name = h.getAttribute('data-sb');
+    if (f[name]) delete f[name]; else f[name] = true;
+    try { localStorage.setItem(SB_KEY, JSON.stringify(f)); } catch (e) {}
+    sbApply();
+  }
+  function sidebarFold() {
+    if (!document.getElementById('sb-fold-css')) {
+      var st = document.createElement('style'); st.id = 'sb-fold-css';
+      st.textContent = 'p.sidebar-section[data-sb]{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between}' +
+        'p.sidebar-section[data-sb]::after{content:"\\25BE";font-size:.8em;opacity:.6;transition:transform .15s}' +
+        '.sb-folded>p.sidebar-section[data-sb]::after{transform:rotate(-90deg)}' +
+        '.sb-folded>:not(.sidebar-section):not(.sidebar-link-active){display:none!important}';
+      document.head.appendChild(st);
+    }
+    document.addEventListener('click', function (e) { var h = e.target && e.target.closest && e.target.closest('p.sidebar-section[data-sb]'); if (h) { e.preventDefault(); sbToggle(h); } }, true);
+    document.addEventListener('keydown', function (e) { var h = e.target && e.target.closest && e.target.closest('p.sidebar-section[data-sb]'); if (h && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sbToggle(h); } }, true);
+    sbApply();
+    // React re-renders its sidebar after load and on navigation — fold again when it does
+    var t = null;
+    new MutationObserver(function () { clearTimeout(t); t = setTimeout(sbApply, 60); }).observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sidebarFold); else sidebarFold();
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
   // For other scripts / testing: CRMAlerts.check() polls right away.

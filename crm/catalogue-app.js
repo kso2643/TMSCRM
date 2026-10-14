@@ -303,8 +303,9 @@
             el('b', { text: f.title }),
             el('span', { class: 'sub', text: f.fileName + ' · ' + Math.max(1, Math.round(f.size / 1024)) + ' KB' + (f.uploadedBy ? ' · ' + f.uploadedBy : '') }),
             el('div', { style: 'display:flex;gap:.35rem;margin-top:auto' }, [
-              el('button', { class: 'pc-btn sm pri', type: 'button', text: 'Open', onclick: function () { getFile('/catalog/files/' + f.id, true, f.fileName); } }),
-              el('button', { class: 'pc-btn sm', type: 'button', text: 'Download', onclick: function () { getFile('/catalog/files/' + f.id + '?download=1', false, f.fileName); } }),
+              f.ext === 'link' ? el('button', { class: 'pc-btn sm pri', type: 'button', text: '↗ Open link', onclick: function () { window.open(f.linkUrl, '_blank', 'noopener'); } })
+                : el('button', { class: 'pc-btn sm pri', type: 'button', text: 'Open', onclick: function () { getFile('/catalog/files/' + f.id, true, f.fileName); } }),
+              f.ext === 'link' ? null : el('button', { class: 'pc-btn sm', type: 'button', text: 'Download', onclick: function () { getFile('/catalog/files/' + f.id + '?download=1', false, f.fileName); } }),
               canEdit ? el('button', { class: 'pc-btn sm red', type: 'button', text: '✕', title: 'Remove', onclick: function () {
                 if (!confirm('Remove “' + f.title + '”?')) return;
                 api('DELETE', '/catalog/files/' + f.id).then(function () { toast('Removed'); load(); }).catch(function (e) { toast(e.message, 'err'); });

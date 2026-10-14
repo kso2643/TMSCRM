@@ -169,7 +169,7 @@
     return a.alertType === 'REMINDER_EVENING_BEFORE' ? ' \u00b7 day ' + a.seriesDay + ' of ' + a.seriesLen : ' \u00b7 ' + a.seriesLen + ' visit days';
   }
   function renderAlert(a) {
-    var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE';
+    var manual = /^MANUAL_/.test(a.alertType || ''); var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE' || manual;
     var card = el('div', { class: 'ar-card' + (isReminder ? ' ar-amber' : '') });
     card.appendChild(el('div', { class: 'ar-ico', text: isReminder ? '\u23f0' : '\ud83d\udccc' }));
     var viewBtn = el('a', {
@@ -181,8 +181,9 @@
     card.appendChild(el('div', { class: 'ar-body' }, [
       el('p', {
         class: 'ar-t',
-        text: isReminder ? 'Appointment reminder' : 'New appointment assigned to you'
+        text: manual ? '🔔 Reminder from ' + (a.sentByName || 'admin') : isReminder ? 'Appointment reminder' : 'New appointment assigned to you'
       }),
+      manual && a.note ? el('p', { class: 'ar-s', style: 'font-weight:600', text: '“' + a.note + '”' }) : null,
       el('p', {
         class: 'ar-s',
         text: a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '') + seriesTxt(a)
@@ -208,9 +209,9 @@
       alerts.forEach(function (a) {
         if (shownIds[a.id]) return;
         shownIds[a.id] = true;
-        var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE';
-        var title = isReminder ? 'Appointment reminder' : 'New appointment assigned to you';
-        var body = a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '') + seriesTxt(a) + ' \u00b7 ' + fmtWhen(a.appointmentDate, a.appointmentTime);
+        var manual = /^MANUAL_/.test(a.alertType || ''); var isReminder = a.alertType === 'REMINDER_EVENING_BEFORE' || manual;
+        var title = manual ? '🔔 Reminder from ' + (a.sentByName || 'admin') : isReminder ? 'Appointment reminder' : 'New appointment assigned to you';
+        var body = (manual && a.note ? '“' + a.note + '” · ' : '') + a.title + (a.companyName ? ' \u00b7 ' + a.companyName : '') + seriesTxt(a) + ' \u00b7 ' + fmtWhen(a.appointmentDate, a.appointmentTime);
         // Same bottom-right stack as every other alert (crm-global.js), so it
         // never covers a page's header buttons or form fields.
         var shared = window.CRMAlerts && window.CRMAlerts.show && window.CRMAlerts.show({

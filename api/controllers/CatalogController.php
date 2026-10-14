@@ -54,7 +54,8 @@ class CatalogController
   `fileName` VARCHAR(255) NOT NULL, `storedName` VARCHAR(80) NOT NULL, `size` INT NOT NULL DEFAULT 0,
   `uploadedById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `ProductCatalogueFile_brand_idx` (`brand`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", 'columns' => ['docType' => "VARCHAR(16) NULL", 'brands' => 'VARCHAR(500) NULL', 'notes' => 'TEXT NULL', 'updatedAt' => 'DATETIME NULL']],
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", 'columns' => ['docType' => "VARCHAR(16) NULL", 'brands' => 'VARCHAR(500) NULL', 'notes' => 'TEXT NULL', 'updatedAt' => 'DATETIME NULL',
+                'linkUrl' => 'VARCHAR(1000) NULL', 'thumbName' => 'VARCHAR(80) NULL']],
         ];
     }
 
@@ -349,10 +350,22 @@ class CatalogController
         foreach ($rows as &$r) {
             $r['docType'] = $r['docType'] ?: 'CATALOGUE';
             $r['brandList'] = array_values(array_filter(array_map('trim', explode(',', (string) ($r['brands'] ?: $r['brand'])))));
-            $r['ext'] = strtolower(pathinfo($r['storedName'], PATHINFO_EXTENSION));
+            $r['ext'] = $r['linkUrl'] && $r['storedName'] === '' ? 'link' : strtolower(pathinfo($r['storedName'], PATHINFO_EXTENSION));
+            $r['hasThumb'] = !empty($r['thumbName']);
+            unset($r['thumbName'], $r['storedName']);
         }
         unset($r);
         sendSuccess(['files' => $rows, 'docTypes' => self::DOC_TYPES]);
+    }
+
+    /** A shared catalogue link (brand website / Google Drive / online catalogue) → clean http(s) URL or null. */
+    private static function linkField(): ?string
+    {
+        $u = trim((string) ($_POST['linkUrl'] ?? ''));
+        if ($u === '') return null;
+        if (!preg_match('~^https?://~i', $u)) $u = 'https://' . $u;
+        if (!filter_var($u, FILTER_VALIDATE_URL) || !preg_match('~^https?://~i', $u)) sendError('Enter a valid link (https://…).', 400);
+        return mb_substr($u, 0, 1000);
     }
 
     private static function brandFields(): array
@@ -388,11 +401,17 @@ class CatalogController
         if (isset($_POST['brands']) || isset($_POST['brand'])) { [$b1, $bl] = self::brandFields(); $sets[] = 'brand=?'; $vals[] = $b1; $sets[] = 'brands=?'; $vals[] = $bl; }
         if (isset($_POST['docType'])) { $d = strtoupper((string) $_POST['docType']); $sets[] = 'docType=?'; $vals[] = isset(self::DOC_TYPES[$d]) ? $d : 'OTHER'; }
         if (isset($_POST['notes'])) { $sets[] = 'notes=?'; $vals[] = trim((string) $_POST['notes']) ?: null; }
+        if (isset($_POST['linkUrl'])) {
+            $link = self::linkField();
+            if (!$link && $old['storedName'] === '' && empty($_FILES['file']['name'])) sendError('Enter the link.', 400);
+            $sets[] = 'linkUrl=?'; $vals[] = $link;
+        }
         $f = $_FILES['file'] ?? null;
         if ($f && $f['error'] === UPLOAD_ERR_OK) {
             [$ext, $stored, $name] = self::storeDoc($f, gen_id());
-            @unlink(UPLOADS_PATH . '/catalogues/' . basename($old['storedName']));
-            array_push($sets, 'storedName=?', 'fileName=?', 'size=?'); array_push($vals, $stored, $name, (int) $f['size']);
+            if ($old['storedName'] !== '') @unlink(UPLOADS_PATH . '/catalogues/' . basename($old['storedName']));
+            if ($old['thumbName']) @unlink(UPLOADS_PATH . '/catalogues/' . basename($old['thumbName']));
+            array_push($sets, 'storedName=?', 'fileName=?', 'size=?', 'thumbName=NULL'); array_push($vals, $stored, $name, (int) $f['size']);
         }
         $vals[] = $id;
         db()->prepare('UPDATE `ProductCatalogueFile` SET ' . implode(',', $sets) . ' WHERE id=?')->execute($vals);
@@ -404,17 +423,60 @@ class CatalogController
     {
         $auth = self::auth(true);
         $f = $_FILES['file'] ?? null;
-        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('Choose the file (PDF, PowerPoint, Excel, Word…).', 400);
+        $link = self::linkField();
+        $hasFile = $f && $f['error'] === UPLOAD_ERR_OK;
+        if (!$hasFile && !$link) sendError('Choose the file (PDF, PowerPoint, Excel, Word…) or paste the catalogue link.', 400);
         $id = gen_id();
-        [$ext, $stored, $name] = self::storeDoc($f, $id);
+        if ($hasFile) [$ext, $stored, $name] = self::storeDoc($f, $id);
+        else { $ext = 'link'; $stored = ''; $name = mb_substr((string) (parse_url($link, PHP_URL_HOST) ?: 'link'), 0, 255); }
         $type = strtoupper((string) ($_POST['type'] ?? '')); if (!isset(self::TYPES[$type])) $type = null;
         $doc = strtoupper((string) ($_POST['docType'] ?? '')); if (!isset(self::DOC_TYPES[$doc])) $doc = in_array($ext, ['ppt', 'pptx'], true) ? 'PRESENTATION' : 'CATALOGUE';
         [$b1, $bl] = self::brandFields();
         $title = mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 255) ?: preg_replace('/\.[a-z0-9]+$/i', '', $name);
-        db()->prepare('INSERT INTO `ProductCatalogueFile` (id,brand,brands,catType,docType,title,notes,fileName,storedName,size,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-            ->execute([$id, $b1, $bl, $type, $doc, $title, trim((string) ($_POST['notes'] ?? '')) ?: null, $name, $stored, (int) $f['size'], $auth['id'], now_sql()]);
+        db()->prepare('INSERT INTO `ProductCatalogueFile` (id,brand,brands,catType,docType,title,notes,fileName,storedName,size,linkUrl,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            ->execute([$id, $b1, $bl, $type, $doc, $title, trim((string) ($_POST['notes'] ?? '')) ?: null, $name, $stored, $hasFile ? (int) $f['size'] : 0, $link, $auth['id'], now_sql()]);
         log_activity($auth['id'], 'CATALOGUE_PDF_UPLOADED', 'ProductCatalogueFile', $id, ['title' => $title]);
-        sendSuccess(['id' => $id], self::DOC_TYPES[$doc] . ' uploaded', 201);
+        sendSuccess(['id' => $id], $hasFile ? self::DOC_TYPES[$doc] . ' uploaded' : 'Catalogue link added', 201);
+    }
+
+    // POST /api/catalog/files/:id/thumb — small preview picture (first PDF page / image), made in the browser.
+    // Admins can replace it; anyone signed in can add one when there is none yet.
+    public function uploadThumb(string $id): void
+    {
+        $auth = self::auth();
+        $s = db()->prepare('SELECT * FROM `ProductCatalogueFile` WHERE id=?'); $s->execute([$id]);
+        $old = $s->fetch();
+        if (!$old) sendError('File not found.', 404);
+        if ($old['thumbName'] && !in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true)) sendError('There is already a preview.', 409);
+        $f = $_FILES['thumb'] ?? null;
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('No picture received.', 400);
+        if ($f['size'] > 3 * 1024 * 1024) sendError('The preview is too large.', 400);
+        $info = @getimagesize($f['tmp_name']);
+        $ext = $info && $info[2] === IMAGETYPE_PNG ? 'png' : ($info && $info[2] === IMAGETYPE_JPEG ? 'jpg' : ($info && defined('IMAGETYPE_WEBP') && $info[2] === IMAGETYPE_WEBP ? 'webp' : ''));
+        if ($ext === '') sendError('The preview must be a PNG, JPEG or WebP picture.', 400);
+        $dir = UPLOADS_PATH . '/catalogues';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the preview.', 500);
+        $name = 'thumb_' . $id . '_' . substr(gen_id(), -6) . '.' . $ext;
+        if (!(@move_uploaded_file($f['tmp_name'], "$dir/$name") || @rename($f['tmp_name'], "$dir/$name"))) sendError('Could not save the preview.', 500);
+        if ($old['thumbName']) @unlink("$dir/" . basename($old['thumbName']));
+        db()->prepare('UPDATE `ProductCatalogueFile` SET thumbName=? WHERE id=?')->execute([$name, $id]);
+        sendSuccess(['id' => $id], 'Preview saved');
+    }
+
+    // GET /api/catalog/files/:id/thumb
+    public function thumb(string $id): void
+    {
+        self::auth();
+        $s = db()->prepare('SELECT thumbName FROM `ProductCatalogueFile` WHERE id=?'); $s->execute([$id]);
+        $t = $s->fetchColumn();
+        $path = $t ? UPLOADS_PATH . '/catalogues/' . basename($t) : '';
+        if (!$t || !is_file($path)) sendError('No preview.', 404);
+        while (ob_get_level()) ob_end_clean();
+        $ext = strtolower(pathinfo($t, PATHINFO_EXTENSION));
+        header('Content-Type: ' . ($ext === 'png' ? 'image/png' : ($ext === 'webp' ? 'image/webp' : 'image/jpeg')));
+        header('Cache-Control: private, max-age=86400');
+        header('Content-Length: ' . filesize($path));
+        readfile($path); exit;
     }
 
     public function downloadFile(string $id): void
@@ -422,7 +484,8 @@ class CatalogController
         self::auth();
         $s = db()->prepare('SELECT * FROM `ProductCatalogueFile` WHERE id=?'); $s->execute([$id]);
         $f = $s->fetch();
-        $path = $f ? UPLOADS_PATH . '/catalogues/' . basename($f['storedName']) : '';
+        if ($f && $f['storedName'] === '' && $f['linkUrl']) sendSuccess(['linkUrl' => $f['linkUrl']], 'This catalogue is a link');
+        $path = $f && $f['storedName'] !== '' ? UPLOADS_PATH . '/catalogues/' . basename($f['storedName']) : '';
         if (!$f || !is_file($path)) sendError('Catalogue not found.', 404);
         while (ob_get_level()) ob_end_clean();
         header('Content-Type: ' . (self::DOC_EXT[strtolower(pathinfo($f['storedName'], PATHINFO_EXTENSION))] ?? 'application/octet-stream'));
@@ -434,10 +497,10 @@ class CatalogController
     public function deleteFile(string $id): void
     {
         self::auth(true);
-        $s = db()->prepare('SELECT storedName FROM `ProductCatalogueFile` WHERE id=?'); $s->execute([$id]);
-        $st = $s->fetchColumn();
-        if (!$st) sendError('Catalogue not found.', 404);
-        @unlink(UPLOADS_PATH . '/catalogues/' . basename($st));
+        $s = db()->prepare('SELECT storedName, thumbName FROM `ProductCatalogueFile` WHERE id=?'); $s->execute([$id]);
+        $row = $s->fetch();
+        if (!$row) sendError('Catalogue not found.', 404);
+        foreach ([$row['storedName'], $row['thumbName']] as $fn) if ($fn) @unlink(UPLOADS_PATH . '/catalogues/' . basename($fn));
         db()->prepare('DELETE FROM `ProductCatalogueFile` WHERE id=?')->execute([$id]);
         sendSuccess([], 'Catalogue removed');
     }

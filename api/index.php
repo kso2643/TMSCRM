@@ -91,6 +91,7 @@ require __DIR__ . '/controllers/SupplierQuoteController.php';
 require __DIR__ . '/controllers/CatalogController.php';
 require __DIR__ . '/controllers/OptionController.php';
 require __DIR__ . '/controllers/QuoteFollowController.php';
+require __DIR__ . '/controllers/SalesReportController.php';   // sales report by engineer
 require __DIR__ . '/controllers/ToolingController.php';   // projects / tooled-up / machine accessories
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
@@ -346,6 +347,7 @@ try {
             $method === 'GET'   && $c1 !== '' && $c2 === ''           => $ctrl->show($c1),
             $method === 'PUT'   && $c1 !== '' && $c2 === ''           => $ctrl->update($c1),
             $method === 'DELETE'&& $c1 !== '' && $c2 === ''           => $ctrl->delete($c1),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'remind'     => $ctrl->remind($c1),
             default => sendError("Route /api/appointments/$c1/$c2 not found", 404),
         };
     }
@@ -537,12 +539,25 @@ try {
             $method === 'POST'   && $c1 === 'import'                     => $ctrl->import(),
             $method === 'GET'    && $c1 === 'files' && $c2 === ''        => $ctrl->files(),
             $method === 'POST'   && $c1 === 'files' && $c2 === ''        => $ctrl->uploadFile(),
+            $method === 'GET'    && $c1 === 'files' && $c2 !== '' && $c3 === 'thumb' => $ctrl->thumb($c2),
+            $method === 'POST'   && $c1 === 'files' && $c2 !== '' && $c3 === 'thumb' => $ctrl->uploadThumb($c2),
             $method === 'GET'    && $c1 === 'files' && $c2 !== ''        => $ctrl->downloadFile($c2),
             $method === 'DELETE' && $c1 === 'files' && $c2 !== ''        => $ctrl->deleteFile($c2),
             $method === 'POST'   && $c1 === 'files' && $c2 !== ''        => $ctrl->updateFile($c2),
             $method === 'POST'   && $c1 === ''                           => $ctrl->create(),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''             => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'sales-report') {
+        $ctrl = new SalesReportController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                         => $ctrl->index(),
+            $method === 'PATCH'  && $c1 === 'orders' && $c2 !== ''     => $ctrl->setOrderValue($c2),
+            $method === 'POST'   && $c1 === 'entries' && $c2 === ''    => $ctrl->createEntry(),
+            $method === 'PUT'    && $c1 === 'entries' && $c2 !== ''    => $ctrl->updateEntry($c2),
+            $method === 'DELETE' && $c1 === 'entries' && $c2 !== ''    => $ctrl->deleteEntry($c2),
             default => sendError('Route not found', 404),
         };
     }
@@ -559,6 +574,10 @@ try {
             $method === 'GET'    && $c1 !== '' && $c2 === ''      => $ctrl->show($c1),
             $method === 'POST'   && $c1 !== '' && $c2 === 'reply' => $ctrl->reply($c1),
             $method === 'PATCH'  && $c1 !== '' && $c2 === ''      => $ctrl->update($c1),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === 'items' => $ctrl->updateItems($c1),
+            $method === 'POST'   && $c1 !== '' && $c2 === 'files' && $c3 === '' => $ctrl->uploadFile($c1),
+            $method === 'GET'    && $c1 !== '' && $c2 === 'files' && $c3 !== '' => $ctrl->downloadFile($c1, $c3),
+            $method === 'DELETE' && $c1 !== '' && $c2 === 'files' && $c3 !== '' => $ctrl->deleteFile($c1, $c3),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''      => $ctrl->delete($c1),
             default => sendError('Route not found', 404),
         };

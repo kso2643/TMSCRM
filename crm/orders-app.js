@@ -781,6 +781,7 @@
       ]));
     }
     if (o.notes) facts.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted block', text: 'Notes' }), el('span', { class: 'whitespace-pre-wrap', text: o.notes })]));
+    if (o.orderValue != null) facts.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted block', text: 'Order value' }), el('span', { class: 'font-semibold', text: '₹' + Number(o.orderValue).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })]));
     if (o.deliveredDate && o.deliveryStatus !== 'PENDING') {
       facts.appendChild(el('p', { class: 'text-xs text-muted', text: 'Last supplied ' + fmtDate(o.deliveredDate) }));
     }
@@ -1053,6 +1054,7 @@
         verbalDetails: order ? order.verbalDetails || '' : '',
         orderDate: order ? order.orderDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
         notes: order ? order.notes || '' : '',
+        orderValue: order && order.orderValue != null ? order.orderValue : '',
         engineerId: order ? order.engineer.id : (currentUser() && currentUser().id),
         items: order && order.items ? order.items.map(function (i) {
           return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, unit: i.unit, category: i.category, brand: i.brand, quantity: i.quantity, stock: i.stock === undefined ? undefined : i.stock };
@@ -1322,6 +1324,12 @@
         notesI.addEventListener('input', function () { state.notes = notesI.value; });
         wrap.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Notes' }), el('div', { class: 'mt-1' }, [notesI])]));
 
+        // Order value (optional) — counts in the Sales report by engineer
+        var valI = el('input', { class: INPUT, id: 'ox-order-value', type: 'number', min: '0', step: '0.01', inputmode: 'decimal', placeholder: 'Optional — e.g. 125000' });
+        valI.value = state.orderValue == null ? '' : state.orderValue;
+        valI.addEventListener('input', function () { state.orderValue = valI.value; });
+        wrap.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Order value (₹, before tax)' }), el('div', { class: 'mt-1' }, [valI])]));
+
         return wrap;
       }
 
@@ -1495,6 +1503,7 @@
         fd.append('orderType', state.orderType);
         fd.append('orderDate', state.orderDate);
         fd.append('notes', state.notes || '');
+        fd.append('orderValue', state.orderValue == null ? '' : String(state.orderValue));
         fd.append('items', JSON.stringify(state.items.map(function (i) {
           return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand };
         })));
@@ -1526,6 +1535,7 @@
           orderType: goingToPO ? order.orderType : state.orderType, // don't flip to PO here — the upload call below does that
           orderDate: state.orderDate,
           notes: state.notes,
+          orderValue: state.orderValue == null ? '' : String(state.orderValue),
           items: state.items.map(function (i) {
             return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand };
           }),

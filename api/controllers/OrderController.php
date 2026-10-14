@@ -143,6 +143,8 @@ class OrderController
                     'expectedDeliveryDate'   => 'DATE NULL',
                     'procurementStatus'      => "VARCHAR(20) NOT NULL DEFAULT 'NOT_ORDERED'",
                     'proformaStatus'         => "VARCHAR(20) NOT NULL DEFAULT 'NOT_CONFIRMED'",
+                    // order value in ₹ (optional) — for the sales report by engineer
+                    'orderValue'             => 'DECIMAL(14,2) NULL',
                     'createdAt'              => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
                     'updatedAt'              => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
                 ],
@@ -179,6 +181,15 @@ class OrderController
                 ],
             ],
         ];
+    }
+
+    /** Optional order value (₹) from the body → number or null. */
+    public static function orderValue(array $b): ?float
+    {
+        $v = str_replace([',', '₹', ' '], '', (string) ($b['orderValue'] ?? ''));
+        if ($v === '') return null;
+        if (!is_numeric($v) || (float) $v < 0) sendError('Enter the order value as a number.', 400);
+        return round((float) $v, 2);
     }
 
     private function storageDir(): string
@@ -234,6 +245,7 @@ class OrderController
             'expectedDeliveryDate' => $row['expectedDeliveryDate'],
             'proformaStatus'     => $row['proformaStatus'],
             'notes'              => $row['notes'],
+            'orderValue'         => isset($row['orderValue']) && $row['orderValue'] !== null ? (float) $row['orderValue'] : null,
             'items'              => $items !== null ? array_map(fn($i) => [
                 'id' => $i['id'], 'productId' => $i['productId'], 'itemCode' => $i['itemCode'],
                 'productName' => $i['productName'], 'unit' => $i['unit'], 'category' => $i['category'],
@@ -597,6 +609,7 @@ class OrderController
             $id, $customerId, $engineerId, $orderType, $poOriginal, $poStored, $poMime, $poSize,
             $verbalDetails, $orderDate, bp_trim($b, 'notes'), now_sql(), now_sql(),
         ]);
+        if (($ov = self::orderValue($b)) !== null) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([$ov, $id]);
         $this->replaceItems($id, $items);
 
         StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
@@ -652,6 +665,7 @@ class OrderController
             'UPDATE `CustomerOrder` SET customerId=?,orderType=?,poDocumentOriginalName=?,poDocumentStoredName=?,
              poDocumentMime=?,poDocumentSize=?,verbalDetails=?,orderDate=?,notes=?,updatedAt=? WHERE id=?'
         )->execute([$customerId, $orderType, $poOriginal, $poStored, $poMime, $poSize, $verbalDetails, $orderDate, $notes, now_sql(), $id]);
+        if (bp_has($b, 'orderValue')) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([self::orderValue($b), $id]);
 
         if (bp_has($b, 'items')) {
             $items = $this->parseItems($b['items']);

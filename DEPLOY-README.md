@@ -1,3 +1,57 @@
+# Update — 16 Oct: Remind the engineer, fold sidebar sections, CEO Desk "Get price" + attachments + Report to, catalogue brand folders + links, Sales report
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:**
+  - `api/controllers/SalesReportController.php`
+  - `crm/sales-report/index.html` and `crm/sales-report-app.js`
+  - a new React sidebar file `layout-5d2c8e71f4a39b06.js`
+- **Database:** the new tables (`MdDeskFile`, `SalesEntry`) and columns are added automatically the first time each page is opened:
+  - CEO Desk: `assignees`, `reportTo`
+  - catalogues: `linkUrl`, `thumbName`
+  - orders: `orderValue`
+  - appointment alerts: `note`, `sentById`
+- New upload folder `uploads/md-desk/` (created automatically).
+
+1. **Appointments → remind the engineer:**
+   - **🔔 Remind** on each scheduled visit in the Day view, and **🔔 Send reminder to engineer** in the visit's edit window.
+   - You can type a message.
+   - The engineer gets a pop-up on every page: "🔔 Reminder from <name>", with the message, the customer and the date.
+   - An Admin or the person who booked the visit can send it, as many times as needed.
+2. **Sidebar sections fold:**
+   - Click a heading (CRM, Sales, Reports, Operations, Admin…) to minimise or open it.
+   - The page you are on stays visible.
+   - Folds are remembered and work on every page.
+3. **CEO Desk:**
+   - **"Price given" is now "Get price"**, a task to get the price from the supplier:
+     - Add the items (code, product, qty); the customer, price and supplier are optional.
+     - Set a "Need the price by" date.
+     - The person it is given to presses **💰 Enter supplier prices** and types the supplier, price, discount % and lead time per item.
+     - Saving posts a summary in the thread so the sender is told.
+   - **Attachments:**
+     - Add screenshots / images, PDF, Excel or Word when sending, or later with **📎 Add**.
+     - Images show as thumbnails: 👁 opens them large, ⬇ downloads.
+     - PDFs open in the page; Excel and Word files download.
+   - **Several people = one shared task.** Everyone picked sees the same item, thread and status; anyone of them can mark it done.
+   - **Report to:** tick the box and pick any users. They see the item, its replies and when it is done ("📋 Reported to you").
+4. **Catalogues & documents → brand folders:**
+   - Every brand shows as a folder with a thumbnail (the first page of its catalogue, or the brand initials) and the file count.
+   - Click a folder to see all that brand's files.
+   - **🔗 + Add link** adds a catalogue as a link (brand website / Drive), with no file to upload.
+   - **🔗 Copy link** on a folder gives a direct link to that brand's folder to share (`/documents/#brand=…`).
+   - **All files** shows the old list.
+   - Thumbnails are made once in the browser and saved for everyone.
+5. **Sales report** (new page, sidebar → Reports):
+   - Per engineer, for any period (week / month / quarter / financial year / custom):
+     - orders got and their value;
+     - quantity ordered and supplied;
+     - delivered orders and value;
+     - manual entries;
+     - **Total got**, **Total made** and **Made %**.
+   - **Order value:** a new optional box on the order form. Missing values can also be typed straight into the report's Orders list.
+   - **+ Manual entry** is for orders or billing that are not in the Orders page: engineer, date, customer, reference, qty, order value, billed value and note. Entries can be edited and deleted.
+   - **Excel (CSV)** download.
+   - Engineers see only their own figures.
+
 # Update — 15 Oct (b): Customer Edit for everyone, Appointments by customer / week / engineer, Tooled-up size + description
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
