@@ -1,3 +1,14 @@
+# Fix — 14 Oct (b): Customers / Dashboard / Products pages not opening ("Application error")
+
+**Upload:** `crm/`, then press **Ctrl+Shift+R** once. If a page still shows the error, clear the site data once (DevTools → Application → Clear storage).
+
+- **Cause:** the sidebar entry for **Projects** added on 13 Oct used an icon name that does not exist (`__tmsBuilding` instead of `__tmsBuilding2`). The compiled React sidebar crashed on every React page: Customers, Customer map, Dashboard, Products, Analytics, Activity and others.
+- **Fix:**
+  - Corrected the icon name.
+  - The sidebar now loads from a new file name, `layout-f2a7c93e1d5b8046.js`, so browsers cannot keep using the broken cached copy.
+  - The two earlier sidebar files were corrected as well.
+- **Checked:** all sidebar files now reference only icons that exist. Customers, Dashboard, Products, Analytics, Customer map and Activity open without errors for an Admin and an Engineer, and the sidebar shows Projects, Tooled-up, Machine accessories, Catalogues & documents and CEO Desk.
+
 # Update — 14 Oct (a): Super-Admin deletes, new products → Products + Stock, project files & tool selection, Catalogues & documents, stock check, locked order header
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
