@@ -264,7 +264,7 @@
     return { el: box, days: sortedDays, setStart: function (d) { picked = {}; picked[toDateStr(d)] = true; view = new Date(d.getFullYear(), d.getMonth(), 1); render(); } };
   }
 
-  function openApptDialog(existing, prefillDate, onSaved, prefillCustomer) {
+  function openApptDialog(existing, prefillDate, onSaved, prefillCustomer, prefillEngineerId) {
     if (dialogOpen) return;
     dialogOpen = true;
     var me = currentUser();
@@ -316,7 +316,7 @@
           text: u.name + (u.id === (me && me.id) ? ' (me)' : '') + ' \u2014 ' + u.role.replace('_', ' ')
         }));
       });
-      var wanted = existing ? existing.assignedTo && existing.assignedTo.id : (me && me.id);
+      var wanted = existing ? existing.assignedTo && existing.assignedTo.id : (prefillEngineerId || (me && me.id));
       if (wanted) engSelect.value = wanted;
     }).catch(function () {
       engSelect.innerHTML = '';
@@ -439,7 +439,11 @@
     var qDate = params.get('date');
 
     var state = {
-      view: qDate ? 'day' : (function () { try { return localStorage.getItem('crm_appt_view') === 'planner' ? 'planner' : 'month'; } catch (e) { return 'month'; } })(),
+      view: qDate ? 'day' : (function () { try { var v = localStorage.getItem('crm_appt_view'); return ['planner', 'week', 'customers'].indexOf(v) !== -1 ? v : 'month'; } catch (e) { return 'month'; } })(),
+      engineer: '',          // filter: one engineer's appointments (every view)
+      engineers: [],         // /appointments/engineers
+      customers: null,       // every customer (Customers view)
+      custQ: '', custShow: '',
       refDate: qDate ? parseDateStr(qDate) : new Date(),
       mineOnly: false,
       appointments: []
@@ -466,23 +470,33 @@
     }
 
     function loadAndRenderBody() {
-      var range = state.view !== 'day' ? monthRange(state.refDate) : { from: toDateStr(state.refDate), to: toDateStr(state.refDate) };
-      var qs = '?from=' + range.from + '&to=' + range.to + (state.mineOnly ? '&mine=1' : '');
+      var range = state.view === 'day' ? { from: toDateStr(state.refDate), to: toDateStr(state.refDate) }
+        : state.view === 'week' ? weekRange(state.refDate)
+        : state.view === 'customers' ? { from: toDateStr(new Date(Date.now() - 180 * 864e5)), to: toDateStr(new Date(Date.now() + 180 * 864e5)) }
+        : monthRange(state.refDate);
+      var qs = '?from=' + range.from + '&to=' + range.to + (state.mineOnly ? '&mine=1' : '') + (state.engineer ? '&assignedToId=' + encodeURIComponent(state.engineer) : '');
       bodySlot.innerHTML = '';
       bodySlot.appendChild(el('p', { class: 'text-xs text-muted', text: 'Loading\u2026' }));
       api('GET', '/appointments' + qs).then(function (res) {
         state.appointments = (res.data && res.data.appointments) || [];
         bodySlot.innerHTML = '';
-        bodySlot.appendChild(state.view === 'month' ? renderMonthGrid() : state.view === 'planner' ? renderPlannerView() : renderDayList());
+        if (state.view === 'customers') return renderCustomersView();
+        bodySlot.appendChild(state.view === 'month' ? renderMonthGrid() : state.view === 'planner' ? renderPlannerView() : state.view === 'week' ? renderWeekView() : renderDayList());
       }).catch(function (e) {
         bodySlot.innerHTML = '';
         bodySlot.appendChild(el('p', { class: 'text-xs text-red-600 dark:text-red-400', text: e.message }));
       });
     }
 
+    function weekRange(d) {
+      var mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+      return { from: toDateStr(mon), to: toDateStr(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6)), mon: mon };
+    }
     function goToday() { state.refDate = new Date(); loadAndRenderBody(); renderHeaderOnly(); }
     function step(delta) {
-      if (state.view !== 'day') {
+      if (state.view === 'week') {
+        state.refDate = new Date(state.refDate.getFullYear(), state.refDate.getMonth(), state.refDate.getDate() + 7 * delta);
+      } else if (state.view !== 'day') {
         state.refDate = new Date(state.refDate.getFullYear(), state.refDate.getMonth() + delta, 1);
       } else {
         state.refDate = new Date(state.refDate.getFullYear(), state.refDate.getMonth(), state.refDate.getDate() + delta);
@@ -497,7 +511,10 @@
     }
 
     function buildHeader() {
-      var label = state.view !== 'day'
+      var wr = weekRange(state.refDate);
+      var label = state.view === 'customers' ? 'All customers — assign visits'
+        : state.view === 'week' ? parseDateStr(wr.from).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' – ' + parseDateStr(wr.to).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+        : state.view !== 'day'
         ? MONTHS[state.refDate.getMonth()] + ' ' + state.refDate.getFullYear()
         : state.refDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -514,10 +531,25 @@
         }),
         el('button', {
           class: 'px-3 py-1.5 text-xs font-medium rounded-md ' +
+            (state.view === 'week' ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300'),
+          text: 'Week', 'data-view': 'week', onclick: function () { switchView('week'); }
+        }),
+        el('button', {
+          class: 'px-3 py-1.5 text-xs font-medium rounded-md ' +
             (state.view === 'planner' ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300'),
           text: 'Planner', 'data-view': 'planner', onclick: function () { switchView('planner'); }
+        }),
+        el('button', {
+          class: 'px-3 py-1.5 text-xs font-medium rounded-md ' +
+            (state.view === 'customers' ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300'),
+          text: 'Customers', 'data-view': 'customers', onclick: function () { switchView('customers'); }
         })
       ]);
+      // engineer filter — every view shows only that engineer's visits
+      var engSel = el('select', { class: selectCls(), id: 'ap-engineer', 'aria-label': 'Engineer' }, [el('option', { value: '', text: 'All engineers' })]
+        .concat(state.engineers.map(function (u) { return el('option', { value: u.id, text: u.name }); })));
+      engSel.value = state.engineer;
+      engSel.addEventListener('change', function () { state.engineer = engSel.value; loadAndRenderBody(); });
 
       var mineToggle = el('label', { class: 'flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none' }, [
         el('input', {
@@ -547,8 +579,8 @@
           newBtn
         ]),
         el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
-          el('div', { class: 'flex items-center gap-3 flex-wrap' }, [viewTabs, nav, el('span', { class: 'text-sm font-medium text-slate-700 dark:text-slate-200', text: label })]),
-          mineToggle
+          el('div', { class: 'flex items-center gap-3 flex-wrap' }, [viewTabs, state.view === 'customers' ? null : nav, el('span', { class: 'text-sm font-medium text-slate-700 dark:text-slate-200', 'data-ap-label': '', text: label })]),
+          el('div', { class: 'flex items-center gap-3 flex-wrap' }, [engSel, mineToggle])
         ])
       ]);
     }
@@ -747,6 +779,17 @@
       var st = document.createElement('style');
       st.id = 'ap-calendar-css';
       st.textContent = [
+        '.ap-week{width:100%;border-collapse:collapse;font-size:.8rem;min-width:900px}',
+        '.ap-wh{text-align:left;padding:.5rem;font-size:.72rem;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;background:#f8fafc}',
+        '.ap-wname{padding:.5rem;font-weight:600;white-space:nowrap;border-bottom:1px solid #f1f5f9;min-width:140px}',
+        '.ap-wc{padding:.3rem;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;vertical-align:top;min-width:120px}',
+        '.ap-wtoday{background:#eff6ff!important}.dark .ap-wtoday{background:#1e3a8a33!important}.dark .ap-wh{background:#1e293b}',
+        '.ap-wchip{display:block;width:100%;text-align:left;border:0;border-left:3px solid var(--c);background:color-mix(in srgb,var(--c) 10%,#fff);border-radius:.35rem;padding:.2rem .35rem;margin-bottom:.2rem;font-size:.74rem;cursor:pointer;color:inherit}',
+        '.dark .ap-wchip{background:color-mix(in srgb,var(--c) 20%,#0f172a)}.ap-wst{display:block;font-size:.66rem;color:#64748b}',
+        '.ap-wadd{display:block;width:100%;border:1px dashed #cbd5e1;background:none;border-radius:.35rem;color:#94a3b8;font-size:.8rem;line-height:1.2;cursor:pointer;opacity:.5}.ap-wc:hover .ap-wadd{opacity:1}',
+        '.ap-wdot{display:inline-block;width:.6rem;height:.6rem;border-radius:999px;margin-right:.4rem;vertical-align:middle}',
+        '.ap-ctable{width:100%;border-collapse:collapse;font-size:.84rem}.ap-ctable th{text-align:left;font-size:.7rem;text-transform:uppercase;color:#64748b;padding:.45rem;border-bottom:1px solid #e2e8f0}',
+        '.ap-ctable td{padding:.45rem;border-bottom:1px solid #f1f5f9;vertical-align:middle}.ap-ctable .ap-wchip{display:inline-block;width:auto}.ap-none{font-size:.74rem;color:#b45309;font-weight:600}',
         '.ap-scroll{overflow-x:auto}',
         '.ap-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));min-width:700px;border:1px solid #e2e8f0;border-radius:.75rem;overflow:hidden;background:#e2e8f0;gap:1px}',
         '.dark .ap-grid{border-color:#334155;background:#334155}',
@@ -824,6 +867,109 @@
       document.head.appendChild(st);
     }
 
+    // ── Week: engineers down, Monday–Sunday across ─────────────────────
+    function visibleEngineers() {
+      var ids = {};
+      state.appointments.forEach(function (a) { if (a.assignedTo) ids[a.assignedTo.id] = 1; });
+      return state.engineers.filter(function (u) {
+        if (state.engineer) return u.id === state.engineer;
+        return ids[u.id] || u.role === 'SALES_ENGINEER' || u.role === 'SALES';
+      });
+    }
+    function chip(a) {
+      var c = colorFor(a.assignedTo && a.assignedTo.id);
+      return el('button', { type: 'button', class: 'ap-wchip', 'data-appt': a.id, style: '--c:' + c, title: a.title + (a.notes ? ' — ' + a.notes : ''),
+        onclick: function () { openApptDialog(a, null, loadAndRenderBody); } },
+        [el('b', { text: a.appointmentTime ? fmtTime12(a.appointmentTime) : 'Any time' }), ' ', a.customer.companyName,
+         a.status !== 'SCHEDULED' ? el('span', { class: 'ap-wst', text: a.status.toLowerCase() }) : null]);
+    }
+    function renderWeekView() {
+      var wr = weekRange(state.refDate), days = [];
+      for (var i = 0; i < 7; i++) days.push(new Date(wr.mon.getFullYear(), wr.mon.getMonth(), wr.mon.getDate() + i));
+      var engs = visibleEngineers(), today = toDateStr(new Date());
+      var by = {};
+      state.appointments.forEach(function (a) { var k = (a.assignedTo ? a.assignedTo.id : '') + '|' + a.appointmentDate; (by[k] = by[k] || []).push(a); });
+      var head = el('tr', {}, [el('th', { class: 'ap-wh ap-wname', text: 'Engineer' })].concat(days.map(function (d) {
+        var ds = toDateStr(d);
+        return el('th', { class: 'ap-wh' + (ds === today ? ' ap-wtoday' : '') }, [WEEKDAYS[d.getDay()] + ' ', el('span', { class: 'text-muted', text: d.getDate() + ' ' + MONTHS[d.getMonth()].slice(0, 3) })]);
+      })).concat([el('th', { class: 'ap-wh', text: 'Visits' })]));
+      var rows = engs.map(function (u) {
+        var total = 0;
+        var cells = days.map(function (d) {
+          var ds = toDateStr(d), list = (by[u.id + '|' + ds] || []).sort(function (a, b) { return (a.appointmentTime || '99') < (b.appointmentTime || '99') ? -1 : 1; });
+          total += list.length;
+          return el('td', { class: 'ap-wc' + (ds === today ? ' ap-wtoday' : ''), 'data-cell': u.id + '|' + ds }, list.map(chip).concat([
+            el('button', { type: 'button', class: 'ap-wadd', title: 'New visit for ' + u.name + ' on ' + ds, text: '+', onclick: function () { openApptDialog(null, d, loadAndRenderBody, null, u.id); } })]));
+        });
+        return el('tr', { 'data-eng': u.id }, [el('td', { class: 'ap-wname' }, [el('span', { class: 'ap-wdot', style: 'background:' + colorFor(u.id) }), u.name])].concat(cells)
+          .concat([el('td', { class: 'ap-wc', style: 'text-align:center;font-weight:700', text: String(total) })]));
+      });
+      if (!rows.length) return el('div', { class: 'card p-6 text-center text-sm text-muted', text: 'No engineers to show.' });
+      return el('div', { class: 'card overflow-x-auto' }, [el('table', { class: 'ap-week', id: 'ap-week' }, [el('thead', {}, [head]), el('tbody', {}, rows)])]);
+    }
+
+    // ── Customers: every customer, last / next visit, assign an engineer + date ──
+    function renderCustomersView() {
+      bodySlot.innerHTML = '';
+      var box = el('div', { class: 'card p-4 space-y-3' });
+      bodySlot.appendChild(box);
+      function draw() {
+        box.innerHTML = '';
+        var q = el('input', { class: selectCls() + ' flex-1', id: 'ap-cust-q', type: 'search', placeholder: 'Search customer, contact, city…', value: state.custQ });
+        var show = el('select', { class: selectCls(), id: 'ap-cust-show' }, [['', 'All customers'], ['none', 'No visit planned'], ['planned', 'Visit planned']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+        show.value = state.custShow;
+        var t; q.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { state.custQ = q.value.trim(); draw(); var x = document.getElementById('ap-cust-q'); if (x) { x.focus(); x.setSelectionRange(99, 99); } }, 250); });
+        show.addEventListener('change', function () { state.custShow = show.value; draw(); });
+        box.appendChild(el('div', { class: 'flex gap-2 flex-wrap items-center' }, [q, show]));
+        if (!state.customers) { box.appendChild(el('p', { class: 'text-xs text-muted', text: 'Loading customers…' })); return; }
+        var today = toDateStr(new Date()), next = {}, last = {};
+        state.appointments.forEach(function (a) {
+          if (a.status === 'CANCELLED') return;
+          var id = a.customer.id;
+          if (a.appointmentDate >= today) { if (!next[id] || a.appointmentDate < next[id].appointmentDate) next[id] = a; }
+          else if (!last[id] || a.appointmentDate > last[id].appointmentDate) last[id] = a;
+        });
+        var ql = state.custQ.toLowerCase();
+        var list = state.customers.filter(function (c) {
+          if (ql && (c.companyName + ' ' + (c.contactPerson || '') + ' ' + (c.location || '') + ' ' + (c.contactNumber || '')).toLowerCase().indexOf(ql) === -1) return false;
+          if (state.custShow === 'none' && next[c.id]) return false;
+          if (state.custShow === 'planned' && !next[c.id]) return false;
+          return true;
+        });
+        var me = currentUser() || {}, admin = isAdmin();
+        var tomorrow = toDateStr(new Date(Date.now() + 864e5));
+        var rows = list.slice(0, 300).map(function (c) {
+          var eng = el('select', { class: selectCls(), 'data-assign-eng': c.id, disabled: admin ? null : '' }, state.engineers.map(function (u) { return el('option', { value: u.id, text: u.name + (u.id === me.id ? ' (me)' : '') }); }));
+          eng.value = (next[c.id] && next[c.id].assignedTo && admin ? '' : '') || (state.engineer || me.id);
+          if (!admin) eng.value = me.id;
+          var date = el('input', { type: 'date', class: selectCls(), 'data-assign-date': c.id, value: tomorrow, min: today });
+          var time = el('input', { type: 'time', class: selectCls(), 'data-assign-time': c.id });
+          var go = el('button', { type: 'button', class: 'btn-primary btn-sm', 'data-assign': c.id, text: 'Assign' });
+          go.onclick = function () {
+            if (!date.value) { alert('Pick the date.'); return; }
+            go.disabled = true;
+            api('POST', '/appointments', { customerId: c.id, title: 'Visit — ' + c.companyName, appointmentDate: date.value, appointmentTime: time.value || null, assignedToId: eng.value || me.id, status: 'SCHEDULED' })
+              .then(function () { loadAndRenderBody(); })
+              .catch(function (e) { go.disabled = false; alert(e.message); });
+          };
+          var n = next[c.id], l = last[c.id];
+          return el('tr', { 'data-customer': c.companyName }, [
+            el('td', {}, [el('b', { text: c.companyName }), el('div', { class: 'text-xs text-muted', text: [c.contactPerson, c.contactNumber, c.location].filter(Boolean).join(' · ') })]),
+            el('td', { class: 'text-xs' }, [l ? el('span', { text: parseDateStr(l.appointmentDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' · ' + (l.assignedTo ? l.assignedTo.name : '') }) : el('span', { class: 'text-muted', text: '—' })]),
+            el('td', { class: 'text-xs' }, [n ? el('button', { type: 'button', class: 'ap-wchip', style: '--c:' + colorFor(n.assignedTo && n.assignedTo.id), onclick: function () { openApptDialog(n, null, loadAndRenderBody); } },
+              [el('b', { text: parseDateStr(n.appointmentDate).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }), ' ' + (n.assignedTo ? n.assignedTo.name : '')]) : el('span', { class: 'ap-none', text: 'Not planned' })]),
+            el('td', {}, [el('div', { class: 'flex gap-1.5 flex-wrap items-center' }, [eng, date, time, go])])
+          ]);
+        });
+        box.appendChild(el('p', { class: 'text-xs text-muted', text: list.length + ' customer(s)' + (list.length > 300 ? ' — showing the first 300, search to narrow down' : '') + (admin ? ' · pick the engineer, date and time, then Assign' : ' · plan your own visits') }));
+        box.appendChild(el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'ap-ctable', id: 'ap-customers' }, [
+          el('thead', {}, [el('tr', {}, ['Customer', 'Last visit', 'Next visit', 'Assign a visit'].map(function (h) { return el('th', { text: h }); }))]),
+          el('tbody', {}, rows)])]));
+      }
+      draw();
+      if (!state.customers) api('GET', '/customers?limit=2000').then(function (j) { state.customers = (j.data && j.data.items) || []; draw(); }).catch(function (e) { box.appendChild(el('p', { class: 'text-xs text-red-600', text: e.message })); });
+    }
+
     function renderDayList() {
       var sorted = state.appointments.slice().sort(function (a, b) {
         if (!a.appointmentTime) return 1;
@@ -835,7 +981,15 @@
           el('p', { class: 'text-sm text-muted', text: 'No appointments on this day.' })
         ]);
       }
-      return el('div', { class: 'space-y-2' }, sorted.map(function (a) {
+      // engineer-wise: one heading per engineer with that day's visits
+      var groups = [], gi = {};
+      sorted.forEach(function (a) { var k = a.assignedTo ? a.assignedTo.id : ''; if (!(k in gi)) { gi[k] = groups.length; groups.push({ name: a.assignedTo ? a.assignedTo.name : 'Not assigned', id: k, items: [] }); } groups[gi[k]].items.push(a); });
+      return el('div', { class: 'space-y-4' }, groups.map(function (g) {
+        return el('div', { class: 'space-y-2', 'data-day-eng': g.id }, [el('p', { class: 'text-sm font-semibold flex items-center gap-2' }, [el('span', { class: 'ap-wdot', style: 'background:' + colorFor(g.id) }), g.name + ' · ' + g.items.length + ' visit' + (g.items.length === 1 ? '' : 's')])].concat(dayCards(g.items)));
+      }));
+    }
+    function dayCards(sorted) {
+      return sorted.map(function (a) {
         var me = currentUser();
         var canEdit = isAdmin() || (me && (a.user.id === me.id || (a.assignedTo && a.assignedTo.id === me.id)));
         return el('div', { class: 'card p-3.5 flex items-start gap-3' }, [
@@ -856,9 +1010,10 @@
             text: 'Edit', onclick: function () { openApptDialog(a, null, loadAndRenderBody); }
           }) : null
         ]);
-      }));
+      });
     }
 
+    api('GET', '/appointments/engineers').then(function (j) { state.engineers = (j.data && j.data.engineers) || []; renderHeaderOnly(); if (state.view === 'week' || state.view === 'customers') loadAndRenderBody(); }).catch(function () {});
     render();
   }
 

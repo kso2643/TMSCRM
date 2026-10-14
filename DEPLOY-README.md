@@ -1,3 +1,28 @@
+# Update — 15 Oct (b): Customer Edit for everyone, Appointments by customer / week / engineer, Tooled-up size + description
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** the React Customers page file `customers/page-7b3e19c5d2a4f806.js`.
+- No database changes.
+
+1. **Customers → Edit:**
+   - The compiled Customers page showed **Edit** only for the role "ADMIN", so the Super Admin, managers and engineers never saw it.
+   - It now shows for every logged-in user, which matches the server: anyone can already edit a customer.
+2. **Appointments:**
+   - **Customers** view (new):
+     - Lists **every customer**, with the last visit and the next planned visit (or "Not planned").
+     - Each row has *engineer · date · time · Assign*.
+     - The Super Admin / Admin can assign any engineer; an engineer plans their own visits.
+     - Filters: All / No visit planned / Visit planned, plus search.
+   - **Week** view (new): engineers down, Monday–Sunday across.
+     - Each day shows that engineer's visits (time · customer), with a visit count per engineer.
+     - **＋** in a cell books a visit for that engineer on that day; click a visit to edit it.
+     - ‹ / › move a week at a time.
+   - **Day** view: visits grouped **by engineer**.
+   - **Engineer filter** (All engineers / one engineer) works on every view.
+3. **Tooled-up:**
+   - Every ticked item has **Holder / size** and **Description** boxes next to the quantity; so does every hand-added component.
+   - Both show when viewing and pricing, and in the quotation description (as "size …").
+
 # Update — 15 Oct (a): PDFs open in the page, Machine accessories removed, Projects = files + tools, Tooled-up category list, Super Admin delete, order brands
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

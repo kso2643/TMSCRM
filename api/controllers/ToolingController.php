@@ -466,7 +466,7 @@ $t"],
         $items = [];
         foreach ($r['machines'] as $m) foreach ($m['items'] as $it) {
             if ($it['price'] === null) continue;
-            $detail = array_filter([$it['brand'] ?? null, $it['toolSpec'] ?? null, !empty($it['operation']) ? 'for ' . $it['operation'] : null]);
+            $detail = array_filter([$it['brand'] ?? null, (!empty($it['holder']) && $r['type'] !== 'PROJECT') ? 'size ' . $it['holder'] : null, $it['toolSpec'] ?? null, !empty($it['operation']) ? 'for ' . $it['operation'] : null]);
             $items[] = ['itemCode' => $it['itemCode'] ?: '', 'productName' => $it['item'] . ($it['spec'] ? ' — ' . $it['spec'] : '') . ($detail ? ' — ' . implode(', ', $detail) : '') . ' (' . $m['label'] . ')',
                         'quantity' => $it['quantity'], 'approvedPrice' => $it['price'], 'approvedDiscount' => $it['discount'] ?? 0, 'brand' => null];
         }

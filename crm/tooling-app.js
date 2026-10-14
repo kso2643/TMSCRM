@@ -122,6 +122,9 @@
       '.tl-catbtn .n{font-size:.72rem;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:999px;padding:0 .45rem}.tl-catbtn .n.on{background:#dcfce7;color:#166534}.tl-catbtn.on .n{background:#ffffff33;color:#fff}',
       '.tl-catpane{border:1px solid #e2e8f0;border-radius:.6rem;background:#fff;padding:.4rem 0;min-height:200px}.dark .tl-catpane{background:#1e293b;border-color:#334155}',
       '.tl-catpane-h{display:flex;gap:.6rem;align-items:baseline;padding:.2rem .7rem .45rem;border-bottom:1px solid #f1f5f9;margin-bottom:.25rem;flex-wrap:wrap}',
+      '.tl-ci2{grid-template-columns:auto minmax(150px,1fr) 64px 120px minmax(150px,1.3fr)}.tl-ci2 input.tl-size,.tl-ci2 input.tl-desc{border:1px solid #cbd5e1;border-radius:.35rem;padding:.15rem .35rem;font-size:.8rem;background:#fff;color:inherit;min-width:0}',
+      '.tl-ci2 input:disabled{opacity:.35}@media (max-width:900px){.tl-ci2{grid-template-columns:auto 1fr 64px}.tl-ci2 .tl-size,.tl-ci2 .tl-desc{grid-column:2 / span 2}}',
+      '.tl-cust2{grid-template-columns:minmax(0,.8fr) minmax(0,1.3fr) 70px minmax(0,.8fr) minmax(0,1.2fr) auto}@media (max-width:900px){.tl-cust2{grid-template-columns:1fr 1fr}}',
       '.tl-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;transition:opacity .25s,transform .25s;max-width:90vw}',
       '.tl-toast.in{opacity:1;transform:translate(-50%,0)}.tl-toast.err{background:#b91c1c}'
     ].join('\n');
@@ -212,8 +215,8 @@
         var k = it.category + '||' + it.item;
         if (it.toolType || it.operation || it.rpm || it.vc || it.feed) { mm.tools.push({ id: it.id, operation: it.operation || '', toolType: it.toolType || '', item: it.item, itemCode: it.itemCode || '', brand: it.brand || '', qty: qn(it.quantity),
           price: it.price != null ? qn(it.price) : '', rpm: it.rpm || '', feed: it.feed || '', vc: it.vc || '', pockets: it.pockets || '', holder: it.holder || '', toolSpec: it.toolSpec || '' }); return; }
-        if (!it.custom && known[k]) mm.ticks[k] = { qty: qn(it.quantity), id: it.id };
-        else mm.custom.push({ category: it.category || '', item: it.item, qty: qn(it.quantity), id: it.id });
+        if (!it.custom && known[k]) mm.ticks[k] = { qty: qn(it.quantity), id: it.id, size: it.holder || '', desc: it.toolSpec || '' };
+        else mm.custom.push({ category: it.category || '', item: it.item, qty: qn(it.quantity), id: it.id, size: it.holder || '', desc: it.toolSpec || '' });
       });
       return mm;
     }
@@ -307,10 +310,14 @@
         var cb = el('input', { type: 'checkbox', 'data-item': i });
         cb.checked = !!t;
         var qty = el('input', { type: 'number', min: '0', step: 'any', value: t ? t.qty : '', placeholder: 'qty', 'data-qty': i, disabled: !t, 'aria-label': 'Quantity, ' + i });
-        var row = el('div', { class: 'tl-ci' + (t ? ' on' : '') }, [cb, el('label', { text: i, onclick: function () { cb.click(); } }), qty]);
+        var size = el('input', { class: 'tl-size', value: t ? t.size || '' : '', placeholder: 'Holder / size', 'data-size': i, disabled: !t, 'aria-label': 'Holder / size, ' + i });
+        var desc = el('input', { class: 'tl-desc', value: t ? t.desc || '' : '', placeholder: 'Description (spec, brand, length…)', 'data-desc': i, disabled: !t, 'aria-label': 'Description, ' + i });
+        size.oninput = function () { if (m.ticks[k]) m.ticks[k].size = size.value; };
+        desc.oninput = function () { if (m.ticks[k]) m.ticks[k].desc = desc.value; };
+        var row = el('div', { class: 'tl-ci tl-ci2' + (t ? ' on' : '') }, [cb, el('label', { text: i, onclick: function () { cb.click(); } }), qty, size, desc]);
         cb.onchange = function () {
-          if (cb.checked) { m.ticks[k] = { qty: qty.value || '1' }; qty.value = m.ticks[k].qty; qty.disabled = false; row.classList.add('on'); qty.focus(); qty.select(); }
-          else { delete m.ticks[k]; qty.disabled = true; qty.value = ''; row.classList.remove('on'); }
+          if (cb.checked) { m.ticks[k] = { qty: qty.value || '1', size: size.value, desc: desc.value }; qty.value = m.ticks[k].qty; qty.disabled = size.disabled = desc.disabled = false; row.classList.add('on'); qty.focus(); qty.select(); }
+          else { delete m.ticks[k]; qty.disabled = size.disabled = desc.disabled = true; qty.value = ''; row.classList.remove('on'); }
           var n2 = tickedIn(c), badge = nav.querySelector('[data-cat-count="' + c.replace(/"/g, '\\"') + '"]');
           if (badge) { badge.textContent = n2 ? n2 + ' ✓' : String(list[c].length); badge.classList.toggle('on', !!n2); }
         };
@@ -325,7 +332,9 @@
         var cat = el('input', { list: 'tl-cats-' + mi, placeholder: 'Category', value: c.category, 'data-ck': 'category' }); cat.oninput = function () { c.category = cat.value; };
         var it = el('input', { placeholder: 'Component / item (e.g. BT40 ER32 holder 100 L)', value: c.item, 'data-ck': 'item' }); it.oninput = function () { c.item = it.value; };
         var q2 = el('input', { type: 'number', min: '0', step: 'any', placeholder: 'qty', value: c.qty, 'data-ck': 'qty' }); q2.oninput = function () { c.qty = q2.value; };
-        own.appendChild(el('div', { class: 'tl-cust' }, [cat, it, q2, el('button', { class: 'tl-btn sm red', type: 'button', text: '✕', title: 'Remove', onclick: function () { m.custom.splice(ci, 1); draw(); } })]));
+        var sz = el('input', { placeholder: 'Holder / size', value: c.size || '', 'data-ck': 'size' }); sz.oninput = function () { c.size = sz.value; };
+        var ds = el('input', { placeholder: 'Description', value: c.desc || '', 'data-ck': 'desc' }); ds.oninput = function () { c.desc = ds.value; };
+        own.appendChild(el('div', { class: 'tl-cust tl-cust2' }, [cat, it, q2, sz, ds, el('button', { class: 'tl-btn sm red', type: 'button', text: '✕', title: 'Remove', onclick: function () { m.custom.splice(ci, 1); draw(); } })]));
       });
       own.appendChild(el('button', { class: 'tl-btn sm', type: 'button', 'data-add-comp': String(mi), style: 'margin-top:.4rem', text: '+ Add component', onclick: function () { m.custom.push({ category: '', item: '', qty: '1' }); draw(); var r = box.querySelectorAll('[data-ck=item]'); if (r.length) r[r.length - 1].focus(); } }));
       box.appendChild(own);
@@ -373,8 +382,8 @@
         type: S.type, customerId: F.customerId, customerName: F.customerName, title: F.title, notes: F.notes, submit: submit,
         machines: F.machines.map(function (m) {
           var items = [];
-          Object.keys(m.ticks).forEach(function (k) { var p = k.split('||'); items.push({ category: p[0], item: p[1], quantity: m.ticks[k].qty, id: m.ticks[k].id || '' }); });
-          m.custom.forEach(function (c) { if ((c.item || '').trim()) items.push({ category: c.category || 'Other', item: c.item, quantity: c.qty, custom: true, id: c.id || '' }); });
+          Object.keys(m.ticks).forEach(function (k) { var p = k.split('||'), t = m.ticks[k]; items.push({ category: p[0], item: p[1], quantity: t.qty, id: t.id || '', holder: t.size || '', toolSpec: t.desc || '' }); });
+          m.custom.forEach(function (c) { if ((c.item || '').trim()) items.push({ category: c.category || 'Other', item: c.item, quantity: c.qty, custom: true, id: c.id || '', holder: c.size || '', toolSpec: c.desc || '' }); });
           (m.tools || []).forEach(function (t) {
             if (!(t.item || '').trim()) return;
             items.push({ category: t.toolType || 'Tool', item: t.item, quantity: t.qty || 1, custom: true, id: t.id || '', operation: t.operation, toolType: t.toolType || 'Other', itemCode: t.itemCode, brand: t.brand,
@@ -480,7 +489,7 @@
         card.appendChild(el('h2', { style: 'margin:1rem 0 .4rem;font-size:.95rem', text: '🛠 ' + m.label }));
         var rows = m.items.map(function (it) {
           var tdet = [it.operation ? 'Op: ' + it.operation : null, it.brand, it.rpm ? 'RPM ' + it.rpm : null, it.feed ? 'Feed ' + it.feed : null, it.vc ? 'Vc ' + it.vc : null,
-            it.pockets ? 'Z ' + it.pockets : null, it.holder ? 'Holder ' + it.holder : null, it.toolSpec].filter(Boolean).join(' · ');
+            it.pockets ? 'Z ' + it.pockets : null, it.holder ? (q.type === 'PROJECT' ? 'Holder ' : 'Size ') + it.holder : null, it.toolSpec].filter(Boolean).join(' · ');
           var tds = [el('td', { class: 'tl-sub', text: it.category || '' }), el('td', {}, [el('b', { text: it.item }), it.custom && !it.toolType ? el('span', { class: 'tl-sub', text: ' (added)' }) : null, tdet ? el('div', { class: 'tl-sub', 'data-tooldet': '', text: tdet }) : null])];
           var prop = (it.proposedPrice != null || it.proposedDiscount != null) ? el('span', { class: 'tl-prop', text: 'proposed: ' + money(it.proposedPrice) + (it.proposedDiscount != null ? ' −' + qn(it.proposedDiscount) + '%' : '') }) : null;
           if (pricing) {
