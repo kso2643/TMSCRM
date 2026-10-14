@@ -34,6 +34,32 @@
   function currentUser() {
     try { return JSON.parse(localStorage.getItem('crm_user') || 'null'); } catch (e) { return null; }
   }
+  /* Shared brand list (products, vendors and brands added by hand — /options?list=brand); "＋ Other…" adds one for everyone. */
+  var BRANDS = [];
+  function loadBrands() {
+    return fetch(API + '/api/options?list=brand', { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) { return r.json(); })
+      .then(function (j) { BRANDS = ((j.data && j.data.options) || []).map(function (o) { return o.value; }); }).catch(function () {});
+  }
+  function brandSelect(value, onPick) {
+    var s = el('select', { class: INPUT, 'data-order-brand': '', title: 'Brand', style: 'max-width:140px' }, [el('option', { value: '', text: 'Brand…' })]);
+    var list = BRANDS.slice(); if (value && list.indexOf(value) === -1) list.unshift(value);
+    list.forEach(function (b) { s.appendChild(el('option', { value: b, text: b })); });
+    s.appendChild(el('option', { value: '__other', text: '＋ Other (type new)…' }));
+    s.value = value || '';
+    var prev = s.value;
+    s.addEventListener('change', function () {
+      if (s.value !== '__other') { prev = s.value; onPick(s.value); return; }
+      var b = (prompt('New brand name (it will be added to the list for everyone):') || '').trim();
+      if (!b) { s.value = prev; return; }
+      fetch(API + '/api/options', { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || ''), 'Content-Type': 'application/json' }, body: JSON.stringify({ list: 'brand', label: b }) })
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.success) throw new Error(j.message || 'Could not add the brand');
+          var v = j.data.option.value; if (BRANDS.indexOf(v) === -1) BRANDS.push(v);
+          var o = el('option', { value: v, text: v }); s.insertBefore(o, s.lastChild); s.value = v; prev = v; onPick(v);
+        }).catch(function (e) { alert(e.message); s.value = prev; });
+    });
+    return s;
+  }
   function isSuperAdminUser() { var u = currentUser(); return !!u && u.role === 'SUPER_ADMIN'; }
   function isAdmin() {
     var u = currentUser();
@@ -194,7 +220,7 @@
   function mount(root) {
     injectCss();
     var all = [];
-    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '';
+    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '', brandF = '';
     var engineers = [];
     var expanded = {};    // orderId -> true while its row is open
     var presets = {};     // orderId -> delivery status picked from the dropdown that needs the materials panel
@@ -245,6 +271,7 @@
       if (orderType) q.push('orderType=' + orderType);
       if (procurementStatus) q.push('procurementStatus=' + procurementStatus);
       if (proformaStatus) q.push('proformaStatus=' + proformaStatus);
+      if (brandF) q.push('brand=' + encodeURIComponent(brandF));
       q.push('limit=100');
       return q.join('&');
     }
@@ -325,9 +352,10 @@
        labelled('Price / proforma', sel('All', PROFORMA_STATUSES, proformaStatus, function (v) { proformaStatus = v; })),
        labelled('Procurement', sel('All procurement statuses', PROCUREMENT_STATUSES, procurementStatus, function (v) { procurementStatus = v; })),
        labelled('Type', sel('All types', ORDER_TYPES, orderType, function (v) { orderType = v; })),
+       labelled('Brand', sel('All brands', BRANDS.map(function (b) { return [b, b]; }), brandF, function (v) { brandF = v; })),
        el('div', { class: 'flex items-end' }, [el('button', {
          class: 'btn-secondary w-full', text: 'Clear filters',
-         onclick: function () { from = to = engineerId = deliveryStatus = orderType = procurementStatus = proformaStatus = ''; renderFilters(); load(); }
+         onclick: function () { from = to = engineerId = deliveryStatus = orderType = procurementStatus = proformaStatus = brandF = ''; renderFilters(); load(); }
        })])
       ].forEach(function (n) { filters.appendChild(n); });
     }
@@ -380,7 +408,7 @@
     }
 
     function renderTable() {
-      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Materials', 'PDF'];
+      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Brand', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Materials', 'PDF'];
       var tbody = el('tbody');
       if (!all.length) {
         tbody.appendChild(el('tr', {}, [el('td', {
@@ -398,13 +426,19 @@
             el('td', { class: 'px-3 py-3 font-medium ox-nowrap', text: (o.customer && o.customer.companyName) || '—' }),
             el('td', { class: 'px-3 py-3 ox-nowrap' }, [el('span', { class: 'ox-eng', title: 'Show materials', text: (o.engineer && o.engineer.name) || '—' })]),
             el('td', { class: 'px-3 py-3' }, [el('span', { class: 'badge ' + TYPE_BADGE[o.orderType], text: labelOf(ORDER_TYPES, o.orderType) })]),
+            el('td', { class: 'px-3 py-3', 'data-order-brands': '' }, (o.brands && o.brands.length ? o.brands : (fullOrders[o.id] && fullOrders[o.id].items ? fullOrders[o.id].items.map(function (i) { return i.brand; }).filter(function (b, k, a) { return b && a.indexOf(b) === k; }) : []))
+              .map(function (b) { return el('span', { class: 'badge badge-blue', style: 'margin:0 .2rem .2rem 0', text: b }); }).concat(o.brands && o.brands.length ? [] : [el('span', { class: 'text-muted', text: '—' })])),
             el('td', { class: 'px-3 py-3 ox-nowrap', text: fmtDate(o.orderDate) }),
             el('td', { class: 'px-3 py-3 ox-nowrap' }, [etaCell(o)]),
             el('td', { class: 'px-3 py-3' }, [proformaCell(o)]),
             procCell,
             el('td', { class: 'px-3 py-3' }, [deliveryCell(o)]),
             el('td', { class: 'px-3 py-3 ox-nowrap text-muted', title: o.productSummary || '', text: supplied }),
-            el('td', { class: 'px-3 py-3' }, [pdfButton(o)])
+            el('td', { class: 'px-3 py-3 ox-nowrap' }, [pdfButton(o), isSuperAdminUser() ? el('button', { class: 'btn-secondary btn-sm', type: 'button', 'data-order-del': o.id, title: 'Delete this order (Super Admin)', style: 'margin-left:.35rem;color:#b91c1c', text: '🗑', onclick: function (e) {
+              e.stopPropagation();
+              if (!confirm('Delete the order for ' + ((o.customer && o.customer.companyName) || 'this customer') + '? This cannot be undone.')) return;
+              api('DELETE', '/orders/' + o.id).then(function () { load(); }).catch(function (er) { alert(er.message); });
+            } }) : null])
           ]);
           tr.addEventListener('click', function () {
             expanded[o.id] = !expanded[o.id];
@@ -475,6 +509,7 @@
     }).catch(function () {});
 
     renderFilters();
+    loadBrands().then(renderFilters);
     load();
   }
 
@@ -1310,8 +1345,7 @@
           }
           paintStock();
           qty.addEventListener('input', function () { state.items[idx].quantity = Number(qty.value) || 0; paintStock(); });
-          var brand = el('input', { class: INPUT, placeholder: 'Brand', style: 'max-width:110px', value: it.brand || '' });
-          brand.addEventListener('input', function () { state.items[idx].brand = brand.value.trim() || null; });
+          var brand = brandSelect(it.brand, function (v) { state.items[idx].brand = v || null; });
           var label = it.productName + (it.itemCode && it.itemCode !== 'MANUAL' ? ' (' + it.itemCode + ')' : '');
           if (it.category) label += ' · ' + it.category;
           if (!it.productId) label += ' · manual';
@@ -1392,7 +1426,7 @@
         var codeI = el('input', { class: INPUT, placeholder: 'Code (optional)' });
         var unitI = el('input', { class: INPUT, placeholder: 'Unit (optional)' });
         var catI = el('input', { class: INPUT, placeholder: 'Category (optional)' });
-        var brandI = el('input', { class: INPUT, placeholder: 'Brand (optional)' });
+        var brandV = null, brandI = brandSelect(null, function (v) { brandV = v || null; });
         var qtyI = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, value: '1' });
         var err = el('p', { class: 'text-xs text-red-600 dark:text-red-400 hidden' });
 
@@ -1406,7 +1440,7 @@
           state.items.push({
             productId: null, itemCode: codeI.value.trim() || 'MANUAL', productName: name,
             unit: unitI.value.trim() || null, category: catI.value.trim() || null,
-            brand: brandI.value.trim() || null, quantity: Number(qtyI.value) || 1
+            brand: brandV, quantity: Number(qtyI.value) || 1
           });
           showManualEntry = false;
           render();

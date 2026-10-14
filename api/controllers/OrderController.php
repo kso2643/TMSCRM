@@ -502,6 +502,7 @@ class OrderController
         if (qp('proformaStatus'))    { $where[] = 'o.proformaStatus=?';    $params[] = qp('proformaStatus'); }
         if (qp('orderType'))      { $where[] = 'o.orderType=?';      $params[] = qp('orderType'); }
         if (qp('customerId'))     { $where[] = 'o.customerId=?';     $params[] = qp('customerId'); }
+        if (qp('brand'))          { $where[] = 'EXISTS (SELECT 1 FROM `CustomerOrderItem` bi WHERE bi.orderId=o.id AND bi.brand=?)'; $params[] = qp('brand'); }
         if (qp('search')) {
             $like = '%' . qp('search') . '%';
             $where[] = '(c.companyName LIKE ? OR c.contactPerson LIKE ?)';
@@ -516,6 +517,7 @@ class OrderController
         $s2 = db()->prepare(
             "SELECT o.*, c.companyName, c.contactPerson, c.contactNumber, u.name AS engineerName, u.role AS engineerRole,
                     (SELECT GROUP_CONCAT(productName SEPARATOR ', ') FROM `CustomerOrderItem` WHERE orderId=o.id) AS productNames,
+                    (SELECT GROUP_CONCAT(DISTINCT brand ORDER BY brand SEPARATOR '||') FROM `CustomerOrderItem` WHERE orderId=o.id AND brand IS NOT NULL AND brand<>'') AS brandNames,
                     (SELECT COUNT(*) FROM `CustomerOrderItem` WHERE orderId=o.id) AS itemCount,
                     (SELECT COUNT(*) FROM `CustomerOrderItem` WHERE orderId=o.id AND supplied=1) AS suppliedCount
              FROM `CustomerOrder` o
@@ -527,6 +529,7 @@ class OrderController
         $items = array_map(function ($r) {
             $shaped = $this->shape($r);
             $shaped['productSummary'] = $r['productNames'];
+            $shaped['brands'] = $r['brandNames'] ? explode('||', $r['brandNames']) : [];
             $shaped['itemCount'] = (int) $r['itemCount'];
             $shaped['suppliedCount'] = (int) $r['suppliedCount'];
             return $shaped;

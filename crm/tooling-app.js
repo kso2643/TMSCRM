@@ -60,7 +60,7 @@
   }
 
   var TYPES = {
-    PROJECT:     { title: 'Projects', one: 'project', sub: 'Complete tooling packages for a customer project — machine by machine.', path: '/projects/' },
+    PROJECT:     { title: 'Projects', one: 'project', sub: 'Project files (3D STEP, 2D drawings, PDF) and the tools selected for every operation — code, brand, cutting data, holder and specification.', path: '/projects/' },
     TOOLEDUP:    { title: 'Tooled-up', one: 'tooled-up request', sub: 'Everything a machine needs to start cutting — holders, tools, gauges, consumables.', path: '/tooled-up/' },
     ACCESSORIES: { title: 'New machine accessories', one: 'accessories request', sub: 'Accessories checklist for a new machine — tick what the customer needs and the quantity.', path: '/machine-accessories/' }
   };
@@ -115,6 +115,13 @@
       '.tl-tg .tl-f input,.tl-tg .tl-f select{padding:.32rem .45rem;font-size:.82rem}',
       '.tl-files{border:1px dashed #cbd5e1;border-radius:.6rem;padding:.3rem .7rem .6rem;margin:.6rem 0}.tl-file{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.25rem 0;font-size:.85rem}',
       '.tl-file a{color:#1d4ed8;font-weight:600;text-decoration:none}.tl-file a:hover{text-decoration:underline}',
+      '.tl-catwrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:.6rem;align-items:start}@media (max-width:760px){.tl-catwrap{grid-template-columns:1fr}}',
+      '.tl-catnav{display:flex;flex-direction:column;gap:.25rem;border:1px solid #e2e8f0;border-radius:.6rem;padding:.35rem;background:#fff}.dark .tl-catnav{background:#1e293b;border-color:#334155}',
+      '.tl-catbtn{display:flex;justify-content:space-between;align-items:center;gap:.4rem;border:0;background:none;border-radius:.45rem;padding:.42rem .55rem;font-size:.83rem;font-weight:600;color:#334155;cursor:pointer;text-align:left}',
+      '.tl-catbtn:hover{background:#f1f5f9}.tl-catbtn.on{background:#1e3a8a;color:#fff}.dark .tl-catbtn{color:#e2e8f0}.dark .tl-catbtn:hover{background:#0f172a}',
+      '.tl-catbtn .n{font-size:.72rem;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:999px;padding:0 .45rem}.tl-catbtn .n.on{background:#dcfce7;color:#166534}.tl-catbtn.on .n{background:#ffffff33;color:#fff}',
+      '.tl-catpane{border:1px solid #e2e8f0;border-radius:.6rem;background:#fff;padding:.4rem 0;min-height:200px}.dark .tl-catpane{background:#1e293b;border-color:#334155}',
+      '.tl-catpane-h{display:flex;gap:.6rem;align-items:baseline;padding:.2rem .7rem .45rem;border-bottom:1px solid #f1f5f9;margin-bottom:.25rem;flex-wrap:wrap}',
       '.tl-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;transition:opacity .25s,transform .25s;max-width:90vw}',
       '.tl-toast.in{opacity:1;transform:translate(-50%,0)}.tl-toast.err{background:#b91c1c}'
     ].join('\n');
@@ -243,7 +250,7 @@
         el('div', { class: 'tl-f w2' }, [el('label', { text: 'Title (optional)' }), title]),
         el('div', { class: 'tl-f w' }, [el('label', { text: 'Notes' }), notes])
       ]));
-      card.appendChild(filesBox(q && F.id ? q : null, true, F, function (nq) { q = nq; draw(); }));
+      if (S.type === 'PROJECT') card.appendChild(filesBox(q && F.id ? q : null, true, F, function (nq) { q = nq; draw(); }));
       card.appendChild(el('h2', { style: 'margin:1rem 0 .5rem', text: 'Machines' }));
       F.machines.forEach(function (m, mi) { card.appendChild(machineCard(m, mi)); });
       card.appendChild(el('button', { class: 'tl-btn', type: 'button', id: 'tl-add-machine', text: '+ Add another machine', onclick: function () { F.machines.push(blankMachine()); draw(); } }));
@@ -280,29 +287,37 @@
         el('div', { class: 'tl-f' }, [el('label', { text: 'No. of machines' }), cnt]),
         el('div', {}, [F.machines.length > 1 ? el('button', { class: 'tl-btn sm red', type: 'button', text: 'Remove machine', onclick: function () { if (!nTick || confirm('Remove machine ' + (mi + 1) + ' and its ' + nTick + ' item(s)?')) { F.machines.splice(mi, 1); draw(); } } }) : null])
       ]));
-      // checklist by category
-      var list = listFor(m.machineType), cats = el('div', { class: 'tl-cats' });
-      Object.keys(list).forEach(function (c) {
-        var on = list[c].filter(function (i) { return m.ticks[c + '||' + i]; }).length;
-        var cnt2 = el('span', { class: 'c', text: on ? on + ' ticked' : list[c].length + ' items' });
-        var det = el('details', { class: 'tl-cat', open: on ? true : null }, [el('summary', {}, [c, cnt2])]);
-        list[c].forEach(function (i) {
-          var k = c + '||' + i, t = m.ticks[k];
-          var cb = el('input', { type: 'checkbox', 'data-item': i });
-          cb.checked = !!t;
-          var qty = el('input', { type: 'number', min: '0', step: 'any', value: t ? t.qty : '', placeholder: 'qty', 'data-qty': i, disabled: !t, 'aria-label': 'Quantity, ' + i });
-          var row = el('div', { class: 'tl-ci' + (t ? ' on' : '') }, [cb, el('label', { text: i, onclick: function () { cb.click(); } }), qty]);
-          cb.onchange = function () {
-            if (cb.checked) { m.ticks[k] = { qty: qty.value || '1' }; qty.value = m.ticks[k].qty; qty.disabled = false; row.classList.add('on'); qty.focus(); qty.select(); }
-            else { delete m.ticks[k]; qty.disabled = true; qty.value = ''; row.classList.remove('on'); }
-            var n2 = list[c].filter(function (x) { return m.ticks[c + '||' + x]; }).length; cnt2.textContent = n2 ? n2 + ' ticked' : list[c].length + ' items';
-          };
-          qty.oninput = function () { if (m.ticks[k]) m.ticks[k].qty = qty.value; };
-          det.appendChild(row);
-        });
-        cats.appendChild(det);
+      // Projects have no checklist: only files (above) and the tool selection below.
+      if (S.type !== 'PROJECT') {
+      // checklist: pick a category on the left, its items load on the right (tick + quantity)
+      var list = listFor(m.machineType), catNames = Object.keys(list);
+      if (!m.cat || !list[m.cat]) m.cat = catNames.filter(function (c) { return list[c].some(function (i) { return m.ticks[c + '||' + i]; }); })[0] || catNames[0];
+      var nav = el('div', { class: 'tl-catnav', role: 'tablist' });
+      var pane = el('div', { class: 'tl-catpane', 'data-cat-pane': m.cat });
+      function tickedIn(c) { return list[c].filter(function (x) { return m.ticks[c + '||' + x]; }).length; }
+      catNames.forEach(function (c) {
+        var n0 = tickedIn(c);
+        nav.appendChild(el('button', { type: 'button', role: 'tab', class: 'tl-catbtn' + (c === m.cat ? ' on' : ''), 'data-cat': c, onclick: function () { m.cat = c; draw(); } },
+          [el('span', { text: c }), el('span', { class: 'n' + (n0 ? ' on' : ''), 'data-cat-count': c, text: n0 ? n0 + ' ✓' : String(list[c].length) })]));
       });
-      box.appendChild(cats);
+      var c = m.cat;
+      pane.appendChild(el('div', { class: 'tl-catpane-h' }, [el('b', { text: c }), el('span', { class: 'tl-sub', text: list[c].length + ' items — tick what is needed and enter the quantity' })]));
+      list[c].forEach(function (i) {
+        var k = c + '||' + i, t = m.ticks[k];
+        var cb = el('input', { type: 'checkbox', 'data-item': i });
+        cb.checked = !!t;
+        var qty = el('input', { type: 'number', min: '0', step: 'any', value: t ? t.qty : '', placeholder: 'qty', 'data-qty': i, disabled: !t, 'aria-label': 'Quantity, ' + i });
+        var row = el('div', { class: 'tl-ci' + (t ? ' on' : '') }, [cb, el('label', { text: i, onclick: function () { cb.click(); } }), qty]);
+        cb.onchange = function () {
+          if (cb.checked) { m.ticks[k] = { qty: qty.value || '1' }; qty.value = m.ticks[k].qty; qty.disabled = false; row.classList.add('on'); qty.focus(); qty.select(); }
+          else { delete m.ticks[k]; qty.disabled = true; qty.value = ''; row.classList.remove('on'); }
+          var n2 = tickedIn(c), badge = nav.querySelector('[data-cat-count="' + c.replace(/"/g, '\\"') + '"]');
+          if (badge) { badge.textContent = n2 ? n2 + ' ✓' : String(list[c].length); badge.classList.toggle('on', !!n2); }
+        };
+        qty.oninput = function () { if (m.ticks[k]) m.ticks[k].qty = qty.value; };
+        pane.appendChild(row);
+      });
+      box.appendChild(el('div', { class: 'tl-catwrap' }, [nav, pane]));
       // own components
       var dl = el('datalist', { id: 'tl-cats-' + mi }, Object.keys(list).concat(['Other']).map(function (c) { return el('option', { value: c }); }));
       var own = el('div', { style: 'margin-top:.6rem' }, [dl, el('div', { style: 'font-weight:700;font-size:.82rem', text: 'Components added by hand' })]);
@@ -314,7 +329,8 @@
       });
       own.appendChild(el('button', { class: 'tl-btn sm', type: 'button', 'data-add-comp': String(mi), style: 'margin-top:.4rem', text: '+ Add component', onclick: function () { m.custom.push({ category: '', item: '', qty: '1' }); draw(); var r = box.querySelectorAll('[data-ck=item]'); if (r.length) r[r.length - 1].focus(); } }));
       box.appendChild(own);
-      if (S.type === 'PROJECT' || m.tools.length) box.appendChild(toolSection(m, mi));
+      }
+      if (S.type === 'PROJECT') box.appendChild(toolSection(m, mi));
       return box;
     }
     /* Projects: the tools selected for each operation, with cutting data and specification */
@@ -387,6 +403,7 @@
   var FILE_KIND = { '3D': ['3D model', '#7c3aed'], '2D': ['2D drawing', '#2563eb'], PDF: ['PDF', '#dc2626'], IMAGE: ['Image', '#0891b2'], DOC: ['Document', '#b45309'], ZIP: ['ZIP', '#475569'], OTHER: ['File', '#475569'] };
   function fileSize(n) { n = +n || 0; return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
   function openFile(q, f, download) {
+    if (!download && /\.pdf$/i.test(f.fileName) && window.PdfView) { PdfView.show(API + '/api/tooling/' + q.id + '/files/' + f.id, { title: f.fileName, fileName: f.fileName }); return; }
     fetch(API + '/api/tooling/' + q.id + '/files/' + f.id + (download ? '?download=1' : ''), { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
       if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Could not open the file'); });
       return r.blob().then(function (b) {
@@ -454,7 +471,7 @@
         el('button', { class: 'tl-btn sm', type: 'button', text: '← Back to list', onclick: showList })
       ]));
       if (q.notes) card.appendChild(el('div', { style: 'margin:.6rem 0;white-space:pre-wrap;font-size:.88rem', text: q.notes }));
-      card.appendChild(filesBox(q, mine || S.isAdmin, null, function (nq) { q = nq; draw(); }));
+      if (q.type === 'PROJECT' || (q.files && q.files.length)) card.appendChild(filesBox(q, mine || S.isAdmin, null, function (nq) { q = nq; draw(); }));
       if (q.adminNote) card.appendChild(el('div', { style: 'margin:.4rem 0;font-size:.85rem;color:#475569', text: 'Admin note: ' + q.adminNote }));
       if (q.requestNo) card.appendChild(el('div', { class: 'tl-sub', style: 'margin:.4rem 0', html: null }, ['To quote: open ', el('a', { href: '/quotations/', text: 'Quotations' }), ', enter ', el('b', { text: q.requestNo }), ' in the "Price request / approval no." box and press "Load approved prices" — every item comes in with its price and discount.']));
       if (q.status === 'NEGOTIATION') card.appendChild(el('div', { class: 'tl-sub', style: 'color:#7c3aed;font-weight:600;margin:.3rem 0', text: q.proposals + ' new price(s) proposed by the engineer — ' + (S.isAdmin ? 'check them below and approve or turn down.' : 'waiting for the admin.') }));

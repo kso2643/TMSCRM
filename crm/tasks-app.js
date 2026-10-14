@@ -586,7 +586,10 @@
           dueEl(t),
           el('span', { class: 'badge ' + PRIORITY_BADGE[t.priority], text: labelOf(PRIORITIES, t.priority) }),
           t.status === 'QUEUED' ? el('span', { class: 'text-xs text-muted tx-nowrap', text: '—' }) : timerEl(t, 'text-sm font-semibold tx-nowrap'),
-          t.status !== 'COMPLETED' ? el('button', { class: 'tx-link text-xs', text: 'Edit', onclick: function () { openTaskDialog(t, load); } }) : null
+          t.status !== 'COMPLETED' ? el('button', { class: 'tx-link text-xs', text: 'Edit', onclick: function () { openTaskDialog(t, load); } }) : null,
+          isSuperAdmin() ? el('button', { class: 'tx-link tx-danger text-xs', 'data-task-del': t.id, text: 'Delete', onclick: function () {
+            if (confirm('Delete “' + t.title + '”?')) api('DELETE', '/tasks/' + t.id).then(load).catch(function (e) { alert(e.message); });
+          } }) : null
         ]));
       });
       p.appendChild(box);

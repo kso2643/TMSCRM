@@ -90,6 +90,7 @@
     return api('GET', '/catalog/files').then(function (j) { S.files = j.data.files || []; draw(); }).catch(function (e) { clear(grid).appendChild(el('div', { class: 'dc-empty', text: e.message })); });
   }
   function open(f, download) {
+    if (!download && f.ext === 'pdf' && window.PdfView) { PdfView.show(API + '/api/catalog/files/' + f.id, { title: f.title, fileName: f.fileName }); return; }
     fetch(API + '/api/catalog/files/' + f.id + (download ? '?download=1' : ''), { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
       if (!r.ok) throw new Error('Could not open the file');
       return r.blob().then(function (b) {

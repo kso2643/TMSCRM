@@ -28,6 +28,7 @@
     });
   }
   function getFile(path, open, name) {
+    if (open && window.PdfView && (!name || /\.pdf$/i.test(name))) { PdfView.show(API + '/api' + path, { title: name || 'Catalogue', fileName: name }); return Promise.resolve(); }
     return fetch(API + '/api' + path, { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
       if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Download failed'); });
       var cd = r.headers.get('Content-Disposition') || '', m = /filename="?([^";]+)"?/.exec(cd);
@@ -302,7 +303,7 @@
             el('b', { text: f.title }),
             el('span', { class: 'sub', text: f.fileName + ' · ' + Math.max(1, Math.round(f.size / 1024)) + ' KB' + (f.uploadedBy ? ' · ' + f.uploadedBy : '') }),
             el('div', { style: 'display:flex;gap:.35rem;margin-top:auto' }, [
-              el('button', { class: 'pc-btn sm pri', type: 'button', text: 'Open', onclick: function () { getFile('/catalog/files/' + f.id, true); } }),
+              el('button', { class: 'pc-btn sm pri', type: 'button', text: 'Open', onclick: function () { getFile('/catalog/files/' + f.id, true, f.fileName); } }),
               el('button', { class: 'pc-btn sm', type: 'button', text: 'Download', onclick: function () { getFile('/catalog/files/' + f.id + '?download=1', false, f.fileName); } }),
               canEdit ? el('button', { class: 'pc-btn sm red', type: 'button', text: '✕', title: 'Remove', onclick: function () {
                 if (!confirm('Remove “' + f.title + '”?')) return;

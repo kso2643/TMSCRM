@@ -95,7 +95,6 @@
     { label: 'Price requests',        href: '/price-requests/', icon: 'tag',       section: 'Sales' },
     { label: 'Projects',              href: '/projects/',       icon: 'layers',    section: 'Sales' },
     { label: 'Tooled-up',             href: '/tooled-up/',      icon: 'package',   section: 'Sales' },
-    { label: 'Machine accessories',   href: '/machine-accessories/', icon: 'clipboard', section: 'Sales' },
     { label: 'CPR & weekly review',   href: '/cpr/',            icon: 'target',    section: 'Sales' },
     { label: 'Stock',                 href: '/stock/',          icon: 'layers',    section: 'Sales' },
     { label: 'Analytics',             href: '/analytics/',      icon: 'chart',     section: 'Reports' },

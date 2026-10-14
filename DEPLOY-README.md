@@ -1,3 +1,34 @@
+# Update — 15 Oct (a): PDFs open in the page, Machine accessories removed, Projects = files + tools, Tooled-up category list, Super Admin delete, order brands
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `crm/pdf-view.js`, and a new React sidebar file `layout-a61d4e9b3c7f2508.js`.
+- No new tables.
+
+1. **PDFs open again:**
+   - On **Catalogues & documents**, the Product catalogue PDF tab and project files, a PDF now opens in a viewer **inside the page**, page by page, with Download / New tab / Close (Esc).
+   - Before, it opened a new tab after loading, which browsers block as a pop-up.
+   - If a file cannot be read, the viewer says why.
+2. **Machine accessories page removed:**
+   - Gone from both sidebars. The old link opens **Tooled-up**.
+   - Requests already made there (ACC- numbers) are listed on Tooled-up, and their numbers still load into quotations.
+3. **Projects** now has only:
+   - **project files**: 3D STEP / IGES, 2D DWG / DXF / PDF, images, Office, ZIP, up to 50 MB;
+   - **tool selection per machine**: operation, tool type, tool, item code, brand, qty, price, RPM, feed, Vc, pockets (cutters only), holder, specification.
+   - No checklist and no hand-added components on Projects.
+   - Admin pricing and the quotation description (brand, specification, operation) are unchanged.
+4. **Tooled-up:**
+   - The checklist is a **category list** on the left. Click a category and its items load on the right (tick + quantity). Each category shows how many items are ticked.
+   - **Collets are separate:** ER16, ER20, ER25, ER32 and ER40 collet sets, single-size ER collets, sealing collets, tapping collets, collet nuts, collet spanners (plus spring collets on CNC / VTL).
+   - The project files box shows only on Projects.
+5. **Delete for the Super Admin:**
+   - Orders now have a **🗑** button on every row in the list.
+   - Tasks have **Delete** in the "assigned by me" list too, not only in the queue view.
+   - Vendor POs, quotations and CEO Desk already had Delete for the Super Admin. Other users still cannot delete.
+6. **Orders — brand:**
+   - New **Brand** column (the brands on the order's items) and a **Brand** filter.
+   - Each item in the order form has a **brand dropdown** (shared brand list; **＋ Other…** adds a new brand for everyone). The hand-entry form uses the same dropdown.
+7. **Stock check:** unchanged and working. **🗂 Stock check (count)** on the Stock page (Admin / Manager): pick the place, type the counted Nos, save — the stock is set to the counted Nos and the check is recorded.
+
 # Fix — 14 Oct (b): Customers / Dashboard / Products pages not opening ("Application error")
 
 **Upload:** `crm/`, then press **Ctrl+Shift+R** once. If a page still shows the error, clear the site data once (DevTools → Application → Clear storage).
