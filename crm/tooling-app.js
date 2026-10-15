@@ -123,6 +123,9 @@
       '.tl-catpane{border:1px solid #e2e8f0;border-radius:.6rem;background:#fff;padding:.4rem 0;min-height:200px}.dark .tl-catpane{background:#1e293b;border-color:#334155}',
       '.tl-catpane-h{display:flex;gap:.6rem;align-items:baseline;padding:.2rem .7rem .45rem;border-bottom:1px solid #f1f5f9;margin-bottom:.25rem;flex-wrap:wrap}',
       '.tl-ci2{grid-template-columns:auto minmax(150px,1fr) 64px 120px minmax(150px,1.3fr)}.tl-ci2 input.tl-size,.tl-ci2 input.tl-desc{border:1px solid #cbd5e1;border-radius:.35rem;padding:.15rem .35rem;font-size:.8rem;background:#fff;color:inherit;min-width:0}',
+      '.tl-ci3{grid-template-columns:auto minmax(150px,1fr) 64px 120px minmax(150px,1.3fr) auto}.tl-ied{display:flex;gap:.15rem}.tl-ied button{border:0;background:none;cursor:pointer;font-size:.8rem;opacity:.55;padding:.1rem .2rem}.tl-ied button:hover{opacity:1}',
+      '.tl-addrow{display:flex;gap:.4rem;padding:.45rem .7rem .2rem;border-top:1px dashed #e2e8f0;margin-top:.3rem}.tl-addrow input{flex:1;border:1px solid #cbd5e1;border-radius:.4rem;padding:.3rem .5rem;font-size:.82rem;background:#fff;color:inherit}.dark .tl-addrow input{background:#0f172a;border-color:#334155}',
+      '.tl-catadd{color:#1e3a8a;border:1px dashed #93c5fd!important;margin-top:.2rem;justify-content:center}.dark .tl-catadd{color:#93c5fd}',
       '.tl-ci2 input:disabled{opacity:.35}@media (max-width:900px){.tl-ci2{grid-template-columns:auto 1fr 64px}.tl-ci2 .tl-size,.tl-ci2 .tl-desc{grid-column:2 / span 2}}',
       '.tl-cust2{grid-template-columns:minmax(0,.8fr) minmax(0,1.3fr) 70px minmax(0,.8fr) minmax(0,1.2fr) auto}@media (max-width:900px){.tl-cust2{grid-template-columns:1fr 1fr}}',
       '.tl-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);opacity:0;z-index:2147483600;background:#0f766e;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;transition:opacity .25s,transform .25s;max-width:90vw}',
@@ -304,7 +307,39 @@
           [el('span', { text: c }), el('span', { class: 'n' + (n0 ? ' on' : ''), 'data-cat-count': c, text: n0 ? n0 + ' ✓' : String(list[c].length) })]));
       });
       var c = m.cat;
-      pane.appendChild(el('div', { class: 'tl-catpane-h' }, [el('b', { text: c }), el('span', { class: 'tl-sub', text: list[c].length + ' items — tick what is needed and enter the quantity' })]));
+      var clM = ['VMC', 'HMC', 'CNC', 'VTL'].indexOf(m.machineType) !== -1 ? m.machineType : 'VMC';
+      /* edit the list itself: add (anyone), rename / delete (Admin) — saved for everyone, per machine type */
+      function clCall(path, payload, after) {
+        payload.machine = clM;
+        return api('POST', '/tooling/checklist/' + path, payload).then(function (j) {
+          S.checklists[clM].categories = j.data.categories; S.checklists[clM].uploaded = true;
+          if (clM === 'VMC' && S.checklists.OTHER) S.checklists.OTHER.categories = j.data.categories;
+          if (after) after(j.data.categories);
+          toast(j.message); draw();
+        }).catch(function (e) { toast(e.message, 'err'); });
+      }
+      function moveTicks(fn) {   // keep ticks when a category / item is renamed
+        F.machines.forEach(function (mm) {
+          if ((['VMC', 'HMC', 'CNC', 'VTL'].indexOf(mm.machineType) !== -1 ? mm.machineType : 'VMC') !== clM) return;
+          Object.keys(mm.ticks).forEach(function (k) { var nk = fn(k); if (nk && nk !== k) { mm.ticks[nk] = mm.ticks[k]; delete mm.ticks[k]; } });
+          if (mm.cat) { var nc = fn(mm.cat + '||'); if (nc) mm.cat = nc.split('||')[0]; }
+        });
+      }
+      nav.appendChild(el('button', { type: 'button', class: 'tl-catbtn tl-catadd', id: 'tl-new-cat-' + mi, text: '＋ New category', onclick: function () {
+        var name = (prompt('New category name (e.g. Angle Heads):') || '').trim(); if (!name) return;
+        var first = (prompt('First item in "' + name + '":') || '').trim(); if (!first) return;
+        clCall('item', { category: name, item: first }, function () { m.cat = name; m.ticks[name + '||' + first] = { qty: '1', size: '', desc: '' }; });
+      } }));
+      pane.appendChild(el('div', { class: 'tl-catpane-h' }, [el('b', { text: c }), el('span', { class: 'tl-sub', text: list[c].length + ' items — tick what is needed and enter the quantity' }),
+        S.isAdmin ? el('span', { style: 'margin-left:auto;display:flex;gap:.3rem' }, [
+          el('button', { type: 'button', class: 'tl-btn sm', 'data-cat-rename': c, text: '✎ Rename', onclick: function () {
+            var to = (prompt('Rename category "' + c + '" to:', c) || '').trim(); if (!to || to === c) return;
+            clCall('rename', { category: c, to: to }, function () { moveTicks(function (k) { var p = k.split('||'); return p[0] === c ? to + '||' + p[1] : null; }); });
+          } }),
+          el('button', { type: 'button', class: 'tl-btn sm red', 'data-cat-del': c, text: '🗑 Delete', onclick: function () {
+            if (!confirm('Delete the category "' + c + '" and its ' + list[c].length + ' item(s) from the ' + clM + ' list?')) return;
+            clCall('remove', { category: c }, function () { m.cat = null; });
+          } })]) : null]));
       list[c].forEach(function (i) {
         var k = c + '||' + i, t = m.ticks[k];
         var cb = el('input', { type: 'checkbox', 'data-item': i });
@@ -314,7 +349,16 @@
         var desc = el('input', { class: 'tl-desc', value: t ? t.desc || '' : '', placeholder: 'Description (spec, brand, length…)', 'data-desc': i, disabled: !t, 'aria-label': 'Description, ' + i });
         size.oninput = function () { if (m.ticks[k]) m.ticks[k].size = size.value; };
         desc.oninput = function () { if (m.ticks[k]) m.ticks[k].desc = desc.value; };
-        var row = el('div', { class: 'tl-ci tl-ci2' + (t ? ' on' : '') }, [cb, el('label', { text: i, onclick: function () { cb.click(); } }), qty, size, desc]);
+        var row = el('div', { class: 'tl-ci tl-ci2' + (t ? ' on' : '') + (S.isAdmin ? ' tl-ci3' : '') }, [cb, el('label', { text: i, onclick: function () { cb.click(); } }), qty, size, desc,
+          S.isAdmin ? el('span', { class: 'tl-ied' }, [
+            el('button', { type: 'button', title: 'Rename item', 'data-item-rename': i, text: '✎', onclick: function () {
+              var to = (prompt('Rename "' + i + '" to:', i) || '').trim(); if (!to || to === i) return;
+              clCall('rename', { category: c, item: i, to: to }, function () { moveTicks(function (k2) { return k2 === k ? c + '||' + to : null; }); });
+            } }),
+            el('button', { type: 'button', title: 'Delete item', 'data-item-del': i, text: '🗑', onclick: function () {
+              if (!confirm('Delete "' + i + '" from ' + c + '?')) return;
+              clCall('remove', { category: c, item: i }, function () { F.machines.forEach(function (mm) { delete mm.ticks[k]; }); });
+            } })]) : null]);
         cb.onchange = function () {
           if (cb.checked) { m.ticks[k] = { qty: qty.value || '1', size: size.value, desc: desc.value }; qty.value = m.ticks[k].qty; qty.disabled = size.disabled = desc.disabled = false; row.classList.add('on'); qty.focus(); qty.select(); }
           else { delete m.ticks[k]; qty.disabled = size.disabled = desc.disabled = true; qty.value = ''; row.classList.remove('on'); }
@@ -324,10 +368,19 @@
         qty.oninput = function () { if (m.ticks[k]) m.ticks[k].qty = qty.value; };
         pane.appendChild(row);
       });
+      // add an item to this category (saved in the list for everyone) and tick it
+      var newIt = el('input', { placeholder: 'New item in ' + c + '…', 'data-new-item': c, 'aria-label': 'New item in ' + c });
+      function addIt() {
+        var v = newIt.value.trim(); if (!v) { newIt.focus(); return; }
+        clCall('item', { category: c, item: v }, function () { m.ticks[c + '||' + v] = m.ticks[c + '||' + v] || { qty: '1', size: '', desc: '' }; });
+      }
+      newIt.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addIt(); } });
+      pane.appendChild(el('div', { class: 'tl-addrow' }, [newIt, el('button', { type: 'button', class: 'tl-btn sm', 'data-add-item': c, text: '＋ Add to ' + c, onclick: addIt })]));
       box.appendChild(el('div', { class: 'tl-catwrap' }, [nav, pane]));
       // own components
       var dl = el('datalist', { id: 'tl-cats-' + mi }, Object.keys(list).concat(['Other']).map(function (c) { return el('option', { value: c }); }));
-      var own = el('div', { style: 'margin-top:.6rem' }, [dl, el('div', { style: 'font-weight:700;font-size:.82rem', text: 'Components added by hand' })]);
+      var own = el('div', { style: 'margin-top:.6rem' }, [dl, el('div', { style: 'font-weight:700;font-size:.82rem', text: 'Components added by hand' }),
+        el('div', { class: 'tl-sub', text: 'Pick or type a category — when you save, the component is added to that category\u2019s list (a new name makes a new category).' })]);
       m.custom.forEach(function (c, ci) {
         var cat = el('input', { list: 'tl-cats-' + mi, placeholder: 'Category', value: c.category, 'data-ck': 'category' }); cat.oninput = function () { c.category = cat.value; };
         var it = el('input', { placeholder: 'Component / item (e.g. BT40 ER32 holder 100 L)', value: c.item, 'data-ck': 'item' }); it.oninput = function () { c.item = it.value; };
@@ -383,7 +436,7 @@
         machines: F.machines.map(function (m) {
           var items = [];
           Object.keys(m.ticks).forEach(function (k) { var p = k.split('||'), t = m.ticks[k]; items.push({ category: p[0], item: p[1], quantity: t.qty, id: t.id || '', holder: t.size || '', toolSpec: t.desc || '' }); });
-          m.custom.forEach(function (c) { if ((c.item || '').trim()) items.push({ category: c.category || 'Other', item: c.item, quantity: c.qty, custom: true, id: c.id || '', holder: c.size || '', toolSpec: c.desc || '' }); });
+          m.custom.forEach(function (c) { if ((c.item || '').trim()) items.push({ category: (c.category || '').trim(), item: c.item, quantity: c.qty, custom: true, id: c.id || '', holder: c.size || '', toolSpec: c.desc || '' }); });
           (m.tools || []).forEach(function (t) {
             if (!(t.item || '').trim()) return;
             items.push({ category: t.toolType || 'Tool', item: t.item, quantity: t.qty || 1, custom: true, id: t.id || '', operation: t.operation, toolType: t.toolType || 'Other', itemCode: t.itemCode, brand: t.brand,
@@ -402,7 +455,9 @@
           .then(function (last) { return files.length ? api('GET', '/tooling/' + rid).then(function (k) { return { message: j.message + (files.length ? ' · ' + files.length + ' file(s) attached' : ''), data: { request: k.data.request } }; }) : j; });
       }).then(function (j) {
         toast(j.message); F.id = j.data.request.id;
-        if (submit) view(j.data.request); else { q = j.data.request; F.machines = q.machines.map(fromServer); draw(); try { history.replaceState(null, '', '#' + F.id); } catch (e) {} }
+        // hand-added components with a category are now in that category's list — reload the lists
+        S.checklists = null;
+        if (submit) view(j.data.request); else { q = j.data.request; checklists().then(function () { F.machines = q.machines.map(fromServer); draw(); }); try { history.replaceState(null, '', '#' + F.id); } catch (e) {} }
       }).catch(function (e) { toast(e.message, 'err'); btn.disabled = false; });
     }
     draw();

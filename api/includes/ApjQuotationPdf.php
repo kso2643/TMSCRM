@@ -190,7 +190,7 @@ class ApjQuotationPdf
         $this->pdf->setFillColor(self::GREY);
         $coInfo = [
             "No. 26/2, Kongu Maa Nagar, Villankurichi Road, Coimbatore \u{2013} 641 035",
-            'Mobile: 6379510936  |  E-Mail: operations@apjtech.in  |  GST: 33ABECA9840L1Z',
+            'Mobile: 6379510936  |  E-Mail: operations@apjtech.in  |  GST: 33ABECA9840L1ZE',
         ];
         foreach ($coInfo as $l) {
             $this->pdf->text($l, $this->mm(self::A4_W - self::MR), $this->mm($hY), ['align' => 'right', 'baseline' => 'top']);

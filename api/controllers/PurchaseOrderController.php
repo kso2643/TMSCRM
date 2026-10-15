@@ -30,7 +30,7 @@ class PurchaseOrderController
                   'phone' => '+91-0422 316 1934 | Mobile: 6379510936 / 7845843225', 'email' => 'uthaya@tulipsmachining.com', 'gstin' => '33BRHPA9794E1ZO'],
         'APJ' => ['name' => 'APJ Technologies Private Limited',
                   'address' => "No. 26/2, Kongu Maa Nagar, Villankurichi Road,\nCoimbatore - 641 035",
-                  'phone' => 'Mobile: 6379510936', 'email' => 'operations@apjtech.in', 'gstin' => '33ABECA9840L1Z'],
+                  'phone' => 'Mobile: 6379510936', 'email' => 'operations@apjtech.in', 'gstin' => '33ABECA9840L1ZE'],
     ];
 
     public static function ensure(): void

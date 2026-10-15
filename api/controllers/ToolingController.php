@@ -19,6 +19,10 @@
  *   GET    /api/tooling/checklist?machine=          checklists (default ones come from the
  *                                                   VMC accessories checklist; admins can upload their own)
  *   POST   /api/tooling/checklist                   admin: upload Excel (Category, Item[, Machine]) for a machine type
+ *   POST   /api/tooling/checklist/item              { machine, category, item } add an item / a new category (anyone)
+ *   POST   /api/tooling/checklist/rename            admin { machine, category, item?, to } rename a category or an item
+ *   POST   /api/tooling/checklist/remove            admin { machine, category, item? } delete a category or an item
+ *   Components added by hand with a category are added to that category's list when saved.
  *   POST   /api/tooling                             new request { type, customerId, customerName, title, notes, machines[], submit }
  *   GET    /api/tooling/:id
  *   PUT    /api/tooling/:id                         edit (draft / rejected; admins also while pending)
@@ -106,6 +110,92 @@ $t"],
         return self::DEFAULTS[$m] ?? self::DEFAULTS['VMC'];
     }
 
+    /** Copies the built-in list into the table so it can be edited (no-op once a machine type has rows). */
+    private static function materialize(string $m): void
+    {
+        $c = db()->prepare('SELECT COUNT(*) FROM `ToolingChecklist` WHERE machineType=?'); $c->execute([$m]);
+        if ((int) $c->fetchColumn() > 0) return;
+        $ins = db()->prepare('INSERT INTO `ToolingChecklist` (id,machineType,category,item,sortOrder) VALUES (?,?,?,?,?)');
+        $n = 0;
+        foreach (self::DEFAULTS[$m] ?? self::DEFAULTS['VMC'] as $cat => $items) foreach ($items as $it) $ins->execute([gen_id(), $m, $cat, $it, $n++]);
+    }
+
+    /** Adds an item to a machine type's list (if not there yet). Returns true if added. */
+    private static function addChecklistItem(string $m, string $cat, string $item): bool
+    {
+        self::materialize($m);
+        $e = db()->prepare('SELECT COUNT(*) FROM `ToolingChecklist` WHERE machineType=? AND category=? AND item=?'); $e->execute([$m, $cat, $item]);
+        if ((int) $e->fetchColumn() > 0) return false;
+        $mx = db()->prepare('SELECT COALESCE(MAX(sortOrder),0)+1 FROM `ToolingChecklist` WHERE machineType=?'); $mx->execute([$m]);
+        db()->prepare('INSERT INTO `ToolingChecklist` (id,machineType,category,item,sortOrder) VALUES (?,?,?,?,?)')->execute([gen_id(), $m, $cat, $item, (int) $mx->fetchColumn()]);
+        return true;
+    }
+
+    private static function clMachine($b): string
+    {
+        $m = strtoupper(trim((string) ($b['machine'] ?? '')));
+        if (!in_array($m, ['VMC', 'HMC', 'CNC', 'VTL'], true)) sendError('Pick the machine type (VMC, HMC, CNC or VTL).', 400);
+        return $m;
+    }
+
+    // POST /api/tooling/checklist/item — add an item (a new category name creates the category)
+    public function checklistAdd(): void
+    {
+        $auth = authenticate();
+        $b = request_body(); $m = self::clMachine($b);
+        $cat = mb_substr(trim((string) ($b['category'] ?? '')), 0, 80); $item = mb_substr(trim((string) ($b['item'] ?? '')), 0, 255);
+        if ($cat === '') sendError('Enter the category.', 400);
+        if ($item === '') sendError('Enter the item.', 400);
+        $added = self::addChecklistItem($m, $cat, $item);
+        if ($added) log_activity($auth['id'], 'TOOLING_CHECKLIST_ADD', 'ToolingChecklist', null, ['machine' => $m, 'category' => $cat, 'item' => $item]);
+        sendSuccess(['categories' => self::checklistFor($m)], $added ? "Added to $cat" : 'Already in the list');
+    }
+
+    // POST /api/tooling/checklist/rename — admin: { machine, category, item?, to }
+    public function checklistRename(): void
+    {
+        $auth = authenticate();
+        if (!self::isAdmin($auth)) sendError('Only an Admin can rename checklist items.', 403);
+        $b = request_body(); $m = self::clMachine($b);
+        $cat = trim((string) ($b['category'] ?? '')); $item = trim((string) ($b['item'] ?? '')); $to = trim((string) ($b['to'] ?? ''));
+        if ($to === '') sendError('Enter the new name.', 400);
+        self::materialize($m);
+        if ($item === '') {
+            $to = mb_substr($to, 0, 80);
+            $e = db()->prepare('SELECT COUNT(*) FROM `ToolingChecklist` WHERE machineType=? AND category=?'); $e->execute([$m, $to]);
+            if ($to !== $cat && (int) $e->fetchColumn() > 0) sendError("There is already a category \"$to\".", 400);
+            $u = db()->prepare('UPDATE `ToolingChecklist` SET category=? WHERE machineType=? AND category=?'); $u->execute([$to, $m, $cat]);
+        } else {
+            $to = mb_substr($to, 0, 255);
+            $e = db()->prepare('SELECT COUNT(*) FROM `ToolingChecklist` WHERE machineType=? AND category=? AND item=?'); $e->execute([$m, $cat, $to]);
+            if ($to !== $item && (int) $e->fetchColumn() > 0) sendError("\"$to\" is already in $cat.", 400);
+            $u = db()->prepare('UPDATE `ToolingChecklist` SET item=? WHERE machineType=? AND category=? AND item=?'); $u->execute([$to, $m, $cat, $item]);
+        }
+        if (!$u->rowCount() && $to !== ($item ?: $cat)) sendError('Not found in the list.', 404);
+        log_activity($auth['id'], 'TOOLING_CHECKLIST_RENAME', 'ToolingChecklist', null, ['machine' => $m, 'category' => $cat, 'item' => $item, 'to' => $to]);
+        sendSuccess(['categories' => self::checklistFor($m)], 'Renamed');
+    }
+
+    // POST /api/tooling/checklist/remove — admin: { machine, category, item? }
+    public function checklistRemove(): void
+    {
+        $auth = authenticate();
+        if (!self::isAdmin($auth)) sendError('Only an Admin can delete checklist items.', 403);
+        $b = request_body(); $m = self::clMachine($b);
+        $cat = trim((string) ($b['category'] ?? '')); $item = trim((string) ($b['item'] ?? ''));
+        self::materialize($m);
+        $w = $item === '' ? 'machineType=? AND category=?' : 'machineType=? AND category=? AND item=?';
+        $p = $item === '' ? [$m, $cat] : [$m, $cat, $item];
+        $c = db()->prepare("SELECT (SELECT COUNT(*) FROM `ToolingChecklist` WHERE $w), (SELECT COUNT(*) FROM `ToolingChecklist` WHERE machineType=?)");
+        $c->execute(array_merge($p, [$m]));
+        [$hit, $all] = array_map('intval', $c->fetch(PDO::FETCH_NUM));
+        if (!$hit) sendError('Not found in the list.', 404);
+        if ($hit >= $all) sendError('The list cannot be empty — keep at least one item.', 400);
+        db()->prepare("DELETE FROM `ToolingChecklist` WHERE $w")->execute($p);
+        log_activity($auth['id'], 'TOOLING_CHECKLIST_REMOVE', 'ToolingChecklist', null, ['machine' => $m, 'category' => $cat, 'item' => $item]);
+        sendSuccess(['categories' => self::checklistFor($m)], $item === '' ? "Category \"$cat\" deleted" : 'Item deleted');
+    }
+
     // GET /api/tooling/checklist
     public function checklist(): void
     {
@@ -115,7 +205,7 @@ $t"],
             $c = db()->prepare('SELECT COUNT(*) FROM `ToolingChecklist` WHERE machineType=?'); $c->execute([$m]);
             $out[$m] = ['categories' => self::checklistFor($m), 'uploaded' => (int) $c->fetchColumn() > 0];
         }
-        $out['OTHER'] = ['categories' => self::DEFAULTS['VMC'], 'uploaded' => false];
+        $out['OTHER'] = ['categories' => self::checklistFor('VMC'), 'uploaded' => false];   // "Other" machines use the VMC list
         sendSuccess(['checklists' => $out, 'types' => array_map(fn($t) => $t[0], self::TYPES), 'statuses' => self::STATUSES, 'machines' => self::MACHINES]);
     }
 
@@ -268,7 +358,7 @@ $t"],
                 if ($qty === null || $qty <= 0) sendError('Machine ' . ($k + 1) . ', "' . $name . '": enter the quantity.', 400);
                 $str = fn($k, $n) => mb_substr(trim((string) ($it[$k] ?? '')), 0, $n) ?: null;
                 $price = array_key_exists('price', $it) ? self::num($it['price'], 'Price') : null;
-                $items[] = ['category' => mb_substr(trim((string) ($it['category'] ?? '')), 0, 80) ?: 'Other', 'item' => $name, 'custom' => !empty($it['custom']) ? 1 : 0,
+                $items[] = ['category' => mb_substr(trim((string) ($it['category'] ?? '')), 0, 80) ?: 'Other', 'catTyped' => trim((string) ($it['category'] ?? '')) !== '', 'item' => $name, 'custom' => !empty($it['custom']) ? 1 : 0,
                             'quantity' => $qty, 'unit' => mb_substr(trim((string) ($it['unit'] ?? '')), 0, 20) ?: 'Nos', 'id' => (string) ($it['id'] ?? ''),
                             // tool selection details (Projects): operation, tool type, code, brand, cutting data, holder, specification
                             'operation' => $str('operation', 120), 'toolType' => $str('toolType', 40), 'itemCode' => $str('itemCode', 120), 'brand' => $str('brand', 100),
@@ -298,6 +388,11 @@ $t"],
             $mid = gen_id();
             $im->execute([$mid, $rid, $k, $m['machineType'], $m['machineOther'], $m['make'], $m['count']]);
             foreach ($m['items'] as $it) {
+                // a component added by hand with a category joins that category's list (not Projects' tool lines)
+                if ($it['custom'] && $it['catTyped'] && !$it['toolType'] && !$it['operation'] && in_array($m['machineType'], ['VMC', 'HMC', 'CNC', 'VTL'], true)) {
+                    self::addChecklistItem($m['machineType'], $it['category'], $it['item']);
+                    $it['custom'] = 0;
+                }
                 $o = ($it['id'] !== '' && isset($old[$it['id']])) ? $old[$it['id']] : null;
                 $ii->execute([$o ? $it['id'] : gen_id(), $rid, $mid, $n++, $it['category'], $it['item'], $it['custom'], $it['quantity'], $it['unit'],
                     $it['itemCode'] ?? ($o['itemCode'] ?? null), $o['spec'] ?? null, $it['price'] ?? ($o['price'] ?? null), $o['discount'] ?? null,

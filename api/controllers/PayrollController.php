@@ -309,7 +309,7 @@ class PayrollController
         'TMS' => ['name' => 'TULIPS MACHINING SOLUTIONS', 'logo' => 'tms-logo.png', 'logoRatio' => 291 / 164,
                   'lines' => ['SF No 244, Palkarathottam, Opp. Sri Vignesh Nagar, Jeeva Nagar,', 'Cheran Managar, Villankurichi, Coimbatore - 641 035', 'GST No: 33BRHPA9794E1ZO']],
         'APJ' => ['name' => 'APJ TECHNOLOGIES PRIVATE LIMITED', 'logo' => 'apj-logo.png', 'logoRatio' => 1,
-                  'lines' => ['No. 26/2, Kongu Maa Nagar, Villankurichi Road,', 'Coimbatore - 641 035', 'GST: 33ABECA9840L1Z']],
+                  'lines' => ['No. 26/2, Kongu Maa Nagar, Villankurichi Road,', 'Coimbatore - 641 035', 'GST: 33ABECA9840L1ZE']],
     ];
 
     /** Approved leave for one employee: per type for the month and the year to date. */

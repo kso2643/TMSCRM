@@ -115,9 +115,9 @@
   function draw() {
     var d = S.data, rows = d.summary, t = totals(rows);
     clear(tilesBox);
-    [['Orders got', String(t.totalOrders), t.manualCount ? t.orders + ' from Orders · ' + t.manualCount + ' manual' : 'from the Orders page', '#1e3a8a'],
+    [['Orders got', String(t.totalOrders), t.manualCount ? t.orders + ' from Orders · ' + t.manualCount + ' invoices / manual' : 'from the Orders page', '#1e3a8a'],
      ['Order value got', money(t.totalGot), t.unpricedOrders ? t.unpricedOrders + ' order(s) without a value' : 'orders + manual', '#2563eb'],
-     ['Made (delivered + billed)', money(t.totalMade), t.totalGot ? Math.round(t.totalMade / t.totalGot * 100) + '% of value got' : '', '#16a34a'],
+     ['Made (delivered + invoiced)', money(t.totalMade), t.totalGot ? Math.round(t.totalMade / t.totalGot * 100) + '% of value got' : '', '#16a34a'],
      ['Quantity ordered / supplied', num(t.qty + 0) + ' / ' + num(t.suppliedQty), t.delivered + ' order(s) fully delivered', '#7c3aed']
     ].forEach(function (x) { tilesBox.appendChild(el('div', { class: 'sr-tile', style: '--c:' + x[3] }, [el('span', { text: x[0] }), el('b', { text: x[1] }), el('small', { text: x[2] })])); });
 
@@ -126,7 +126,7 @@
     if (!rows.length) { sumBox.appendChild(el('div', { class: 'sr-empty', text: 'No engineers.' })); }
     else {
       var max = Math.max.apply(null, rows.map(function (r) { return r.totalGot; }).concat([1]));
-      var H = ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Delivered', 'Delivered value', 'Manual entries', 'Manual order value', 'Manual billed', 'Total got', 'Total made', 'Made %'];
+      var H = ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Delivered', 'Delivered value', 'Invoices (manual)', 'Manual order value', 'Invoiced sales', 'Total got', 'Total made', 'Made %'];
       sumBox.appendChild(el('div', { class: 'sr-scroll' }, [el('table', { class: 'sr-table', id: 'sr-summary' }, [
         el('thead', {}, [el('tr', {}, H.map(function (h, i) { return el('th', { class: i ? 'n' : '', text: h }); }))]),
         el('tbody', {}, rows.map(function (r) {
@@ -156,7 +156,7 @@
 
   function drawTabs() {
     clear(tabsBox);
-    [['orders', 'Orders (' + S.data.orders.length + ')'], ['entries', 'Manual entries (' + S.data.entries.length + ')']].forEach(function (x) {
+    [['orders', 'Orders (' + S.data.orders.length + ')'], ['entries', 'Tax invoices / manual entries (' + S.data.entries.length + ')']].forEach(function (x) {
       tabsBox.appendChild(el('button', { type: 'button', class: 'sr-tab' + (S.tab === x[0] ? ' on' : ''), 'data-tab': x[0], text: x[1], onclick: function () { S.tab = x[0]; drawList(); } }));
     });
   }
@@ -187,9 +187,9 @@
         }))
       ])]));
     } else {
-      if (!d.entries.length) { listBox.appendChild(el('div', { class: 'sr-empty', text: 'No manual entries in this period — press "+ Manual entry" to add orders or billing that are not in the Orders page.' })); return; }
+      if (!d.entries.length) { listBox.appendChild(el('div', { class: 'sr-empty', text: 'No tax invoices / entries in this period — press "+ Sales entry" or "Import invoices".' })); return; }
       listBox.appendChild(el('div', { class: 'sr-scroll' }, [el('table', { class: 'sr-table', id: 'sr-entries' }, [
-        el('thead', {}, [el('tr', {}, ['Date', 'Engineer', 'Customer', 'Reference', 'Qty', 'Order value', 'Billed value', 'Note', ''].map(function (h, i) { return el('th', { class: i >= 4 && i <= 6 ? 'n' : '', text: h }); }))]),
+        el('thead', {}, [el('tr', {}, ['Tax invoice date', 'Engineer', 'Customer', 'Tax invoice no.', 'Qty', 'Order value', 'Sales value', 'Note', ''].map(function (h, i) { return el('th', { class: i >= 4 && i <= 6 ? 'n' : '', text: h }); }))]),
         el('tbody', {}, d.entries.map(function (e) {
           return el('tr', { 'data-entry': e.id }, [el('td', { text: dmy(e.entryDate) }), el('td', { text: e.engineerName || '—' }), el('td', {}, [el('b', { text: e.customerName || '—' })]), el('td', { text: e.reference || '—' }),
             el('td', { class: 'n', text: e.quantity == null ? '—' : num(e.quantity) }), el('td', { class: 'n', text: money(e.orderValue) }), el('td', { class: 'n', text: money(e.billedValue) }),
@@ -210,20 +210,22 @@
     m.addEventListener('click', function (x) { if (x.target === m) m.remove(); });
     document.body.appendChild(m);
     var d = S.data;
-    var eng = el('select', { id: 'sr-e-eng' }, (d.seesAll ? d.engineers : [{ id: d.me, name: 'Me' }]).map(function (u) { return el('option', { value: u.id, text: u.name }); }));
+    // engineer who made the sale (Admins pick anyone; engineers enter their own)
+    var eng = el('select', { id: 'sr-e-eng', disabled: d.seesAll ? null : true }, (d.seesAll ? d.engineers : [{ id: d.me, name: (S.myName || 'Me') }]).map(function (u) { return el('option', { value: u.id, text: u.name + (u.role ? ' · ' + String(u.role).replace(/_/g, ' ').toLowerCase() : '') }); }));
     eng.value = e ? e.engineerId : (S.eng || d.me);
     if (!eng.value && eng.options.length) eng.selectedIndex = 0;
     var date = el('input', { id: 'sr-e-date', type: 'date', value: e ? String(e.entryDate).slice(0, 10) : iso(new Date()) });
     var cust = el('input', { id: 'sr-e-cust', value: e ? e.customerName || '' : '', placeholder: 'Customer name' });
-    var ref = el('input', { id: 'sr-e-ref', value: e ? e.reference || '' : '', placeholder: 'PO / invoice no. (optional)' });
+    var ref = el('input', { id: 'sr-e-ref', value: e ? e.reference || '' : '', placeholder: 'e.g. APJ/26-27/0142' });
     var ov = el('input', { id: 'sr-e-ov', type: 'number', min: '0', step: '0.01', inputmode: 'decimal', value: e && e.orderValue != null ? String(e.orderValue) : '', placeholder: 'Order got (₹)' });
-    var bv = el('input', { id: 'sr-e-bv', type: 'number', min: '0', step: '0.01', inputmode: 'decimal', value: e && e.billedValue != null ? String(e.billedValue) : '', placeholder: 'Billed / made (₹)' });
+    var bv = el('input', { id: 'sr-e-bv', type: 'number', min: '0', step: '0.01', inputmode: 'decimal', value: e && e.billedValue != null ? String(e.billedValue) : '', placeholder: 'Invoice value before tax (₹)' });
     var qty = el('input', { id: 'sr-e-qty', type: 'number', min: '0', step: 'any', inputmode: 'decimal', value: e && e.quantity != null ? String(e.quantity) : '', placeholder: 'Nos (optional)' });
     var note = el('textarea', { id: 'sr-e-note', rows: 2, placeholder: 'Optional' }); note.value = e ? e.note || '' : '';
     var err = el('div', { class: 'sr-err' });
     function f(l, i, w) { return el('div', { class: 'sr-f' + (w ? ' w' : '') }, [el('label', { text: l }), i]); }
-    dlg.appendChild(el('h3', { text: e ? 'Edit manual entry' : 'Manual sales entry' }));
-    dlg.appendChild(el('div', { class: 'sr-grid' }, [f('Engineer', eng), f('Date', date), f('Customer', cust, true), f('Reference', ref), f('Quantity', qty), f('Order value got (₹)', ov), f('Billed / made value (₹)', bv), f('Note', note, true)]));
+    dlg.appendChild(el('h3', { text: e ? 'Edit sales entry' : 'Sales entry (tax invoice)' }));
+    dlg.appendChild(el('div', { class: 'sr-grid' }, [f('Engineer who made the sale', eng, true), f('Tax invoice date', date), f('Tax invoice no.', ref), f('Customer', cust, true),
+      f('Sales value (₹, before tax)', bv), f('Order value got (₹, optional)', ov), f('Quantity (optional)', qty), f('Note', note, true)]));
     dlg.appendChild(err);
     var save = el('button', { type: 'button', class: 'sr-btn pri', id: 'sr-e-save', text: e ? 'Save' : 'Add entry' });
     save.onclick = function () {
@@ -240,26 +242,53 @@
     var d = S.data; if (!d) return;
     function q(v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
     var lines = [['Sales report by engineer', d.from + ' to ' + d.to].map(q).join(','), '',
-      ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Qty supplied', 'Delivered orders', 'Delivered value', 'Manual entries', 'Manual order value', 'Manual billed', 'Total got', 'Total made'].join(',')];
+      ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Qty supplied', 'Delivered orders', 'Delivered value', 'Invoices (manual)', 'Manual order value', 'Invoiced sales', 'Total got', 'Total made'].join(',')];
     d.summary.forEach(function (r) { lines.push([r.name, r.orders, r.orderValue, r.qty, r.suppliedQty, r.delivered, r.deliveredValue, r.manualCount, r.manualOrderValue, r.manualBilled, r.totalGot, r.totalMade].map(q).join(',')); });
     lines.push('', 'Orders', ['Date', 'Customer', 'Engineer', 'Type', 'Items', 'Qty ordered', 'Qty supplied', 'Status', 'Order value'].join(','));
     d.orders.forEach(function (o) { lines.push([o.orderDate, o.customerName, o.engineerName, o.orderType, o.itemCount, o.qty, o.suppliedQty, (DS[o.deliveryStatus] || [o.deliveryStatus])[0], o.orderValue].map(q).join(',')); });
-    lines.push('', 'Manual entries', ['Date', 'Engineer', 'Customer', 'Reference', 'Qty', 'Order value', 'Billed value', 'Note'].join(','));
+    lines.push('', 'Tax invoices / manual entries', ['Tax invoice date', 'Engineer', 'Customer', 'Tax invoice no', 'Qty', 'Order value', 'Sales value', 'Note'].join(','));
     d.entries.forEach(function (e) { lines.push([e.entryDate, e.engineerName, e.customerName, e.reference, e.quantity, e.orderValue, e.billedValue, e.note].map(q).join(',')); });
     var b = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), u = URL.createObjectURL(b);
     var a = el('a', { href: u, download: 'Sales-report_' + d.from + '_' + d.to + '.csv' }); document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(u); }, 2000);
   }
 
+  /** Template for importing tax invoices: one row per invoice. */
+  function template() {
+    var d = S.data, names = d && d.seesAll ? d.engineers.map(function (u) { return u.name; }) : [S.myName || 'Your name'];
+    var rows = [['Engineer', 'Tax invoice date', 'Tax invoice no', 'Customer', 'Sales value', 'Order value', 'Qty', 'Note'],
+      [names[0] || 'Engineer name', iso(new Date()).split('-').reverse().join('-'), 'APJ/26-27/0001', 'Customer name', '125000', '', '10', '']];
+    var b = new Blob(['\ufeff' + rows.map(function (r) { return r.map(function (v) { return /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n') +
+      '\r\n\r\n# Engineer names: ' + names.join(' / ')], { type: 'text/csv' });
+    var u = URL.createObjectURL(b), a = el('a', { href: u, download: 'Sales-invoices-template.csv' }); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(u); }, 2000);
+  }
+  var impFile;
+  function importFile(f) {
+    var fd = new FormData(); fd.append('file', f);
+    fetch(API + '/api/sales-report/import', { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || '') }, body: fd }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.success === false) throw new Error(j.message || 'Import failed'); return j; });
+    }).then(function (j) {
+      toast(j.message + (j.data.errors.length ? ' — ' + j.data.errors.slice(0, 3).join('; ') : ''), j.data.saved ? '' : 'err');
+      S.tab = 'entries'; load();
+    }).catch(function (e) { toast(e.message, 'err'); });
+  }
+
   function mountPage(content) {
     css();
+    try { S.myName = (JSON.parse(localStorage.getItem('crm_user') || '{}') || {}).name; } catch (e) {}
+    impFile = el('input', { type: 'file', id: 'sr-import-file', accept: '.xlsx,.csv', style: 'display:none' });
+    impFile.onchange = function () { if (impFile.files[0]) importFile(impFile.files[0]); impFile.value = ''; };
+    document.body.appendChild(impFile);
     var r = presetRange(S.preset); S.from = r[0]; S.to = r[1];
     var wrap = el('div', { class: 'sr-wrap' });
     wrap.appendChild(el('div', { class: 'sr-head' }, [el('div', {}, [el('h1', { text: 'Sales report' }),
-      el('p', { text: 'Orders got and value made by each engineer — from the Orders page plus manual entries.' })]),
+      el('p', { text: 'Orders got and sales made by each engineer — from the Orders page plus tax invoices (typed in or imported from Excel).' })]),
       el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap' }, [
         el('button', { type: 'button', class: 'sr-btn', id: 'sr-csv', text: '⬇ Excel (CSV)', onclick: csv }),
-        el('button', { type: 'button', class: 'sr-btn pri', id: 'sr-add', text: '+ Manual entry', onclick: function () { entryDialog(null); } })])]));
+        el('button', { type: 'button', class: 'sr-btn', id: 'sr-tpl', text: '⬇ Invoice template', onclick: template }),
+        el('button', { type: 'button', class: 'sr-btn', id: 'sr-import', text: '⤒ Import invoices', onclick: function () { impFile.click(); } }),
+        el('button', { type: 'button', class: 'sr-btn pri', id: 'sr-add', text: '+ Sales entry', onclick: function () { entryDialog(null); } })])]));
     var preset = el('select', { id: 'sr-preset' }, [['week', 'This week'], ['month', 'This month'], ['last', 'Last month'], ['quarter', 'This quarter'], ['fy', 'This financial year'], ['custom', 'Custom dates']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
     preset.value = S.preset;
     fromI = el('input', { type: 'date', id: 'sr-from', value: S.from }); toI = el('input', { type: 'date', id: 'sr-to', value: S.to });

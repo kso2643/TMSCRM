@@ -506,6 +506,9 @@ try {
         match (true) {
             $method === 'GET'    && $c1 === ''                         => $ctrl->index(),
             $method === 'GET'    && $c1 === 'checklist'                => $ctrl->checklist(),
+            $method === 'POST'   && $c1 === 'checklist' && $c2 === 'item'   => $ctrl->checklistAdd(),
+            $method === 'POST'   && $c1 === 'checklist' && $c2 === 'rename' => $ctrl->checklistRename(),
+            $method === 'POST'   && $c1 === 'checklist' && $c2 === 'remove' => $ctrl->checklistRemove(),
             $method === 'POST'   && $c1 === 'checklist'                => $ctrl->uploadChecklist(),
             $method === 'GET'    && $c1 === 'by-no' && $c2 !== ''      => $ctrl->byNumber($c2),
             $method === 'POST'   && $c1 === ''                         => $ctrl->create(),
@@ -556,6 +559,7 @@ try {
             $method === 'GET'    && $c1 === ''                         => $ctrl->index(),
             $method === 'PATCH'  && $c1 === 'orders' && $c2 !== ''     => $ctrl->setOrderValue($c2),
             $method === 'POST'   && $c1 === 'entries' && $c2 === ''    => $ctrl->createEntry(),
+            $method === 'POST'   && $c1 === 'import'                   => $ctrl->import(),
             $method === 'PUT'    && $c1 === 'entries' && $c2 !== ''    => $ctrl->updateEntry($c2),
             $method === 'DELETE' && $c1 === 'entries' && $c2 !== ''    => $ctrl->deleteEntry($c2),
             default => sendError('Route not found', 404),

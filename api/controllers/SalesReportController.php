@@ -17,6 +17,11 @@
  *   POST   /api/sales-report/entries                  manual entry
  *   PUT    /api/sales-report/entries/:id
  *   DELETE /api/sales-report/entries/:id
+ *   POST   /api/sales-report/import                  Excel / CSV of tax invoices: Engineer, Tax invoice date,
+ *                                                    Tax invoice no, Customer, Sales value, Order value, Qty, Note
+ *
+ * A manual entry is usually a tax invoice: date = tax invoice date, reference =
+ * tax invoice no., billed value = sales value (before tax), engineer = who made the sale.
  */
 class SalesReportController
 {
@@ -148,11 +153,11 @@ $tail"],
         $chk = db()->prepare('SELECT id FROM `User` WHERE id=?'); $chk->execute([$eng]);
         if (!$chk->fetch()) sendError('Pick the engineer.', 400);
         $date = to_date_only($b['entryDate'] ?? null);
-        if (!$date) sendError('Enter the date.', 400);
+        if (!$date) sendError('Enter the tax invoice date.', 400);
         $ov = self::money($b['orderValue'] ?? null, 'order value');
         $bv = self::money($b['billedValue'] ?? null, 'billed value');
         $qty = self::money($b['quantity'] ?? null, 'quantity');
-        if ($ov === null && $bv === null && $qty === null) sendError('Enter the order value, the billed value or the quantity.', 400);
+        if ($ov === null && $bv === null && $qty === null) sendError('Enter the sales value (or the order value / quantity).', 400);
         return [$eng, $date, mb_substr(trim((string) ($b['customerName'] ?? '')), 0, 255) ?: null, mb_substr(trim((string) ($b['reference'] ?? '')), 0, 120) ?: null,
             $ov, $bv, $qty, trim((string) ($b['note'] ?? '')) ?: null];
     }
@@ -187,6 +192,74 @@ $tail"],
         db()->prepare('UPDATE `SalesEntry` SET engineerId=?,entryDate=?,customerName=?,reference=?,orderValue=?,billedValue=?,quantity=?,note=?,updatedAt=? WHERE id=?')
             ->execute(array_merge($f, [now_sql(), $id]));
         sendSuccess(['id' => $id], 'Entry saved');
+    }
+
+    /** "15-10-2026", "15/10/26", "2026-10-15" or an Excel day number → Y-m-d (Indian day-first order). */
+    private static function anyDate($v): ?string
+    {
+        $v = trim((string) $v);
+        if ($v === '') return null;
+        if (is_numeric($v) && (float) $v > 20000 && (float) $v < 80000) return gmdate('Y-m-d', (int) round(((float) $v - 25569) * 86400));
+        if (preg_match('~^(\d{4})-(\d{1,2})-(\d{1,2})~', $v, $m)) return checkdate((int) $m[2], (int) $m[3], (int) $m[1]) ? sprintf('%04d-%02d-%02d', $m[1], $m[2], $m[3]) : null;
+        if (preg_match('~^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$~', $v, $m)) {
+            $y = (int) $m[3]; if ($y < 100) $y += 2000;
+            return checkdate((int) $m[2], (int) $m[1], $y) ? sprintf('%04d-%02d-%02d', $y, $m[2], $m[1]) : null;
+        }
+        $t = strtotime($v);
+        return $t ? date('Y-m-d', $t) : null;
+    }
+
+    // POST /api/sales-report/import — rows of tax invoices (admins: any engineer; engineers: their own)
+    public function import(): void
+    {
+        $auth = authenticate();
+        $f = $_FILES['file'] ?? null;
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('Choose the Excel / CSV file.', 400);
+        try {
+            $rows = preg_match('/\.csv$/i', (string) $f['name'])
+                ? array_map(fn($l) => str_getcsv(preg_replace('/^\xEF\xBB\xBF/', '', $l)), file($f['tmp_name'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES))
+                : XlsxReader::readFirstSheetRows($f['tmp_name']);
+        } catch (Throwable $e) { sendError('Could not read the file: ' . $e->getMessage(), 400); }
+        // find the heading row (first row with an "invoice"/"date" and a "value"/"amount" column)
+        $col = []; $start = 0;
+        foreach (array_slice($rows, 0, 10) as $ri => $r) {
+            $h = array_map(fn($x) => strtolower(trim((string) $x)), (array) $r);
+            $find = function (array $words, array $not = []) use ($h) { foreach ($h as $i => $x) { foreach ($words as $w) if ($x !== '' && str_contains($x, $w)) { foreach ($not as $n) if (str_contains($x, $n)) continue 3; return $i; } } return null; };
+            $c = ['eng' => $find(['engineer', 'sales person', 'salesman', 'executive']), 'date' => $find(['invoice date', 'inv date', 'inv. date', 'date']),
+                  'no' => $find(['invoice no', 'inv no', 'inv. no', 'invoice number', 'bill no', 'reference', 'ref']),
+                  'cust' => $find(['customer', 'party', 'company', 'client']), 'sales' => $find(['sales value', 'taxable', 'invoice value', 'billed', 'sales', 'amount', 'value'], ['order', 'person', 'engineer', 'salesman', 'executive']),
+                  'order' => $find(['order value', 'order']), 'qty' => $find(['qty', 'quantity', 'nos']), 'note' => $find(['note', 'remark'])];
+            if ($c['date'] !== null && ($c['sales'] !== null || $c['order'] !== null)) { $col = $c; $start = $ri + 1; break; }
+        }
+        if (!$col) sendError('The first row must have the headings: Engineer, Tax invoice date, Tax invoice no, Customer, Sales value (optional: Order value, Qty, Note).', 400);
+        $users = db()->query('SELECT id, name, email FROM `User`')->fetchAll();
+        $byName = []; foreach ($users as $u) { $byName[mb_strtolower(trim($u['name']))] = $u['id']; $byName[mb_strtolower(trim($u['email']))] = $u['id']; }
+        $all = self::seesAll($auth);
+        $ins = db()->prepare('INSERT INTO `SalesEntry` (id,engineerId,entryDate,customerName,reference,orderValue,billedValue,quantity,note,createdById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+        $dup = db()->prepare('SELECT COUNT(*) FROM `SalesEntry` WHERE engineerId=? AND reference=? AND entryDate=?');
+        $done = 0; $skipped = 0; $errors = [];
+        $get = fn($r, $k) => $col[$k] === null ? '' : trim((string) ($r[$col[$k]] ?? ''));
+        $num = function ($v) { $v = str_replace([',', '₹', ' ', 'Rs.', 'Rs'], '', (string) $v); return $v === '' || !is_numeric($v) ? null : round((float) $v, 2); };
+        foreach (array_slice($rows, $start) as $i => $r) {
+            $line = $start + $i + 1;
+            if (!array_filter((array) $r, fn($x) => trim((string) $x) !== '')) continue;
+            $date = self::anyDate($get($r, 'date'));
+            $sales = $num($get($r, 'sales')); $ord = $num($get($r, 'order')); $qty = $num($get($r, 'qty'));
+            if (!$date) { $errors[] = "Row $line: tax invoice date missing or not a date"; continue; }
+            if ($sales === null && $ord === null) { $errors[] = "Row $line: no sales value"; continue; }
+            $engName = $get($r, 'eng');
+            if ($all) {
+                $eng = $engName === '' ? $auth['id'] : ($byName[mb_strtolower($engName)] ?? null);
+                if (!$eng) { $errors[] = "Row $line: engineer \"$engName\" not found"; continue; }
+            } else $eng = $auth['id'];
+            $ref = mb_substr($get($r, 'no'), 0, 120) ?: null;
+            if ($ref) { $dup->execute([$eng, $ref, $date]); if ((int) $dup->fetchColumn() > 0) { $skipped++; continue; } }
+            $ins->execute([gen_id(), $eng, $date, mb_substr($get($r, 'cust'), 0, 255) ?: null, $ref, $ord, $sales, $qty, $get($r, 'note') ?: null, $auth['id'], now_sql()]);
+            $done++;
+        }
+        log_activity($auth['id'], 'SALES_ENTRY_IMPORT', 'SalesEntry', null, ['rows' => $done]);
+        sendSuccess(['saved' => $done, 'skipped' => $skipped, 'errors' => array_slice($errors, 0, 30)],
+            "$done invoice" . ($done === 1 ? '' : 's') . ' imported' . ($skipped ? ", $skipped already there" : '') . ($errors ? ', ' . count($errors) . ' row(s) skipped' : ''));
     }
 
     // DELETE /api/sales-report/entries/:id

@@ -1,3 +1,36 @@
+# Update — 16 Oct (b): Tooled-up categories you can edit, sales report by tax invoice, APJ GST number
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- No new files and no new tables.
+
+1. **Tooled-up — categories:**
+   - **＋ Add to <category>** at the bottom of each category adds a new item to that category's list. It is saved for everyone and ticked straight away.
+   - **＋ New category** under the category list creates a category and its first item.
+   - **Admin / Super Admin** can also:
+     - use **✎ Rename** and **🗑 Delete** on a category;
+     - use ✎ and 🗑 on each item.
+   - Ticks are kept when you rename something.
+   - **Components added by hand:** give one a category and, when you save, it goes into that category's list (a new name makes a new category).
+   - Lists are kept per machine type (VMC / HMC / CNC / VTL); "Other" machines use the VMC list.
+   - "Back to built-in list" in Machine checklists still resets a machine type.
+2. **Sales report — tax invoices:**
+   - **+ Sales entry** now asks for:
+     - **Engineer who made the sale** (dropdown of all engineers; engineers get their own name);
+     - **Tax invoice date** and **Tax invoice no.**;
+     - customer and **Sales value (before tax)**;
+     - optional order value, quantity and note.
+   - **⤒ Import invoices** loads many at once from Excel / CSV. The columns are Engineer, Tax invoice date, Tax invoice no, Customer, Sales value, plus optional Order value, Qty and Note.
+     - Similar headings (Invoice date, Party, Taxable value…) also work.
+     - Dates can be 15-10-2026, 15/10/26 or Excel dates.
+     - Engineers are matched by name or e-mail.
+     - An invoice already imported is skipped.
+     - **⬇ Invoice template** gives a ready file.
+   - Invoiced sales count in **Total made** for that engineer, in the period of the tax invoice date.
+3. **APJ GST number** corrected to **33ABECA9840L1ZE** (a letter was missing). It is fixed in:
+   - the APJ quotation page and its PDF;
+   - APJ purchase orders;
+   - APJ payslips.
+
 # Update — 16 Oct: Remind the engineer, fold sidebar sections, CEO Desk "Get price" + attachments + Report to, catalogue brand folders + links, Sales report
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
