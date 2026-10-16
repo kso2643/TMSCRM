@@ -1,3 +1,25 @@
+# Update — 16 Oct (e): Android app (.apk), Windows app (.exe), server security hardening
+
+**Upload:** `api/` and `crm/` (icons fixed), then press **Ctrl+Shift+R** once.
+- **New on the server:** `api/storage/` is created automatically (blocked from the web).
+
+**Apps:**
+- The phone and Windows apps are built on GitHub; see `apps/README.md`.
+- Download them from github.com/kso2643/TMSCRM → **Releases → "APJ CRM apps"**.
+- Both open https://crm.apjtech.in, so they always show the latest CRM.
+
+**Server security (important):**
+1. **JWT secret:**
+   - If `api/.env` has no `JWT_SECRET` (or still the example value), a strong random secret is now created and used.
+   - Before this, the public default from the code would have let anyone forge a login.
+   - Everyone may need to log in again once.
+   - Best: set your own long `JWT_SECRET` in `api/.env`.
+2. **`api/.htaccess` blocks** `.env`, `.sql`, `.md`, `.log` and back-up files, plus the folders `config`, `includes`, `controllers`, `database`, `scripts` and `storage`.
+   - Before this, `api.apjtech.in/.env` or `scripts/seed.php` might have been reachable.
+   - Scripts uploaded into `uploads/` can't run.
+3. **Security headers** on every API reply: no-sniff, no framing, strict referrer, and HSTS on HTTPS.
+4. **PWA icons:** the old ones were 1×1 placeholders and are now real.
+
 # Update — 16 Oct (d): Appointments private to each engineer, page access (view only / edit / delete) per user
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
