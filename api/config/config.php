@@ -48,7 +48,24 @@ define('DB_USER', env('DB_USER', 'root'));
 define('DB_PASS', env('DB_PASS', ''));
 
 // ── Auth ───────────────────────────────────────────────────────────────
-define('JWT_SECRET', env('JWT_SECRET', 'change_this_to_a_long_random_secret_in_production'));
+// The code is public, so the built-in default secret must never sign real logins:
+// if .env has no JWT_SECRET (or the default one), a strong random secret is made once
+// and kept in api/storage/ (blocked from the web by .htaccess). Users log in again once.
+(function () {
+    $jwt = (string) env('JWT_SECRET', '');
+    if ($jwt === '' || $jwt === 'change_this_to_a_long_random_secret_in_production' || strlen($jwt) < 16) {
+        $f = __DIR__ . '/../storage/.jwt_secret';
+        if (!is_file($f)) {
+            @mkdir(dirname($f), 0700, true);
+            @file_put_contents($f, bin2hex(random_bytes(32)), LOCK_EX);
+            @chmod($f, 0600);
+        }
+        $s = trim((string) @file_get_contents($f));
+        if (strlen($s) >= 32) $jwt = $s;
+        elseif ($jwt === '') $jwt = hash('sha256', __DIR__ . php_uname() . (string) @filemtime(__FILE__));   // storage not writable: still not the public default
+    }
+    define('JWT_SECRET', $jwt);
+})();
 define('JWT_EXPIRES_IN', env('JWT_EXPIRES_IN', '7d')); // e.g. "7d", "12h", "30m", "3600" (seconds)
 
 // ── Server / CORS ─────────────────────────────────────────────────────

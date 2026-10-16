@@ -1,0 +1,45 @@
+{
+  "name": "apj-crm",
+  "productName": "APJ CRM",
+  "version": "1.0.0",
+  "description": "APJ CRM for Windows",
+  "author": "APJ Technologies",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "in.apjtech.crm",
+    "productName": "APJ CRM",
+    "copyright": "APJ Technologies",
+    "files": ["main.js", "offline.html", "build/icon.png"],
+    "directories": { "output": "dist" },
+    "win": {
+      "icon": "build/icon.png",
+      "artifactName": "APJ-CRM-${version}-${arch}-${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "APJ CRM",
+      "artifactName": "APJ-CRM-Setup-${version}.${ext}"
+    },
+    "portable": { "artifactName": "APJ-CRM-Portable-${version}.${ext}" },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "onlyLoadAppFromAsar": true
+    }
+  }
+}

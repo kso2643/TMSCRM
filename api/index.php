@@ -125,6 +125,10 @@ function sendCorsHeaders(): void
 }
 
 sendCorsHeaders();
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+if (($_SERVER['HTTPS'] ?? '') === 'on' || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') header('Strict-Transport-Security: max-age=31536000');
 
 // Handle CORS pre-flight — all routes
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

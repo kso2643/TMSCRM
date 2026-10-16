@@ -1,0 +1,50 @@
+plugins { id 'com.android.application' }
+
+// Release signing comes from environment variables (GitHub secrets in CI) — never from the repo.
+def ksFile = System.getenv('ANDROID_KEYSTORE_FILE')
+
+android {
+    namespace 'in.apjtech.crm'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'in.apjtech.crm'
+        minSdk 24
+        targetSdk 34
+        versionCode Integer.parseInt(System.getenv('APP_VERSION_CODE') ?: '1')
+        versionName System.getenv('APP_VERSION_NAME') ?: '1.0'
+        buildConfigField 'String', 'APP_URL', '"https://crm.apjtech.in"'
+    }
+
+    signingConfigs {
+        release {
+            if (ksFile) {
+                storeFile file(ksFile)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (ksFile) signingConfig signingConfigs.release
+        }
+    }
+    buildFeatures { buildConfig true }
+    lint { checkReleaseBuilds false; abortOnError false }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.biometric:biometric:1.1.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

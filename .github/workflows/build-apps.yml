@@ -1,0 +1,101 @@
+name: Build mobile (APK) and Windows (EXE) apps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'apps/**'
+      - '.github/workflows/build-apps.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apps
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.7' }
+      - name: Signing key
+        id: key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=$KS_PASS" >> $GITHUB_ENV
+            echo "ANDROID_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+            echo "ANDROID_KEY_PASSWORD=$KEY_PASS" >> $GITHUB_ENV
+            echo "suffix=" >> $GITHUB_OUTPUT
+          else
+            # No signing secrets yet: sign with a throw-away key so the APK still installs (see apps/README.md)
+            P=$(openssl rand -hex 16)
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/release.jks" -storepass "$P" -keypass "$P" -alias temp -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=APJ CRM Test"
+            echo "::add-mask::$P"
+            echo "ANDROID_KEYSTORE_PASSWORD=$P" >> $GITHUB_ENV
+            echo "ANDROID_KEY_ALIAS=temp" >> $GITHUB_ENV
+            echo "ANDROID_KEY_PASSWORD=$P" >> $GITHUB_ENV
+            echo "suffix=-TEST-KEY" >> $GITHUB_OUTPUT
+          fi
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> $GITHUB_ENV
+      - name: Build APK
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
+          APP_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: gradle -p apps/android assembleRelease --no-daemon --stacktrace
+      - name: Rename
+        run: |
+          mkdir -p out
+          cp apps/android/app/build/outputs/apk/release/app-release.apk "out/APJ-CRM-1.0.${{ github.run_number }}${{ steps.key.outputs.suffix }}.apk"
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with: { name: apj-crm-android, path: out/*.apk, retention-days: 30 }
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install
+        working-directory: apps/desktop
+        run: npm install --no-audit --no-fund
+      - name: Set version
+        working-directory: apps/desktop
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version --allow-same-version
+      - name: Build EXE
+        working-directory: apps/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win nsis portable --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with: { name: apj-crm-windows, path: 'apps/desktop/dist/*.exe', retention-days: 30 }
+
+  release:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: files, merge-multiple: true }
+      - name: Publish to the "APJ CRM apps" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la files
+          (cd files && sha256sum * > SHA256SUMS.txt)
+          gh release delete crm-apps --yes --cleanup-tag || true
+          gh release create crm-apps files/* --target "${{ github.sha }}" --prerelease \
+            --title "APJ CRM apps 1.0.${{ github.run_number }}" \
+            --notes "Android: install the .apk on the phone. Windows: run APJ-CRM-Setup (installer) or APJ-CRM-Portable (no install). Both open https://crm.apjtech.in. SHA256SUMS.txt lets you check the files were not changed."

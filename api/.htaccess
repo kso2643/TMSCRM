@@ -3,6 +3,28 @@ Options -MultiViews
 
 RewriteEngine On
 
+# ── Security: never serve secrets, code or data files directly ──────────
+# .env, .sql dumps, notes, back-ups and the folders with code / scripts / config
+<FilesMatch "(^\.|\.(env|sql|md|log|bak|ini|sh|lock|dist|example)$|^composer\.json$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+RewriteRule ^(config|includes|controllers|database|scripts|storage)(/|$) - [F,L]
+RewriteRule ^uploads/.*\.(php|phtml|phar|pl|py|cgi|sh)$ - [F,L]
+
+# ── Security headers ──
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on'"
+</IfModule>
+
 # ── Static uploads served directly ──────────────────────────────────────
 RewriteCond %{REQUEST_URI} ^/uploads/
 RewriteRule ^ - [L]

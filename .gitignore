@@ -5,3 +5,4 @@ Thumbs.db
 *.log
 api/uploads/*/*
 !api/uploads/*/.gitkeep
+api/storage/
