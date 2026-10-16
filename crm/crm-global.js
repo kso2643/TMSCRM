@@ -916,6 +916,86 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sidebarFold); else sidebarFold();
 
+
+  // ── Page access (set by the Super Admin on the Users page) ────────────
+  // hidden → link removed from the menu and the page blocked; view → read only
+  // (add / edit / delete buttons hidden); edit → delete buttons hidden.
+  // The API refuses the same writes, so this is only about not showing them.
+  var PA_KEY = 'crm_page_access';
+  var PA_VIEW_TXT = /^\s*(?:[+＋✎🗑⤒📎💰🔔]|(?:new|add|edit|delete|remove|save|upload|import|send|submit|mark|approve|reject|create|duplicate|convert|assign|book|restore|deactivate|reset|enter|set|change|record|log|start|stop|copy to|move)\b)/iu;
+  var PA_VIEW_TTL = /\b(add|new|edit|delete|remove|upload|save|rename|assign)\b/i;
+  var PA_DEL_TXT = /^\s*(?:🗑|(?:delete|remove|deactivate)\b)/iu;
+  var PA_DEL_TTL = /\b(delete|remove)\b/i;
+  var PA_SAFE = /\b(close|dismiss|cancel|search|filter|back|view|open|download|print|export|refresh|show|hide|expand|collapse)\b/i;
+  var paState = null;
+  function paPageFor(path, pages) {
+    var best = null, len = 0;
+    (pages || []).forEach(function (pg) { pg.paths.forEach(function (p) { if ((path === p || path.indexOf(p + '/') === 0) && p.length > len) { best = pg; len = p.length; } }); });
+    return best;
+  }
+  function paApply() {
+    if (!paState) return;
+    var acc = paState.access || {}, pages = paState.pages || [];
+    var css = '';
+    pages.forEach(function (pg) {
+      if (acc[pg.key] !== 'hidden') return;
+      pg.paths.forEach(function (p) { css += 'a[href="' + p + '"],a[href="' + p + '/"],a[href^="' + p + '/?"],a[href^="' + p + '/#"]{display:none!important}'; });
+    });
+    var st = document.getElementById('pa-css');
+    if (!st) { st = document.createElement('style'); st.id = 'pa-css'; document.head.appendChild(st); }
+    if (st.textContent !== css) st.textContent = css;
+    var pg = paPageFor(location.pathname.replace(/\/+$/, '') || '/', pages), lvl = pg ? acc[pg.key] || 'full' : 'full';
+    document.documentElement.setAttribute('data-page-access', lvl);
+    var block = document.getElementById('pa-block'), banner = document.getElementById('pa-banner');
+    if (lvl === 'hidden') {
+      if (!block) {
+        block = document.createElement('div'); block.id = 'pa-block';
+        block.style.cssText = 'position:fixed;inset:0;z-index:2147483300;background:rgba(248,250,252,.97);display:flex;align-items:center;justify-content:center;font:15px/1.5 Inter,system-ui,sans-serif;color:#0f172a;text-align:center;padding:1rem';
+        block.innerHTML = '<div><div style="font-size:2.4rem">🔒</div><b style="font-size:1.1rem"></b><p style="color:#64748b;margin:.4rem 0 1rem">You do not have access to this page. Ask the Super Admin if you need it.</p><a href="/dashboard/" style="display:inline-block;background:#1e3a8a;color:#fff;border-radius:.5rem;padding:.5rem 1rem;text-decoration:none;font-weight:600">Go to the dashboard</a></div>';
+        block.querySelector('b').textContent = pg.label;
+        document.body.appendChild(block);
+      }
+    } else if (block) block.remove();
+    if (lvl === 'view' || lvl === 'edit') {
+      if (!banner) {
+        banner = document.createElement('div'); banner.id = 'pa-banner';
+        banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:2147482000;background:' + (lvl === 'view' ? '#fef3c7;color:#92400e;border:1px solid #fcd34d' : '#dbeafe;color:#1e3a8a;border:1px solid #93c5fd') + ';border-radius:999px;padding:.3rem .9rem;font:600 12.5px Inter,system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.08);pointer-events:none';
+        banner.textContent = lvl === 'view' ? '👁 View only — you can look but not add, edit or delete' : '✎ You can add and edit here, but not delete';
+        document.body.appendChild(banner);
+      }
+      paHideButtons(lvl);
+    } else if (banner) banner.remove();
+  }
+  function paHideButtons(lvl) {
+    var nodes = document.querySelectorAll('button, a.btn-primary, a.btn-secondary, [role="button"], label.btn-primary, label.btn-secondary');
+    for (var i = 0; i < nodes.length; i++) {
+      var b = nodes[i];
+      if (b.hasAttribute('data-pa-off') || b.closest('.sidebar-link, aside, nav, #pa-banner, #pa-block, .sidebar-section')) continue;
+      var txt = (b.textContent || '').trim(), ttl = (b.getAttribute('title') || '') + ' ' + (b.getAttribute('aria-label') || '');
+      if (PA_SAFE.test(ttl) || /^(close|cancel|✕ close)$/i.test(txt)) continue;
+      var hit = lvl === 'view' ? (PA_VIEW_TXT.test(txt) || PA_VIEW_TTL.test(ttl) || ((txt === '✕' || txt === '×') && PA_DEL_TTL.test(ttl)))
+                               : (PA_DEL_TXT.test(txt) || PA_DEL_TTL.test(ttl));
+      if (hit && !PA_SAFE.test(txt.replace(/^[^a-z]+/i, '').split(/\s/)[0] || '')) { b.setAttribute('data-pa-off', ''); b.style.setProperty('display', 'none', 'important'); }
+    }
+  }
+  function pageAccess() {
+    if (!token()) return;
+    try { paState = JSON.parse(localStorage.getItem(PA_KEY) || 'null'); } catch (e) { paState = null; }
+    paApply();
+    fetch(API + '/api/page-access/me', { headers: { Authorization: 'Bearer ' + token() } }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (!j || !j.data) return;
+      paState = { access: j.data.access || {}, pages: j.data.pages || [] };
+      try { localStorage.setItem(PA_KEY, JSON.stringify(paState)); } catch (e) {}
+      paApply();
+    }).catch(function () {});
+    var t = null, last = location.pathname;
+    new MutationObserver(function () {
+      if (t) return;
+      t = setTimeout(function () { t = null; if (location.pathname !== last) { last = location.pathname; var b = document.getElementById('pa-banner'); if (b) b.remove(); } paApply(); }, 150);
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pageAccess); else pageAccess();
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
   // For other scripts / testing: CRMAlerts.check() polls right away.

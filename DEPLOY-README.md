@@ -1,3 +1,31 @@
+# Update — 16 Oct (d): Appointments private to each engineer, page access (view only / edit / delete) per user
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New file:** `api/includes/PageAccess.php`.
+- **Database:** column `User.pageAccess` is added automatically.
+
+1. **Appointments are private:**
+   - Engineers (and everyone who is not an Admin) now see only the visits **assigned to them or booked by them**, in every view (Month, Day, Week, Planner, Customers).
+   - The "All engineers" filter is hidden for them.
+   - Opening someone else's appointment by link is refused.
+   - **Super Admin and Admin** still see everyone's appointments.
+2. **Page access per user** (Users page → **Page access**, Super Admin only):
+   - For each page pick one level:
+     - **Full access** — view, add, edit, delete;
+     - **Edit (no delete)**;
+     - **View only** — read only;
+     - **Hidden** — removed from the menu; opening it shows "no access".
+   - "Set all to" buttons change every page at once.
+   - The pages covered are:
+     - Customers, Meetings, Products, Stock;
+     - Product catalogue, Catalogues & documents;
+     - Quotations, Orders, Trials, Price requests, Projects & Tooled-up, CPR;
+     - Appointments, Tasks, Vendors & POs, Accounts, CEO Desk, Sales report.
+   - On a view-only page a yellow "View only" badge shows at the top and the add / edit / delete buttons are hidden. On an "Edit" page the delete buttons are hidden.
+   - **The server refuses the same actions**, so nothing can be changed even from an old open tab.
+   - Everyone keeps full access until the Super Admin limits them. The Super Admin always has full access.
+   - Attendance, leave, chat and payroll keep their own rules (punch-in and applying for leave always work).
+
 # Update — 16 Oct (c): Attendance — Admin / Super Admin mark absent or leave
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

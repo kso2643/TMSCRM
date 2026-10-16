@@ -42,6 +42,8 @@
   function currentUser() {
     try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch (e) { return null; }
   }
+  /** Only the Super Admin and Admins see everyone's appointments (the API enforces it too). */
+  function seesAll() { var u = currentUser(); return !!u && (u.role === 'SUPER_ADMIN' || u.role === 'ADMIN'); }
   function isAdmin() {
     var u = currentUser();
     return !!u && ADMIN_ROLES.indexOf(u.role) !== -1;
@@ -563,6 +565,7 @@
       var engSel = el('select', { class: selectCls(), id: 'ap-engineer', 'aria-label': 'Engineer' }, [el('option', { value: '', text: 'All engineers' })]
         .concat(state.engineers.map(function (u) { return el('option', { value: u.id, text: u.name }); })));
       engSel.value = state.engineer;
+      if (!seesAll()) engSel.style.display = 'none';
       engSel.addEventListener('change', function () { state.engineer = engSel.value; loadAndRenderBody(); });
 
       var mineToggle = el('label', { class: 'flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none' }, [
@@ -887,6 +890,7 @@
       state.appointments.forEach(function (a) { if (a.assignedTo) ids[a.assignedTo.id] = 1; });
       return state.engineers.filter(function (u) {
         if (state.engineer) return u.id === state.engineer;
+        if (!seesAll()) return ids[u.id] || u.id === (currentUser() || {}).id;
         return ids[u.id] || u.role === 'SALES_ENGINEER' || u.role === 'SALES';
       });
     }

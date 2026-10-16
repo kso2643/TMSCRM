@@ -43,6 +43,9 @@ class AppointmentController
     // becomes due. Easy to retune if the team wants an earlier/later heads-up.
     private const EVENING_HOUR = 18;
 
+    /** Super Admin / Admin see every engineer's appointments. */
+    private static function seesAll(array $auth): bool { return in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true); }
+
     // GET /api/appointments/meta
     public function meta(): void
     {
@@ -66,6 +69,9 @@ class AppointmentController
         $where = ['a.appointmentDate BETWEEN ? AND ?'];
         $params = [$from, $to];
 
+        // Only the Super Admin and Admins see everyone's appointments; everyone else sees
+        // just the visits they booked or that are assigned to them.
+        if (!self::seesAll($auth)) { $where[] = '(a.assignedToId=? OR a.userId=?)'; array_push($params, $auth['id'], $auth['id']); }
         if (qp('mine')) { $where[] = 'a.assignedToId=?'; $params[] = $auth['id']; }
         $assignedToId = qp('assignedToId', '');
         if ($assignedToId) { $where[] = 'a.assignedToId=?'; $params[] = $assignedToId; }
@@ -96,9 +102,9 @@ class AppointmentController
     // GET /api/appointments/:id
     public function show(string $id, int $statusCode = 200): void
     {
-        authenticate();
+        $auth = authenticate();
         $row = $this->fetchRow($id);
-        if (!$row) sendError('Appointment not found.', 404);
+        if (!$row || (!self::seesAll($auth) && $row['assignedToId'] !== $auth['id'] && $row['userId'] !== $auth['id'])) sendError('Appointment not found.', 404);
         sendSuccess(['appointment' => $this->shape($row)], 'Success', $statusCode);
     }
 

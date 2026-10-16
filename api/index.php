@@ -66,6 +66,7 @@ require __DIR__ . '/includes/StyledXlsxWriter.php';
 require __DIR__ . '/includes/SimplePdf.php';
 require __DIR__ . '/includes/ApjQuotationPdf.php';
 require __DIR__ . '/includes/TMSQuotationPdf.php';
+require __DIR__ . '/includes/PageAccess.php';   // per-user page access (full / edit / view / hidden)
 
 require __DIR__ . '/controllers/AuthController.php';
 require __DIR__ . '/controllers/UserController.php';
@@ -176,6 +177,9 @@ $c2 = $segs[2] ?? '';
 $c3 = $segs[3] ?? '';
 $c4 = $segs[4] ?? '';
 
+// Page access set by the Super Admin: refuse writes the user's level does not allow.
+PageAccess::guard($method, $segs);
+
 // Tiny router — match from most-specific to least-specific.
 // Convention: segment variables (IDs) are captured as $c1, $c2, etc.
 // Exactly mirrors the Express routes in index.js + all *.routes.js.
@@ -195,6 +199,14 @@ try {
     }
 
     // ── Users ──────────────────────────────────────────────────────
+    elseif ($c0 === 'page-access') {
+        match (true) {
+            $method === 'GET' && $c1 === 'me'                    => PageAccess::me(),
+            $method === 'GET' && $c1 === 'users' && $c2 !== ''   => PageAccess::getUser($c2),
+            $method === 'PUT' && $c1 === 'users' && $c2 !== ''   => PageAccess::setUser($c2),
+            default => sendError('Route not found', 404),
+        };
+    }
     elseif ($c0 === 'users') {
         $ctrl = new UserController();
         match (true) {

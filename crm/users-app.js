@@ -107,6 +107,7 @@
         if (F.status !== 'removed') {
           b('Edit', '', function () { form(u); });
           b('Reset password', '', function () { resetPw(u); });
+          if (isSuper && u.role !== 'SUPER_ADMIN') b('Page access', '', function () { pageAccess(u); }, 'Which pages this user can see, edit or delete on');
           if (!self && u.isActive) b(u.isLocked ? 'Unlock' : 'Lock', '', function () { act('PATCH', '/users/' + u.id + '/toggle-lock'); });
           if (!self) b(u.isActive ? 'Deactivate' : 'Reactivate', u.isActive ? '' : 'grn', function () {
             if (u.isActive) { if (confirm('Deactivate ' + u.name + '? They will not be able to log in until reactivated.')) act('DELETE', '/users/' + u.id); }
@@ -141,6 +142,39 @@
     m.addEventListener('click', function (e) { if (e.target === m) m.remove(); });
     document.body.appendChild(m);
     return { dlg: dlg, close: function () { m.remove(); } };
+  }
+  /* Super Admin: per page — full access / edit (no delete) / view only / hidden */
+  function pageAccess(u) {
+    var M = modal('Page access · ' + u.name);
+    M.dlg.style.maxWidth = '720px';
+    M.dlg.appendChild(el('div', { class: 'us-empty', text: 'Loading…' }));
+    api('GET', '/page-access/users/' + u.id).then(function (j) {
+      var d = j.data, access = {}, sels = {};
+      Object.keys(d.access || {}).forEach(function (k) { access[k] = d.access[k]; });
+      M.dlg.removeChild(M.dlg.lastChild);
+      M.dlg.appendChild(el('p', { style: 'margin:0 0 .6rem;font-size:.82rem;color:#64748b', text: 'Full access = view, add, edit and delete. Edit = no delete. View only = read only. Hidden = removed from the menu. The server enforces it too.' }));
+      var quick = el('div', { style: 'display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.6rem' }, [el('span', { style: 'font-size:.78rem;color:#64748b;align-self:center', text: 'Set all to:' })]
+        .concat(Object.keys(d.levels).map(function (lv) { return el('button', { type: 'button', class: 'us-btn sm', 'data-pa-all': lv, text: d.levels[lv], onclick: function () { Object.keys(sels).forEach(function (k) { sels[k].value = lv; }); } }); })));
+      M.dlg.appendChild(quick);
+      var COL = { full: '#16a34a', edit: '#2563eb', view: '#d97706', hidden: '#64748b' };
+      var tb = el('tbody', {}, d.pages.map(function (pg) {
+        var sel = el('select', { 'data-pa': pg.key, style: 'border:1px solid #cbd5e1;border-radius:.4rem;padding:.25rem .4rem;font-size:.82rem;background:transparent;color:inherit' },
+          Object.keys(d.levels).map(function (lv) { return el('option', { value: lv, text: d.levels[lv] }); }));
+        sel.value = access[pg.key] || 'full';
+        function tint() { sel.style.borderColor = COL[sel.value]; sel.style.color = sel.value === 'full' ? '' : COL[sel.value]; }
+        sel.addEventListener('change', tint); tint();
+        sels[pg.key] = sel;
+        return el('tr', {}, [el('td', { style: 'padding:.3rem .4rem;font-size:.85rem' }, [el('b', { text: pg.label }), el('small', { style: 'color:#64748b;margin-left:.4rem', text: pg.paths.join(', ') })]), el('td', { style: 'padding:.3rem .4rem;text-align:right' }, [sel])]);
+      }));
+      M.dlg.appendChild(el('div', { style: 'max-height:55vh;overflow:auto;border:1px solid #e2e8f0;border-radius:.6rem' }, [el('table', { style: 'width:100%;border-collapse:collapse', id: 'us-pa-table' }, [tb])]));
+      var err = el('div', { class: 'us-err' });
+      M.dlg.appendChild(err);
+      M.dlg.appendChild(el('div', { class: 'us-foot' }, [el('button', { type: 'button', class: 'us-btn', text: 'Cancel', onclick: M.close }),
+        el('button', { type: 'button', class: 'us-btn pri', id: 'us-pa-save', text: 'Save', onclick: function () {
+          var out = {}; Object.keys(sels).forEach(function (k) { if (sels[k].value !== 'full') out[k] = sels[k].value; });
+          api('PUT', '/page-access/users/' + u.id, { access: out }).then(function (r) { toast(r.message); M.close(); }).catch(function (e) { err.textContent = e.message; });
+        } })]));
+    }).catch(function (e) { M.dlg.lastChild.textContent = e.message; });
   }
   function resetPw(u) {
     var M = modal('Reset password · ' + u.name);
