@@ -12,14 +12,21 @@
   },
   "devDependencies": {
     "electron": "31.7.7",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "@electron/fuses": "1.8.0"
   },
   "build": {
     "appId": "in.apjtech.crm",
     "productName": "APJ CRM",
     "copyright": "APJ Technologies",
-    "files": ["main.js", "offline.html", "build/icon.png"],
-    "directories": { "output": "dist" },
+    "files": [
+      "main.js",
+      "offline.html",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
     "win": {
       "icon": "build/icon.png",
       "artifactName": "APJ-CRM-${version}-${arch}-${target}.${ext}"
@@ -33,13 +40,9 @@
       "shortcutName": "APJ CRM",
       "artifactName": "APJ-CRM-Setup-${version}.${ext}"
     },
-    "portable": { "artifactName": "APJ-CRM-Portable-${version}.${ext}" },
-    "electronFuses": {
-      "runAsNode": false,
-      "enableCookieEncryption": true,
-      "enableNodeOptionsEnvironmentVariable": false,
-      "enableNodeCliInspectArguments": false,
-      "onlyLoadAppFromAsar": true
-    }
+    "portable": {
+      "artifactName": "APJ-CRM-Portable-${version}.${ext}"
+    },
+    "afterPack": "./build/fuses.js"
   }
 }
