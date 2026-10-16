@@ -237,7 +237,8 @@
     var same = String(r.toDate || '').slice(0, 10) === String(r.fromDate).slice(0, 10);
     var main = dmy(r.fromDate) + (same ? '' : ' – ' + dmy(r.toDate));
     var sub = r.leaveType === 'PERMISSION' ? (r.fromTime + ' – ' + r.toTime + ' · ' + hrs(r.hours)) : r.leaveType === 'HALF_DAY' ? 'Half day' : (r.totalDays + ' day' + (r.totalDays == 1 ? '' : 's'));
-    var conv = r.originalType && r.originalType !== r.leaveType
+    var conv = r.originalType === 'ABSENT' ? el('div', { class: 'sub', style: 'color:#b91c1c;font-weight:600', text: 'Marked absent (Attendance page)' })
+      : r.originalType && r.originalType !== r.leaveType
       ? el('div', { class: 'sub', style: 'color:#b45309', text: 'Was ' + (LABEL[r.originalType] || r.originalType).toLowerCase() + (r.originalType === 'PERMISSION' && r.fromTime ? ' ' + r.fromTime + '–' + r.toTime : '') + (r.convertNote ? ' — ' + r.convertNote : '') }) : null;
     return el('td', {}, [el('div', { text: main }), el('div', { class: 'sub', text: sub }), r.isLop ? el('span', { class: 'lv-badge', style: '--c:#dc2626', text: 'Loss of pay' }) : null, conv]);
   }

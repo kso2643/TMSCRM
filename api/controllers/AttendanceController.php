@@ -218,6 +218,89 @@ class AttendanceController
         sendSuccess(['days' => $days, 'from' => $from, 'to' => $to], 'Attendance fetched for all users');
     }
 
+    /**
+     * GET /api/attendance/day?date=Y-m-d — admin: every active employee for one day:
+     * punched in (present), on leave (type), marked absent, or not marked yet.
+     */
+    public function day(): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        new LeaveController();   // makes sure the Leave table has its newer columns
+        $d = substr((string) qp('date', date('Y-m-d')), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) $d = date('Y-m-d');
+        $users = db()->query("SELECT id, name, role, department FROM `User` WHERE isActive=1 ORDER BY FIELD(role,'SALES_ENGINEER','SALES','MANAGER','ACCOUNTS','ADMIN','SUPER_ADMIN'), name")->fetchAll();
+        $a = db()->prepare('SELECT id, userId, checkIn, checkOut, workingHours, status FROM `Attendance` WHERE DATE(date)=?'); $a->execute([$d]);
+        $att = []; foreach ($a->fetchAll() as $r) $att[$r['userId']] = $r;
+        $l = db()->prepare("SELECT l.id, l.userId, l.leaveType, l.totalDays, l.fromDate, l.toDate, l.reason, l.isLop, l.originalType, l.status, l.convertedById, a.name AS byName
+            FROM `Leave` l LEFT JOIN `User` a ON a.id=l.approvedById
+            WHERE l.status IN ('PENDING','APPROVED') AND l.leaveType<>'PERMISSION' AND DATE(l.fromDate)<=? AND DATE(l.toDate)>=?");
+        $l->execute([$d, $d]);
+        $lv = []; foreach ($l->fetchAll() as $r) $lv[$r['userId']] = $r;
+        $rows = [];
+        foreach ($users as $u) {
+            $r = $att[$u['id']] ?? null; $x = $lv[$u['id']] ?? null;
+            $state = $x ? ($x['originalType'] === 'ABSENT' ? 'ABSENT' : ($x['status'] === 'PENDING' ? 'LEAVE_PENDING' : ($x['leaveType'] === 'HALF_DAY' ? 'HALF_DAY' : 'ON_LEAVE'))) : 'NOT_MARKED';
+            if ($r && $r['checkIn'] && !in_array($state, ['HALF_DAY'], true)) $state = $x ? $state . '+PUNCHED' : 'PRESENT';
+            $rows[] = ['user' => $u, 'state' => $state,
+                'attendance' => $r ? ['checkIn' => fmt_ampm($r['checkIn']), 'checkOut' => fmt_ampm($r['checkOut']), 'workingHours' => $r['workingHours'], 'status' => $r['status']] : null,
+                'leave' => $x ? ['id' => $x['id'], 'type' => $x['leaveType'], 'label' => $x['originalType'] === 'ABSENT' ? 'Absent' : (LeaveController::LABELS[$x['leaveType']] ?? $x['leaveType']),
+                    'days' => (float) $x['totalDays'], 'from' => substr($x['fromDate'], 0, 10), 'to' => substr($x['toDate'], 0, 10), 'reason' => $x['reason'], 'lop' => !empty($x['isLop']),
+                    'status' => $x['status'], 'by' => $x['byName'], 'marked' => !empty($x['convertedById'])] : null];
+        }
+        $count = array_count_values(array_map(fn($r) => explode('+', $r['state'])[0], $rows));
+        sendSuccess(['date' => $d, 'rows' => $rows, 'counts' => $count]);
+    }
+
+    // POST /api/attendance/mark — admin: { userId, date, kind: ABSENT|CASUAL|SICK|PERSONAL|HALF_DAY, days?, reason?, lop? }
+    // Saved as an approved leave so the leave page, calendar and payslip all count it (absent = loss of pay).
+    public function mark(): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        new LeaveController();
+        $b = request_body();
+        $uid = trim((string) ($b['userId'] ?? ''));
+        $u = db()->prepare('SELECT id, name FROM `User` WHERE id=? AND isActive=1'); $u->execute([$uid]);
+        $usr = $u->fetch();
+        if (!$usr) sendError('Choose the employee.', 400);
+        $from = substr((string) ($b['date'] ?? ''), 0, 10);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) sendError('Choose the date.', 400);
+        $kind = strtoupper(trim((string) ($b['kind'] ?? '')));
+        if (!in_array($kind, ['ABSENT', 'CASUAL', 'SICK', 'PERSONAL', 'HALF_DAY'], true)) sendError('Choose absent, casual / sick / personal leave or half day.', 400);
+        $days = $kind === 'HALF_DAY' ? 0.5 : max(1, min(60, (int) ($b['days'] ?? 1)));
+        $to = $kind === 'HALF_DAY' ? $from : date('Y-m-d', strtotime("$from +" . ((int) $days - 1) . ' days'));
+        $type = $kind === 'ABSENT' ? 'CASUAL' : $kind;
+        $lop = $kind === 'ABSENT' ? 1 : (!empty($b['lop']) ? 1 : 0);
+        if ($kind !== 'HALF_DAY') {
+            $p = db()->prepare('SELECT checkIn FROM `Attendance` WHERE userId=? AND DATE(date) BETWEEN ? AND ? AND checkIn IS NOT NULL LIMIT 1'); $p->execute([$uid, $from, $to]);
+            if ($ci = $p->fetchColumn()) sendError($usr['name'] . ' punched in at ' . fmt_ampm($ci) . ' on that day — mark a half day instead, or check the date.', 400);
+        }
+        $ov = db()->prepare("SELECT id FROM `Leave` WHERE userId=? AND status IN ('PENDING','APPROVED') AND leaveType<>'PERMISSION' AND DATE(fromDate)<=? AND DATE(toDate)>=? LIMIT 1");
+        $ov->execute([$uid, $to, $from]);
+        if ($ov->fetch()) sendError($usr['name'] . ' already has leave on that day — undo it first, or approve it on the Leave page.', 400);
+        $label = ['ABSENT' => 'Absent', 'CASUAL' => 'Casual leave', 'SICK' => 'Sick leave', 'PERSONAL' => 'Personal leave', 'HALF_DAY' => 'Half day'][$kind];
+        $reason = trim((string) ($b['reason'] ?? ''));
+        $reason = mb_substr(($kind === 'ABSENT' ? 'Absent' : $label) . ' — marked by admin' . ($reason !== '' ? ': ' . $reason : ''), 0, 2000);
+        $id = gen_id(); $now = now_sql();
+        db()->prepare("INSERT INTO `Leave` (id,userId,leaveType,fromDate,toDate,totalDays,reason,status,approvedById,approvedAt,isLop,originalType,convertedById,convertedAt,createdAt,updatedAt)
+                       VALUES (?,?,?,?,?,?,?,'APPROVED',?,?,?,?,?,?,?,?)")
+            ->execute([$id, $uid, $type, "$from 00:00:00", "$to 00:00:00", $days, $reason, $auth['id'], $now, $lop, $kind === 'ABSENT' ? 'ABSENT' : null, $auth['id'], $now, $now, $now]);
+        log_activity($auth['id'], 'ATTENDANCE_MARKED', 'Leave', $id, ['userId' => $uid, 'kind' => $kind, 'date' => $from, 'days' => $days]);
+        sendSuccess(['id' => $id], $usr['name'] . ' marked ' . strtolower($label) . ($days > 1 ? " for $days days" : '') . ' · ' . date('j M', strtotime($from)), 201);
+    }
+
+    // DELETE /api/attendance/mark/:leaveId — admin: undo an absent / leave marked from this page
+    public function unmark(string $id): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        $s = db()->prepare('SELECT id, userId, convertedById, reason FROM `Leave` WHERE id=?'); $s->execute([$id]);
+        $r = $s->fetch();
+        if (!$r) sendError('Not found.', 404);
+        if (empty($r['convertedById'])) sendError('This leave was applied by the employee — reject it on the Leave page instead.', 400);
+        db()->prepare('DELETE FROM `Leave` WHERE id=?')->execute([$id]);
+        log_activity($auth['id'], 'ATTENDANCE_UNMARKED', 'Leave', $id, ['userId' => $r['userId']]);
+        sendSuccess([], 'Removed');
+    }
+
     // GET /api/attendance/today
     public function today(): void
     {

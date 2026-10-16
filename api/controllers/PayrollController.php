@@ -340,7 +340,7 @@ class PayrollController
                 }
                 if ($to >= $m0 && $from <= $m1) $out['items'][] = [
                     'type' => $t, 'from' => $from, 'to' => $to, 'lop' => !empty($r['isLop']),
-                    'label' => (LeaveController::LABELS[$t] ?? $t) . ($r['originalType'] === 'PERMISSION' ? ' (from permission)' : '') . (!empty($r['isLop']) ? ' · LOP' : ''),
+                    'label' => ($r['originalType'] === 'ABSENT' ? 'Absent' : (LeaveController::LABELS[$t] ?? $t)) . ($r['originalType'] === 'PERMISSION' ? ' (from permission)' : '') . (!empty($r['isLop']) ? ' · LOP' : ''),
                     'days' => $t === 'PERMISSION' ? 0 : ($t === 'HALF_DAY' ? 0.5 : $days($m0, $m1)),
                     'hours' => $t === 'PERMISSION' ? (float) $r['hours'] : null,
                     'time' => $t === 'PERMISSION' || $r['originalType'] === 'PERMISSION' ? ($r['fromTime'] ? $r['fromTime'] . '–' . $r['toTime'] : null) : null, 'reason' => $r['reason'],

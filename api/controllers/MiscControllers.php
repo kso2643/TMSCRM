@@ -104,7 +104,7 @@ class LeaveController
         unset($r['u_id'], $r['u_name'], $r['department'], $r['a_name']);
         $r['totalDays'] = $r['totalDays'] === null ? null : (float) $r['totalDays'];
         $r['hours'] = isset($r['hours']) && $r['hours'] !== null ? (float) $r['hours'] : null;
-        $r['typeLabel'] = self::LABELS[$r['leaveType']] ?? $r['leaveType'];
+        $r['typeLabel'] = ($r['originalType'] ?? null) === 'ABSENT' ? 'Absent' : (self::LABELS[$r['leaveType']] ?? $r['leaveType']);
         $r['isLop'] = !empty($r['isLop']);
         $r['dayKind'] = self::dayKind($r);
         return $r;

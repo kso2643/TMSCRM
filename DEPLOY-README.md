@@ -1,3 +1,20 @@
+# Update — 16 Oct (c): Attendance — Admin / Super Admin mark absent or leave
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- No new files and no new tables.
+
+**Attendance → All employees → "Mark attendance — absent / leave":**
+- Pick a date (today by default) to see every employee's status for that day:
+  - Present, Not punched in, Absent, On leave, Half day or Leave pending;
+  - a count at the top.
+- **Mark absent** → saved as an approved **Absent (loss of pay)** for that day, with an optional reason.
+- **Leave…** → Absent, Casual, Sick or Personal leave (any number of days, optional loss of pay) or a Half day.
+  - For someone who has already punched in, only Half day is offered.
+  - A full-day absent is refused if they punched in that day.
+- **Undo** removes something marked by mistake. Leave applied by the employee is handled on the Leave page.
+- Everything marked here appears on the **Leave page and calendar** (shown as "Marked absent") and is counted on the **payslip** (absent = loss of pay).
+- Only Admin and Super Admin can mark.
+
 # Update — 16 Oct (b): Tooled-up categories you can edit, sales report by tax invoice, APJ GST number
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

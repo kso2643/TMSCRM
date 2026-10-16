@@ -55,6 +55,31 @@
     });
   }
 
+  function apiSend(method, path, body) {
+    var t = '';
+    try { t = localStorage.getItem('crm_token') || ''; } catch (e) {}
+    return fetch(API + '/api' + path, {
+      method: method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || j.success === false) throw new Error((j && j.message) || 'Request failed');
+        return j;
+      });
+    });
+  }
+  function todayIso() { var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+  function toast(msg, err) {
+    document.querySelectorAll('.am-toast').forEach(function (x) { x.remove(); });
+    var t = el('div', { class: 'am-toast', text: msg });
+    t.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483600;color:#fff;padding:.65rem 1rem;border-radius:.6rem;font-size:.85rem;max-width:90vw;background:' + (err ? '#b91c1c' : '#0f766e');
+    document.body.appendChild(t); setTimeout(function () { t.remove(); }, 4500);
+  }
+  var DAY_STATE = {
+    PRESENT: ['Present', 'badge-green'], NOT_MARKED: ['Not punched in', 'badge-gray'], ABSENT: ['Absent', 'badge-red'],
+    ON_LEAVE: ['On leave', 'badge-yellow'], HALF_DAY: ['Half day', 'badge-yellow'], LEAVE_PENDING: ['Leave pending', 'badge-gray']
+  };
+  var KINDS = [['ABSENT', 'Absent (loss of pay)'], ['CASUAL', 'Casual leave'], ['SICK', 'Sick leave'], ['PERSONAL', 'Personal leave'], ['HALF_DAY', 'Half day']];
+
   function el(tag, attrs, kids) {
     var n = document.createElement(tag);
     attrs = attrs || {};
@@ -157,8 +182,11 @@
     var tabs = el('div', { class: 'flex gap-1 border-b border-slate-200 dark:border-slate-700 mb-4' });
     var filters = el('div', { class: 'flex flex-wrap gap-2 mb-4 hidden' });
     var body = el('div', { class: 'hidden' });
+    var dayBox = el('div', { class: 'card mb-4 hidden', id: 'att-day' });
+    var dayDate = todayIso();
 
     wrap.appendChild(tabs);
+    wrap.appendChild(dayBox);
     wrap.appendChild(filters);
     wrap.appendChild(body);
 
@@ -233,7 +261,81 @@
       historyCard.style.display = showAll ? 'none' : '';
       filters.classList.toggle('hidden', !showAll);
       body.classList.toggle('hidden', !showAll);
-      if (showAll) load();
+      dayBox.classList.toggle('hidden', !showAll);
+      if (showAll) { load(); loadDay(); }
+    }
+
+    /* Mark attendance for a day: everyone with today's state; Admin / Super Admin mark
+       absent or leave (saved as an approved leave, so leave page + payslip count it). */
+    function loadDay() {
+      dayBox.innerHTML = '';
+      var dIn = el('input', { type: 'date', class: selectCls, id: 'att-day-date', value: dayDate });
+      dIn.addEventListener('change', function () { if (dIn.value) { dayDate = dIn.value; loadDay(); } });
+      var head = el('div', { class: 'px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex flex-wrap gap-3 items-center' }, [
+        el('span', { class: 'text-sm font-semibold text-slate-900 dark:text-slate-100', text: 'Mark attendance — absent / leave' }), dIn,
+        el('span', { class: 'text-xs text-muted', id: 'att-day-counts', text: 'Loading…' })]);
+      var list = el('div', { class: 'overflow-x-auto' });
+      dayBox.appendChild(head); dayBox.appendChild(list);
+      api('/attendance/day?date=' + dayDate).then(function (res) {
+        var d = res.data, c = d.counts || {};
+        document.getElementById('att-day-counts').textContent = [(c.PRESENT || 0) + ' present', (c.ABSENT || 0) + ' absent', ((c.ON_LEAVE || 0) + (c.HALF_DAY || 0)) + ' on leave', (c.NOT_MARKED || 0) + ' not punched in'].join(' · ');
+        var tb = el('tbody');
+        d.rows.forEach(function (r) {
+          var base = r.state.split('+')[0], st = DAY_STATE[base] || [base, 'badge-gray'];
+          var info = r.leave ? r.leave.label + (r.leave.days > 1 ? ' · ' + r.leave.days + ' days (' + fmtDate(r.leave.from) + ' – ' + fmtDate(r.leave.to) + ')' : '') + (r.leave.lop ? ' · loss of pay' : '') + (r.leave.by ? ' · by ' + r.leave.by : '')
+            : r.attendance ? 'In ' + (r.attendance.checkIn || '—') + (r.attendance.checkOut ? ' · Out ' + r.attendance.checkOut : '') : '';
+          var acts = el('div', { class: 'flex gap-1 justify-end' });
+          if (!r.leave && base !== 'PRESENT') {
+            acts.appendChild(el('button', { class: 'btn-secondary text-xs', style: 'color:#b91c1c', 'data-absent': r.user.id, text: 'Mark absent', onclick: function () { markDialog(r, 'ABSENT'); } }));
+            acts.appendChild(el('button', { class: 'btn-secondary text-xs', 'data-leave': r.user.id, text: 'Leave…', onclick: function () { markDialog(r, 'CASUAL'); } }));
+          } else if (!r.leave && base === 'PRESENT') {
+            acts.appendChild(el('button', { class: 'btn-secondary text-xs', 'data-leave': r.user.id, text: 'Half day…', onclick: function () { markDialog(r, 'HALF_DAY'); } }));
+          }
+          if (r.leave && r.leave.marked) acts.appendChild(el('button', { class: 'btn-secondary text-xs', 'data-undo': r.user.id, text: 'Undo', onclick: function () {
+            if (!confirm('Remove "' + r.leave.label + '" for ' + r.user.name + '?')) return;
+            apiSend('DELETE', '/attendance/mark/' + encodeURIComponent(r.leave.id)).then(function () { toast('Removed'); loadDay(); load(); }).catch(function (e) { toast(e.message, true); });
+          } }));
+          if (r.leave && !r.leave.marked && r.leave.status === 'PENDING') acts.appendChild(el('a', { class: 'btn-secondary text-xs', href: '/leaves/', text: 'Open leave' }));
+          tb.appendChild(el('tr', { class: 'table-row', 'data-row': r.user.id }, [
+            el('td', { class: 'px-4 py-2 font-medium whitespace-nowrap', text: r.user.name }),
+            el('td', { class: 'px-4 py-2 text-muted whitespace-nowrap', text: String(r.user.role || '').replace(/_/g, ' ').toLowerCase() + (r.user.department ? ' · ' + r.user.department : '') }),
+            el('td', { class: 'px-4 py-2' }, [el('span', { class: 'badge ' + st[1], text: st[0] + (/PUNCHED/.test(r.state) ? ' (punched in)' : '') })]),
+            el('td', { class: 'px-4 py-2 text-xs text-muted', text: info }),
+            el('td', { class: 'px-4 py-2' }, [acts])]));
+        });
+        list.appendChild(el('table', { class: 'w-full text-sm' }, [el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, ['Employee', 'Role', 'Status', 'Details', ''].map(function (h) { return el('th', { class: 'table-head text-left px-4 py-2 whitespace-nowrap', text: h }); }))]), tb]));
+      }).catch(function (e) { document.getElementById('att-day-counts').textContent = e.message; });
+    }
+
+    function markDialog(r, kind) {
+      document.querySelectorAll('.am-modal').forEach(function (m) { m.remove(); });
+      var card = el('div', { class: 'card p-5', style: 'max-width:440px;width:100%' });
+      var m = el('div', { class: 'am-modal' }, [card]);
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:2147483400;display:flex;align-items:flex-start;justify-content:center;padding:10vh 1rem';
+      m.addEventListener('click', function (e) { if (e.target === m) m.remove(); });
+      var k = el('select', { class: selectCls + ' w-full', id: 'am-kind' }, KINDS.map(function (x) { return el('option', { value: x[0], text: x[1] }); }));
+      k.value = kind;
+      var dt = el('input', { type: 'date', class: selectCls + ' w-full', id: 'am-date', value: dayDate });
+      var days = el('input', { type: 'number', min: '1', max: '60', step: '1', class: selectCls + ' w-full', id: 'am-days', value: '1' });
+      var lop = el('input', { type: 'checkbox', id: 'am-lop' });
+      var reason = el('input', { class: selectCls + ' w-full', id: 'am-reason', placeholder: kind === 'ABSENT' ? 'e.g. Did not come, not informed' : 'e.g. Fever, informed by phone' });
+      var daysRow = el('label', { class: 'block text-xs text-muted mb-2' }, ['Number of days', days]);
+      var lopRow = el('label', { class: 'flex items-center gap-2 text-xs text-muted mb-2' }, [lop, 'Loss of pay']);
+      function sync() { daysRow.style.display = k.value === 'HALF_DAY' ? 'none' : ''; lopRow.style.display = k.value === 'ABSENT' ? 'none' : ''; }
+      k.addEventListener('change', sync); sync();
+      var err = el('div', { class: 'text-xs', style: 'color:#b91c1c;min-height:1rem' });
+      var save = el('button', { class: 'btn-primary', id: 'am-save', text: 'Save' });
+      save.onclick = function () {
+        save.disabled = true; err.textContent = '';
+        apiSend('POST', '/attendance/mark', { userId: r.user.id, date: dt.value, kind: k.value, days: days.value, lop: lop.checked, reason: reason.value.trim() })
+          .then(function (j) { m.remove(); toast(j.message); loadDay(); load(); })
+          .catch(function (e) { err.textContent = e.message; save.disabled = false; });
+      };
+      card.appendChild(el('h3', { class: 'text-base font-semibold mb-3', text: r.user.name }));
+      [el('label', { class: 'block text-xs text-muted mb-2' }, ['Mark as', k]), el('label', { class: 'block text-xs text-muted mb-2' }, ['From date', dt]), daysRow, lopRow,
+       el('label', { class: 'block text-xs text-muted mb-2' }, ['Reason (optional)', reason]), err,
+       el('div', { class: 'flex gap-2 justify-end mt-3' }, [el('button', { class: 'btn-secondary', text: 'Cancel', onclick: function () { m.remove(); } }), save])].forEach(function (x) { card.appendChild(x); });
+      document.body.appendChild(m);
     }
 
     function setMsg(msg) {
