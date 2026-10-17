@@ -43,6 +43,8 @@ class PageAccess
         'accounts'       => ['Accounts', ['/accounts'], ['accounts']],
         'md-desk'        => ['CEO Desk', ['/md-desk'], ['md-desk']],
         'sales-report'   => ['Sales report', ['/sales-report'], ['sales-report']],
+        'internal-meetings' => ['Internal meetings', ['/internal-meetings'], ['internal-meetings']],
+        'mom'            => ['MOM (minutes of meeting)', ['/mom'], ['mom']],
     ];
 
     /** Writes that stay allowed whatever the level (pop-ups being acknowledged, reminders read). */

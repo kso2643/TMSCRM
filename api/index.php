@@ -92,7 +92,8 @@ require __DIR__ . '/controllers/SupplierQuoteController.php';
 require __DIR__ . '/controllers/CatalogController.php';
 require __DIR__ . '/controllers/OptionController.php';
 require __DIR__ . '/controllers/QuoteFollowController.php';
-require __DIR__ . '/controllers/SalesReportController.php';   // sales report by engineer
+require __DIR__ . '/controllers/SalesReportController.php';
+require __DIR__ . '/controllers/MeetingReportController.php';   // internal meeting reports + MOM   // sales report by engineer
 require __DIR__ . '/controllers/ToolingController.php';   // projects / tooled-up / machine accessories
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
@@ -578,6 +579,30 @@ try {
             $method === 'POST'   && $c1 === ''                           => $ctrl->create(),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''             => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'internal-meetings') {
+        $ctrl = new MeetingReportController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                              => $ctrl->imIndex(),
+            $method === 'GET'    && $c1 === 'people'                        => $ctrl->people(),
+            $method === 'POST'   && $c1 === ''                              => $ctrl->imCreate(),
+            $method === 'PUT'    && $c1 !== '' && $c2 === ''                => $ctrl->imUpdate($c1),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === 'actions' && $c3 !== '' => $ctrl->imAction($c1, $c3),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''                => $ctrl->imDelete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'mom') {
+        $ctrl = new MeetingReportController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                  => $ctrl->momIndex(),
+            $method === 'GET'    && $c1 !== '' && $c2 === 'pdf' => $ctrl->momPdf($c1),
+            $method === 'GET'    && $c1 !== '' && $c2 === ''    => $ctrl->momShow($c1),
+            $method === 'POST'   && $c1 === ''                  => $ctrl->momCreate(),
+            $method === 'PUT'    && $c1 !== '' && $c2 === ''    => $ctrl->momUpdate($c1),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''    => $ctrl->momDelete($c1),
             default => sendError('Route not found', 404),
         };
     }

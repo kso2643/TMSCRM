@@ -1,3 +1,25 @@
+# Update — 17 Oct (d): Internal meetings page, MOM page (TMS / APJ letterhead PDF)
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `api/controllers/MeetingReportController.php`, `crm/meeting-notes-app.js`, `crm/internal-meetings/index.html`, `crm/mom/index.html`.
+- **Database:** tables `InternalMeeting` and `Mom` are created automatically.
+- Both pages appear in the sidebar under **Operations**. They are also in **Users → Page access**, so you can hide them or set them to view only per user.
+
+1. **Internal meetings** (team meetings):
+   - **+ New meeting report:** date, time, topic, who attended, **what we discussed** (one point per box) and **next actions**, each with an owner and a due date.
+   - Each report gets a number like **IM-2610-001**.
+   - The action owner ticks the action when it's done. Overdue actions show in red.
+   - **My open actions** lists what is still pending for you.
+   - Everyone sees the reports they wrote, attended or own an action in. Admins see all.
+2. **MOM — minutes of meeting** (customer meetings):
+   - Choose the **TMS** or **APJ** letterhead.
+   - Fill in the customer (search fills the name and address), date, time, venue, subject, attendees on both sides, points discussed, action points (responsibility, target date), next meeting and remarks.
+   - **Save & open PDF** gives the MOM on that company's letterhead. Numbers look like **TMS/MOM/2610/001** or **APJ/MOM/2610/001**.
+   - Engineers see their own MOMs. Admins see all.
+3. **Letterhead address:**
+   - On the MOM page, Admin / Manager can open **✎ Letterheads (address)** and change the company name, address, phone, e-mail and GST for TMS and APJ.
+   - The same letterhead is used on purchase order PDFs.
+
 # Update — 17 Oct (c): HR — father's and spouse's contact numbers
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
