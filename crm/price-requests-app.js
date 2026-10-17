@@ -257,7 +257,7 @@
   function go(tab) { state.tab = tab; history.replaceState(null, '', '#' + tab); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
   /* ── New request ─────────────────────────────────────────────────── */
-  function blankItem() { return { productId: '', itemCode: '', productName: '', category: '', brand: '', supplyType: '', quantity: '', unit: '', requestedPrice: '', existingPrice: '', existingHint: '', priority: 'NORMAL', notes: '', listPrice: null, problems: [] }; }
+  function blankItem() { return { productId: '', itemCode: '', productName: '', category: '', brand: '', supplyType: '', quantity: '', unit: '', requestedPrice: '', existingPrice: '', monthlyVolume: '', existingHint: '', priority: 'NORMAL', notes: '', listPrice: null, problems: [] }; }
   /** The customer's current price for this item (last order / quotation) → fills "Customer's existing price" if empty. */
   function lookupExisting(it, customer, done) {
     if (!customer || !customer.id || !it.itemCode) return;
@@ -430,6 +430,7 @@
         el('div', { class: 'pr-f' }, [el('label', {}, ['Regular / One time ', el('span', { class: 'req', text: '*' })]), seg]),
         field('quantity', 'Quantity', { req: true, type: 'number', ph: '0' }),
         field('unit', 'Unit', { ph: 'PCS' }),
+        field('monthlyVolume', 'Monthly volume', { type: 'number', ph: 'per month' }),
         field('existingPrice', 'Customer\u2019s existing ₹/unit', { type: 'number', ph: '0.00' }),
         field('requestedPrice', 'Target ₹/unit (optional)', { type: 'number', ph: '0.00' }),
         priority,
@@ -462,7 +463,7 @@
           var rows = j.data.items.map(function (x) {
             return { productId: x.productId || '', itemCode: x.itemCode || '', productName: x.productName || '', category: x.category || '', brand: x.brand || '',
               supplyType: x.supplyType === 'REGULAR' || x.supplyType === 'ONE_TIME' ? x.supplyType : '', quantity: x.quantity == null ? '' : x.quantity,
-              unit: x.unit || '', requestedPrice: x.requestedPrice == null ? '' : x.requestedPrice, existingPrice: x.existingPrice == null ? '' : x.existingPrice, priority: x.priority || 'NORMAL',
+              unit: x.unit || '', requestedPrice: x.requestedPrice == null ? '' : x.requestedPrice, existingPrice: x.existingPrice == null ? '' : x.existingPrice, monthlyVolume: x.monthlyVolume == null ? '' : x.monthlyVolume, priority: x.priority || 'NORMAL',
               notes: x.notes || '', listPrice: x.listPrice, problems: (x.problems || []).map(function (p) { return p.replace(/^Row \d+: /, ''); }) };
           });
           var empty = F.items.every(function (i) { return !i.productName.trim() && !i.brand.trim(); });
@@ -510,7 +511,7 @@
         customerId: F.customer.id, notes: F.notes, source: F.source,
         items: F.items.map(function (i) {
           return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, category: i.category, brand: i.brand, supplyType: i.supplyType,
-            quantity: i.quantity, unit: i.unit, requestedPrice: i.requestedPrice, existingPrice: i.existingPrice, priority: i.priority || 'NORMAL', notes: i.notes };
+            quantity: i.quantity, unit: i.unit, requestedPrice: i.requestedPrice, existingPrice: i.existingPrice, monthlyVolume: i.monthlyVolume, priority: i.priority || 'NORMAL', notes: i.notes };
         })
       }).then(function (r) {
         toast(r.message);
@@ -638,8 +639,8 @@
       var editing = state.editing || (state.editing = {});
       var answering = canRespond && (b.counts.PENDING > 0 || b.items.some(function (x) { return editing[x.id]; }));
       var tbl = el('table', { class: 'pr-tbl' });
-      tbl.appendChild(el('thead', {}, [el('tr', {}, ['#', 'Product', 'Category · Brand', 'Type', 'Qty', 'List', 'Existing', 'Asked', 'Priority', 'Answer'].map(function (h, i) {
-        return el('th', { class: i >= 4 && i <= 7 ? 'r' : null, text: h });
+      tbl.appendChild(el('thead', {}, [el('tr', {}, ['#', 'Product', 'Category · Brand', 'Type', 'Qty', 'Monthly vol.', 'List', 'Existing', 'Asked', 'Priority', 'Answer'].map(function (h, i) {
+        return el('th', { class: i >= 4 && i <= 8 ? 'r' : null, text: h });
       }))]));
       var tb = el('tbody');
       b.items.forEach(function (it, i) {
@@ -703,6 +704,7 @@
           el('td', {}, [it.category || '—', el('div', { class: 'pr-meta', text: it.brand || '' })]),
           el('td', { text: TYPES[it.supplyType] || '—' }),
           el('td', { class: 'r', text: (it.quantity != null ? Number(it.quantity).toLocaleString('en-IN') : '—') + (it.unit ? ' ' + it.unit : '') }),
+          el('td', { class: 'r', 'data-monthly': it.id, text: it.monthlyVolume != null ? Number(it.monthlyVolume).toLocaleString('en-IN') + (it.unit ? ' ' + it.unit : '') + '/mo' : '—' }),
           el('td', { class: 'r', text: money(it.listPrice) }),
           el('td', { class: 'r', 'data-existing': it.id, text: money(it.existingPrice) }),
           el('td', { class: 'r', text: money(it.requestedPrice) }),

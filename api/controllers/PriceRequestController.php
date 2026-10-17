@@ -80,6 +80,8 @@ class PriceRequestController
                     'priority'         => 'VARCHAR(10) NULL',
                     // the price the customer pays today (typed, or from their last order / quotation)
                     'existingPrice'    => 'DECIMAL(14,2) NULL',
+                    // how many the customer uses per month (for the admin; not copied to the quotation)
+                    'monthlyVolume'    => 'DECIMAL(14,2) NULL',
                 ],
             ],
             'PriceRequestBatch' => [
@@ -129,6 +131,8 @@ $tail",
             'quantity'       => self::money($r['quantity']),
             'listPrice'      => self::money($r['listPrice']),
             'requestedPrice' => self::money($r['requestedPrice']),
+            'existingPrice'  => self::money($r['existingPrice'] ?? null),
+            'monthlyVolume'  => self::money($r['monthlyVolume'] ?? null),
             'notes'          => $r['notes'],
             'status'         => $r['status'],
             'approvedPrice'  => self::money($r['approvedPrice']),
@@ -369,6 +373,9 @@ $tail",
         $exRaw = str_replace([',', '₹', 'Rs', 'rs', ' '], '', (string) ($it['existingPrice'] ?? ''));
         $existing = null;
         if ($exRaw !== '') { if (!is_numeric($exRaw) || (float) $exRaw < 0) $errs[] = "$label: customer's existing price must be a number"; else $existing = round((float) $exRaw, 2); }
+        $mvRaw = str_replace([',', ' '], '', (string) ($it['monthlyVolume'] ?? ''));
+        $monthly = null;
+        if ($mvRaw !== '') { if (!is_numeric($mvRaw) || (float) $mvRaw < 0) $errs[] = "$label: monthly volume must be a number"; else $monthly = round((float) $mvRaw, 2); }
         // Priority (engineers no longer give discount, lead time or delivery date — the admin does)
         $prio = self::priority($it['priority'] ?? '');
         if ($prio === false) $errs[] = "$label: priority must be Urgent, High, Normal or Low";
@@ -377,7 +384,7 @@ $tail",
             'category' => mb_substr($category, 0, 120) ?: null, 'brand' => mb_substr($brand, 0, 120) ?: null, 'supplyType' => $type,
             'quantity' => $qty, 'unit' => mb_substr(trim((string) ($it['unit'] ?? '')) ?: ($product['unit'] ?? ''), 0, 20) ?: null,
             'listPrice' => isset($product['standardPrice']) && $product['standardPrice'] !== null ? (float) $product['standardPrice'] : null,
-            'requestedPrice' => $price, 'existingPrice' => $existing, 'discount' => null, 'notes' => trim((string) ($it['notes'] ?? '')) ?: null,
+            'requestedPrice' => $price, 'existingPrice' => $existing, 'monthlyVolume' => $monthly, 'discount' => null, 'notes' => trim((string) ($it['notes'] ?? '')) ?: null,
             'leadTime' => null, 'expectedDelivery' => null, 'priority' => $prio ?: 'NORMAL',
         ], $errs];
     }
@@ -461,12 +468,12 @@ $tail",
             $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, createdAt) VALUES (?,?,?,?,?,?,?)')
                 ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', now_sql()]);
             $ins = $pdo->prepare('INSERT INTO `PriceRequest` (id,requestedById,customerId,productId,itemCode,productName,quantity,listPrice,requestedPrice,notes,status,
-                                  batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt,priority,existingPrice)
-                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                                  batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt,priority,existingPrice,monthlyVolume)
+                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
             foreach ($clean as $pos => $ci) {
                 $ins->execute([gen_id(), $auth['id'], $customerId, $ci['productId'], $ci['itemCode'], $ci['productName'], $ci['quantity'], $ci['listPrice'],
                     $ci['requestedPrice'], $ci['notes'], $bid, $ci['category'], $ci['brand'], $ci['supplyType'], $ci['unit'], $ci['discount'],
-                    $ci['leadTime'], $ci['expectedDelivery'], $pos + 1, now_sql(), now_sql(), $ci['priority'], $ci['existingPrice'] ?? null]);
+                    $ci['leadTime'], $ci['expectedDelivery'], $pos + 1, now_sql(), now_sql(), $ci['priority'], $ci['existingPrice'] ?? null, $ci['monthlyVolume'] ?? null]);
             }
             $pdo->commit();
         } catch (Throwable $e) {
@@ -613,7 +620,7 @@ $tail",
         sendSuccess([], 'Price request withdrawn');
     }
 
-    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Target Price (Rs)', 'Priority (Urgent / High / Normal / Low)', 'Note'];
+    private const TEMPLATE_COLS = ['Item Code', 'Product Name *', 'Category *', 'Brand *', 'Regular / One time *', 'Quantity *', 'Unit', 'Monthly Volume', 'Target Price (Rs)', 'Priority (Urgent / High / Normal / Low)', 'Note'];
 
     // GET /api/price-requests/template
     public function template(): void
@@ -621,10 +628,10 @@ $tail",
         authenticate();
         $wb = new StyledXlsxWriter();
         $sh = $wb->addSheet('Price request items');
-        $wb->setWidths($sh, [16, 34, 18, 16, 18, 10, 8, 16, 18, 36]);
+        $wb->setWidths($sh, [16, 34, 18, 16, 18, 10, 8, 14, 16, 18, 36]);
         $wb->addRow($sh, self::TEMPLATE_COLS, 'header', 32);
-        $wb->addRow($sh, ['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Inserts', 'YG-1', 'Regular', 100, 'PCS', 245, 'High', 'Customer currently buys from competitor at Rs 230']);
-        $wb->addRow($sh, ['', 'Special step drill D8.5 x 120', 'Drills', 'YG-1', 'One time', 5, 'PCS', 2850, 'Normal', 'Drawing attached by mail']);
+        $wb->addRow($sh, ['CNMG120408-MF', 'CNMG 120408-MF Turning Insert', 'Inserts', 'YG-1', 'Regular', 100, 'PCS', 300, 245, 'High', 'Customer currently buys from competitor at Rs 230']);
+        $wb->addRow($sh, ['', 'Special step drill D8.5 x 120', 'Drills', 'YG-1', 'One time', 5, 'PCS', '', 2850, 'Normal', 'Drawing attached by mail']);
         $wb->freeze($sh, 1);
         $ls = $wb->addSheet('Lists');
         $cats = [];
@@ -664,7 +671,7 @@ $tail",
         $hIdx = null;
         foreach (array_slice($rows, 0, 10, true) as $i => $r) { if (preg_match('/product/i', implode('|', $r)) && preg_match('/brand/i', implode('|', $r))) { $hIdx = $i; break; } }
         if ($hIdx === null) sendError('Could not find the heading row (Product Name, Brand …). Use the template from "Download template".', 400);
-        $alias = ['itemCode' => '/item\s*code|^code|edp/i', 'productName' => '/product|description/i', 'category' => '/categor/i', 'brand' => '/brand|make/i',
+        $alias = ['monthlyVolume' => '/monthly|volume|per\s*month/i', 'itemCode' => '/item\s*code|^code|edp/i', 'productName' => '/product|description/i', 'category' => '/categor/i', 'brand' => '/brand|make/i',
                   'supplyType' => '/regular|one\s*time|single|type/i', 'quantity' => '/qty|quantity/i', 'unit' => '/^unit|uom/i',
                   'priority' => '/priority|urgen/i', 'requestedPrice' => '/price|rate/i', 'notes' => '/note|remark/i'];
         $map = [];

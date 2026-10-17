@@ -1,3 +1,17 @@
+# Update — 17 Oct (b): New trial when a trial is on hold, monthly volume on price requests
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **Database:** column `PriceRequest.monthlyVolume` is added automatically.
+
+1. **Trials — new trial request by progress:**
+   - An approved trial set to **Trial postponed** or **Other reason** no longer blocks the engineer. The **+ New trial request** button turns on, and the trial's row shows a **+ New trial request** button too.
+   - **Trial running** and **Trial completed → report** still block. A trial marked completed needs its savings report first, as before.
+2. **Price requests — monthly volume:**
+   - New **Monthly volume** field on each item and a separate **Monthly vol.** column in the request table.
+   - The Excel template has a **Monthly Volume** column, and the upload reads it.
+   - It is only for the admin and is **not** copied into the quotation.
+   - Fix: the **Existing** price column now shows the price the engineer entered (it showed "—" before).
+
 # Update — 17 Oct (a): PO PDF reading, existing price, fuel bills, trial progress, app sound, CEO Desk numbers, visit check
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

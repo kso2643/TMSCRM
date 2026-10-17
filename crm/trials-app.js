@@ -322,7 +322,10 @@
         reload();
       }).catch(function (e) { alert(e.message); sel.value = x.progress === 'REPORT_DUE' ? 'COMPLETED' : (x.progress || ''); });
     });
-    return el('div', {}, [sel, label]);
+    // A postponed / stopped trial no longer holds up the next one.
+    var again = (x.progress === 'POSTPONED' || x.progress === 'OTHER') && x.requestedBy && x.requestedBy.id === me.id
+      ? el('button', { class: 'btn-secondary btn-sm', style: 'margin-top:.3rem', 'data-new-from': x.id, text: '+ New trial request', onclick: function (e) { e.stopPropagation(); go('/new'); } }) : null;
+    return el('div', {}, [sel, label, again]);
   }
   /** Navigates to hash, re-rendering even when it is already the current one. */
   function show(hash) { if (location.hash.replace(/^#/, '') === hash) route(); else go(hash); }
@@ -385,7 +388,7 @@
         // One trial at a time: the next one opens after the savings report of the last.
         newBtn.disabled = !!o; newBtn.title = o ? 'Finish ' + o.trialNo + ' first' : '';
         openBanner.style.display = o ? '' : 'none';
-        if (o) openBanner.textContent = 'You can raise a new trial after ' + o.trialNo + ' is completed — ' + (o.status === 'PENDING_APPROVAL' ? 'it is waiting for approval.' : 'submit its savings report (step 4, Trial comparison).');
+        if (o) openBanner.textContent = 'You can raise a new trial after ' + o.trialNo + ' is completed — ' + (o.status === 'PENDING_APPROVAL' ? 'it is waiting for approval.' : (o.progress === 'REPORT_DUE' ? 'submit its savings report (step 4, Trial comparison).' : 'submit its savings report (step 4), or set its trial progress to Postponed / Other reason.'));
         render(r.data.trials || [], r.data.counts || {});
       })
         .catch(function (e) { body.innerHTML = ''; body.appendChild(errorCard(e.message, load)); });
