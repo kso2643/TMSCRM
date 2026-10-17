@@ -1,3 +1,11 @@
+# Update — 17 Oct (c): HR — father's and spouse's contact numbers
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **Database:** columns `User.fatherPhone` and `User.spousePhone` are added automatically.
+
+1. **HR page:** the employee profile's **Personal** section has two new fields, **Father's contact number** and **Spouse's contact number**. Fill them in with **Edit**, then **Save**.
+2. **Fix (server):** the automatic database update now adds every new column, even when two parts of the CRM add columns to the same table in one request. Before this, a column could be skipped.
+
 # Update — 17 Oct (b): New trial when a trial is on hold, monthly volume on price requests
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

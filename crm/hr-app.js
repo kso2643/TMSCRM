@@ -41,6 +41,8 @@
       ['maritalStatus', 'Marital status', 'text', ['Single', 'Married', 'Other']],
       ['bloodGroup', 'Blood group', 'text', ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']],
       ['fatherName', "Father's name", 'text'],
+      ['fatherPhone', "Father's contact number", 'text'],
+      ['spousePhone', "Spouse's contact number", 'text'],
       ['personalEmail', 'Personal email', 'text']
     ]},
     { title: 'Emergency contact', fields: [

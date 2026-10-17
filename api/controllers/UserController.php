@@ -8,7 +8,7 @@ class UserController
         employeeCode,designation,dateOfBirth,dateOfJoining,dateOfLeaving,gender,maritalStatus,bloodGroup,
         personalEmail,currentAddress,emergencyContactName,emergencyContactPhone,panNumber,aadharNumber,
         bankAccountName,bankAccountNumber,bankIFSC,bankName,uanNumber,pfNumber,esiNumber,employmentType,
-        fatherName,
+        fatherName,fatherPhone,spousePhone,
         permanentAddress,permanentCity,permanentDistrict,permanentState,permanentPincode,
         presentAddress,presentCity,presentDistrict,presentState,presentPincode,presentAddressSameAsPermanent,
         bankBranchName,upiId,
@@ -19,7 +19,7 @@ class UserController
         'employeeCode','designation','gender','maritalStatus','bloodGroup','personalEmail','currentAddress',
         'emergencyContactName','emergencyContactPhone','panNumber','aadharNumber',
         'bankAccountName','bankAccountNumber','bankIFSC','bankName','uanNumber','pfNumber','esiNumber','employmentType',
-        'fatherName',
+        'fatherName','fatherPhone','spousePhone',
         'permanentAddress','permanentCity','permanentDistrict','permanentState','permanentPincode',
         'presentAddress','presentCity','presentDistrict','presentState','presentPincode',
         'bankBranchName','upiId',
@@ -32,7 +32,11 @@ class UserController
     /** deletedAt: a removed user (has records, so not deleted outright) is hidden from the list. */
     private static function ensure(): void
     {
-        ensure_schema(['User' => ['create' => '', 'columns' => ['deletedAt' => 'DATETIME NULL']]], 'User removal');
+        ensure_schema(['User' => ['create' => '', 'columns' => [
+            'deletedAt'   => 'DATETIME NULL',
+            'fatherPhone' => 'VARCHAR(30) NULL',
+            'spousePhone' => 'VARCHAR(30) NULL',
+        ]]], 'User removal / family contacts');
     }
 
     /** Only the Super Admin may change, remove or create a Super Admin. */
@@ -45,13 +49,14 @@ class UserController
 
     private function fetchSafe(string $id): ?array
     {
+        self::ensure();
         $stmt = db()->prepare(
             'SELECT id,name,email,role,phone,department,avatar,isActive,isLocked,
                     twoFactorEnabled,lastLoginAt,sessionTimeout,
                     employeeCode,designation,dateOfBirth,dateOfJoining,dateOfLeaving,gender,maritalStatus,bloodGroup,
                     personalEmail,currentAddress,emergencyContactName,emergencyContactPhone,panNumber,aadharNumber,
                     bankAccountName,bankAccountNumber,bankIFSC,bankName,uanNumber,pfNumber,esiNumber,employmentType,
-                    fatherName,
+                    fatherName,fatherPhone,spousePhone,
                     permanentAddress,permanentCity,permanentDistrict,permanentState,permanentPincode,
                     presentAddress,presentCity,presentDistrict,presentState,presentPincode,presentAddressSameAsPermanent,
                     bankBranchName,upiId,
@@ -152,13 +157,13 @@ class UserController
               employeeCode,designation,dateOfBirth,dateOfJoining,dateOfLeaving,gender,maritalStatus,bloodGroup,
               personalEmail,currentAddress,emergencyContactName,emergencyContactPhone,panNumber,aadharNumber,
               bankAccountName,bankAccountNumber,bankIFSC,bankName,uanNumber,pfNumber,esiNumber,employmentType,
-              fatherName,
+              fatherName,fatherPhone,spousePhone,
               permanentAddress,permanentCity,permanentDistrict,permanentState,permanentPincode,
               presentAddress,presentCity,presentDistrict,presentState,presentPincode,presentAddressSameAsPermanent,
               bankBranchName,upiId,
               createdAt,updatedAt)
              VALUES (?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?,?,?,?,
-                     ?, ?,?,?,?,?, ?,?,?,?,?,?, ?,?, ?,?)'
+                     ?,?,?, ?,?,?,?,?, ?,?,?,?,?,?, ?,?, ?,?)'
         )->execute([
             $id, $name, $email, $hash, $role, $phone ?: null, $dept ?: null, $timeout,
             $hr['employeeCode'], $hr['designation'], $hr['dateOfBirth'], $hr['dateOfJoining'], $hr['dateOfLeaving'],
@@ -167,7 +172,7 @@ class UserController
             $hr['panNumber'], $hr['aadharNumber'],
             $hr['bankAccountName'], $hr['bankAccountNumber'], $hr['bankIFSC'], $hr['bankName'],
             $hr['uanNumber'], $hr['pfNumber'], $hr['esiNumber'], $hr['employmentType'],
-            $hr['fatherName'],
+            $hr['fatherName'], $hr['fatherPhone'], $hr['spousePhone'],
             $hr['permanentAddress'], $hr['permanentCity'], $hr['permanentDistrict'], $hr['permanentState'], $hr['permanentPincode'],
             $hr['presentAddress'], $hr['presentCity'], $hr['presentDistrict'], $hr['presentState'], $hr['presentPincode'],
             $hr['presentAddressSameAsPermanent'] ? 1 : 0,
@@ -182,6 +187,7 @@ class UserController
     /** Normalizes HR-profile fields from a request body. Every key is always present (null when absent/blank) so create() can bind positionally. */
     private function hrFieldsFromBody(array $body): array
     {
+        self::ensure();
         $out = [];
         foreach (self::HR_FIELDS as $f) {
             $val = array_key_exists($f, $body) ? trim((string)($body[$f] ?? '')) : '';

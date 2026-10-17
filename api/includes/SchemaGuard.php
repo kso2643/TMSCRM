@@ -80,7 +80,8 @@ function schema_with_collation(string $sql, ?array $ref): string
 function ensure_schema(array $tables, string $migrationHint): void
 {
     static $done = [];
-    $key = implode(',', array_keys($tables));
+    // Keyed on the full spec: two calls may add different columns to the same table.
+    $key = md5(json_encode($tables));
     if (isset($done[$key])) return;
 
     $names = array_keys($tables);
