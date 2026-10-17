@@ -292,6 +292,38 @@
     route();
   }
   function go(hash) { location.hash = hash; }
+
+  /* Trial progress for an approved trial: Running / Postponed to (date) / Completed → trial report / Other (reason). */
+  var PROG = { RUNNING: ['Running', 'badge-blue'], POSTPONED: ['Postponed', 'badge-yellow'], REPORT_DUE: ['Done — report due', 'badge-yellow'], OTHER: ['Other', 'badge-gray'], COMPLETED: ['Completed · report in', 'badge-green'] };
+  function progressText(x) {
+    if (!x.progress) return '';
+    var t = PROG[x.progress] ? PROG[x.progress][0] : x.progress;
+    if (x.progress === 'POSTPONED' && x.progressDate) t += ' to ' + fmtDate(x.progressDate);
+    if (x.progress === 'OTHER' && x.progressReason) t += ': ' + x.progressReason;
+    return t;
+  }
+  function progressCell(x, reload) {
+    if (x.status === 'COMPLETED') return el('span', { class: 'badge badge-green', text: PROG.COMPLETED[0] });
+    if (x.status !== 'APPROVED') return el('span', { class: 'text-xs text-muted', text: '—' });
+    var me = currentUser() || {}, can = canManage() || (x.requestedBy && x.requestedBy.id === me.id);
+    var label = x.progress ? el('div', { class: 'text-xs ' + (x.progress === 'REPORT_DUE' ? 'text-amber-700 font-semibold' : 'text-muted'), style: 'max-width:220px', 'data-progress-text': x.id, text: progressText(x) }) : null;
+    if (!can) return el('div', {}, [x.progress ? el('span', { class: 'badge ' + PROG[x.progress][1], text: PROG[x.progress][0] }) : el('span', { class: 'text-xs text-muted', text: 'Not updated' }), label]);
+    var sel = el('select', { class: INPUT + ' text-xs', 'data-progress': x.id, style: 'min-width:150px;padding:.25rem .4rem' }, [
+      el('option', { value: '', text: 'Set trial status…' }), el('option', { value: 'RUNNING', text: 'Trial running' }), el('option', { value: 'POSTPONED', text: 'Trial postponed to…' }),
+      el('option', { value: 'COMPLETED', text: 'Trial completed → report' }), el('option', { value: 'OTHER', text: 'Other reason…' })]);
+    sel.value = x.progress === 'REPORT_DUE' ? 'COMPLETED' : (x.progress || '');
+    sel.addEventListener('change', function () {
+      var v = sel.value, body = { progress: v };
+      if (!v) return;
+      if (v === 'POSTPONED') { var d = prompt('Postponed to which date? (DD-MM-YYYY)', ''); if (!d) { sel.value = x.progress || ''; return; } body.date = d.trim().split(/[-\/.]/).reverse().join('-'); body.reason = prompt('Reason for postponing (optional):', '') || ''; }
+      if (v === 'OTHER') { var r = prompt('What is the reason?', x.progressReason || ''); if (!r || !r.trim()) { sel.value = x.progress || ''; return; } body.reason = r.trim(); }
+      api('PATCH', '/trials/' + encodeURIComponent(x.id) + '/progress', body).then(function (j) {
+        if (v === 'COMPLETED') { alert(j.message + '.\nOpening the trial — fill the trial comparison / savings report (step 4).'); go('/t/' + encodeURIComponent(x.id)); return; }
+        reload();
+      }).catch(function (e) { alert(e.message); sel.value = x.progress === 'REPORT_DUE' ? 'COMPLETED' : (x.progress || ''); });
+    });
+    return el('div', {}, [sel, label]);
+  }
   /** Navigates to hash, re-rendering even when it is already the current one. */
   function show(hash) { if (location.hash.replace(/^#/, '') === hash) route(); else go(hash); }
   function route() {
@@ -376,7 +408,7 @@
           ? 'No trials yet — use “+ New trial request” to raise one.' : 'No trials in this view.' }));
         return;
       }
-      var heads = ['Trial no.', 'Customer', 'Component', 'Requested by', 'Status', 'Recommendation', 'Saving / year', 'Raised', 'PDF'];
+      var heads = ['Trial no.', 'Customer', 'Component', 'Requested by', 'Status', 'Trial progress', 'Recommendation', 'Saving / year', 'Raised', 'PDF'];
       var tbody = el('tbody');
       trials.forEach(function (x) {
         var recs = x.recommendations || [];
@@ -388,6 +420,7 @@
           el('td', { class: 'px-3 py-3 trl-nowrap', text: (x.requestedBy && x.requestedBy.name) || '—' }),
           el('td', { class: 'px-3 py-3' }, [el('span', { class: 'badge ' + STATUS[x.status].badge, text: STATUS[x.status].label }),
             x.status === 'APPROVED' ? el('div', { class: 'text-xs ' + (x.dc ? 'text-green-700' : 'text-amber-700'), text: x.dc ? 'DC ✓ trial ' + fmtDate(x.dc.date) : 'DC approval pending' }) : null]),
+          el('td', { class: 'px-3 py-3', onclick: function (e) { e.stopPropagation(); } }, [progressCell(x, load)]),
           el('td', { class: 'px-3 py-3 text-sm', text: recs.length ? recText(recs[0]) + (recs.length > 1 ? '  +' + (recs.length - 1) + ' more' : '') : '—' }),
           el('td', { class: 'px-3 py-3 trl-nowrap font-medium', text: x.savingsPerYear !== null ? money(x.savingsPerYear) + (x.savingsPct !== null ? ' (' + Math.round(x.savingsPct) + '%)' : '') : '—' }),
           el('td', { class: 'px-3 py-3 trl-nowrap text-muted', text: fmtDate(x.createdAt) }),

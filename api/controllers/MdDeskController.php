@@ -61,7 +61,9 @@ class MdDeskController
   `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `updatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `MdDeskItem_to_idx` (`toId`), KEY `MdDeskItem_from_idx` (`fromId`), KEY `MdDeskItem_created_idx` (`createdAt`)
 $tail", 'columns' => ['toGroup' => "VARCHAR(10) NOT NULL DEFAULT 'ADMINS'", 'items' => 'MEDIUMTEXT NULL', 'customerId' => 'VARCHAR(30) NULL', 'batchId' => 'VARCHAR(30) NULL',
-                'assignees' => 'MEDIUMTEXT NULL', 'reportTo' => 'MEDIUMTEXT NULL']],
+                'assignees' => 'MEDIUMTEXT NULL', 'reportTo' => 'MEDIUMTEXT NULL',
+                // CEO-yymm-nnnn — typed on the Quotations page to load the customer and items
+                'deskNo' => 'VARCHAR(20) NULL']],
             'MdDeskFile' => ['create' => "CREATE TABLE IF NOT EXISTS `MdDeskFile` (
   `id` VARCHAR(30) NOT NULL, `itemId` VARCHAR(30) NOT NULL, `fileName` VARCHAR(255) NOT NULL, `storedName` VARCHAR(80) NOT NULL,
   `size` INT NOT NULL DEFAULT 0, `uploadedById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -82,6 +84,44 @@ $tail"],
     public function __construct()
     {
         ensure_schema(self::schema(), 'MD desk');
+        // number older items once
+        try {
+            $old = db()->query('SELECT id, createdAt FROM `MdDeskItem` WHERE deskNo IS NULL ORDER BY createdAt LIMIT 500')->fetchAll();
+            foreach ($old as $o) db()->prepare('UPDATE `MdDeskItem` SET deskNo=? WHERE id=?')->execute([self::nextNo($o['createdAt']), $o['id']]);
+        } catch (Throwable $e) {}
+    }
+
+    /** Next CEO-yymm-nnnn number (month of $when). */
+    private static function nextNo(?string $when = null): string
+    {
+        $pre = 'CEO-' . date('ym', $when ? strtotime($when) : time()) . '-';
+        $s = db()->prepare('SELECT MAX(deskNo) FROM `MdDeskItem` WHERE deskNo LIKE ?'); $s->execute([$pre . '%']);
+        $last = (string) $s->fetchColumn();
+        $n = $last !== '' ? (int) substr($last, strlen($pre)) + 1 : 1;
+        return $pre . str_pad((string) $n, 4, '0', STR_PAD_LEFT);
+    }
+
+    // GET /api/md-desk/by-no/:no — for the Quotations page: customer + item lines of a CEO Desk item
+    public function byNumber(string $no): void
+    {
+        $auth = self::auth();
+        $no = strtoupper(trim($no));
+        [$w, $p] = self::visible($auth);
+        $s = db()->prepare("SELECT i.* FROM `MdDeskItem` i WHERE i.deskNo=? AND $w LIMIT 1");
+        $s->execute(array_merge([$no], $p));
+        $r = $s->fetch();
+        if (!$r) sendError("No CEO Desk item $no (or it was not sent to you).", 404);
+        $r = self::shape($r);
+        $cust = null;
+        if ($r['customerId']) { $c = db()->prepare('SELECT id, companyName, address, location, contactPerson FROM `Customer` WHERE id=?'); $c->execute([$r['customerId']]); $cust = $c->fetch() ?: null; }
+        if (!$cust && $r['customerName']) {
+            $c = db()->prepare('SELECT id, companyName, address, location, contactPerson FROM `Customer` WHERE companyName=? LIMIT 1'); $c->execute([$r['customerName']]); $cust = $c->fetch() ?: null;
+        }
+        $lines = $r['items'] ?: ($r['itemCode'] || $r['productName'] ? [['itemCode' => $r['itemCode'], 'productName' => $r['productName'], 'quantity' => null, 'price' => $r['price'], 'discount' => $r['discount']]] : []);
+        $items = array_map(fn($l) => ['itemCode' => $l['itemCode'] ?? '', 'productName' => $l['productName'] ?? '', 'brand' => $l['supplier'] ?? '', 'quantity' => $l['quantity'] ?? null,
+            'approvedPrice' => $l['price'] ?? null, 'approvedDiscount' => $l['discount'] ?? 0, 'leadTime' => $l['leadTime'] ?? ''], $lines);
+        sendSuccess(['deskNo' => $r['deskNo'], 'title' => $r['title'], 'type' => $r['type'], 'quotationNo' => $r['quotationNo'],
+            'customer' => $cust ?: ($r['customerName'] ? ['id' => null, 'companyName' => $r['customerName']] : null), 'items' => $items, 'pending' => 0, 'rejected' => 0]);
     }
 
     private static function auth(): array
@@ -328,6 +368,7 @@ $tail"],
         if ($disc !== null && ($disc < 0 || $disc > 100)) sendError('Discount must be between 0 and 100 %.', 400);
         $lines = in_array($type, ['PRICE', 'QUOTATION'], true) ? self::itemLines($b['items'] ?? []) : [];
         $custId = trim((string) ($b['customerId'] ?? '')) ?: null;
+        $deskNo = self::nextNo();
 
         if ($type === 'PRICE') {
             // "Get price": a task to get the price from the supplier — price filled in later by the assignee
@@ -339,8 +380,7 @@ $tail"],
             if ($title === '') $title = 'Get price · ' . (count($lines) > 1 ? count($lines) . ' items' : ($code ?: $prod)) . ($cust !== '' ? ' · ' . $cust : '');
         } elseif ($type === 'QUOTATION') {
             if ($cust === '') sendError('Enter the customer the quotation was given to.', 400);
-            if ($qno === '') sendError('Enter the quotation number.', 400);
-            if ($title === '') $title = 'New quotation ' . $qno . ' · ' . $cust;
+            if ($title === '') $title = 'New quotation ' . ($qno !== '' ? $qno : $deskNo) . ' · ' . $cust;
         } elseif ($type === 'TASK') {
             if ($title === '') sendError('Write the task.', 400);
         } else {
@@ -355,12 +395,12 @@ $tail"],
         // several people = one shared item (assignees); one person = toId; nobody = a group
         $shared = count($toIds) > 1;
         $reportTo = array_values(array_diff($reportTo, $toIds));
-        $ins = db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,customerId,itemCode,productName,price,discount,quotationId,quotationNo,amount,items,fromId,toId,toGroup,assignees,reportTo,status,createdAt,updatedAt)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?)');
+        $ins = db()->prepare('INSERT INTO `MdDeskItem` (id,type,title,details,priority,dueDate,customerName,customerId,itemCode,productName,price,discount,quotationId,quotationNo,amount,items,fromId,toId,toGroup,assignees,reportTo,status,createdAt,updatedAt,deskNo)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'OPEN\',?,?,?)');
         $ins->execute([$id, $type, mb_substr($title, 0, 255), $details ?: null, $prio, in_array($type, ['TASK', 'PRICE'], true) ? $due : null, $cust ?: null, $custId, $code ?: null, $prod ?: null,
             $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $lines ? json_encode($lines, JSON_UNESCAPED_UNICODE) : null,
             $auth['id'], $shared ? null : ($toIds[0] ?? null), $shared ? 'PEOPLE' : ($toIds ? 'ADMINS' : $group),
-            $shared ? json_encode($toIds) : null, $reportTo ? json_encode($reportTo) : null, $now, $now]);
+            $shared ? json_encode($toIds) : null, $reportTo ? json_encode($reportTo) : null, $now, $now, $deskNo]);
         log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $id, ['type' => $type, 'title' => $title, 'to' => count($toIds), 'reportTo' => count($reportTo)]);
         sendSuccess(['item' => self::load($auth, $id), 'count' => max(1, count($toIds))], $shared ? 'Sent to ' . count($toIds) . ' people (one shared task)' : 'Sent', 201);
     }
@@ -438,7 +478,7 @@ $tail"],
         db()->prepare('UPDATE `MdDeskItem` SET items=?, itemCode=?, productName=?, price=?, discount=?, updatedAt=? WHERE id=?')
             ->execute([json_encode($lines, JSON_UNESCAPED_UNICODE), $f['itemCode'] ?: null, $f['productName'] ?: null, $f['price'], $f['discount'], $now, $id]);
         $priced = count(array_filter($lines, fn($l) => $l['price'] !== null));
-        $note = '💰 Prices updated: ' . $priced . ' of ' . count($lines) . ' item' . (count($lines) === 1 ? '' : 's') . ' priced' .
+        $note = ($item['type'] === 'QUOTATION' ? '✎ Items updated: ' : '💰 Prices updated: ') . $priced . ' of ' . count($lines) . ' item' . (count($lines) === 1 ? '' : 's') . ' priced' .
             implode('', array_map(fn($l) => "\n• " . ($l['itemCode'] ?: $l['productName']) . ($l['supplier'] ? ' · ' . $l['supplier'] : '') .
                 ($l['price'] !== null ? ' · ₹' . number_format($l['price'], 2) . ($l['discount'] ? ' less ' . rtrim(rtrim(number_format($l['discount'], 2), '0'), '.') . '%' : '') : ' · (no price yet)') .
                 ($l['leadTime'] ? ' · ' . $l['leadTime'] : ''), $lines));

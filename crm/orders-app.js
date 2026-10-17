@@ -781,6 +781,7 @@
       ]));
     }
     if (o.notes) facts.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted block', text: 'Notes' }), el('span', { class: 'whitespace-pre-wrap', text: o.notes })]));
+    if (o.poNumber) facts.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted block', text: 'Customer PO no.' }), el('span', { class: 'font-semibold', text: o.poNumber })]));
     if (o.orderValue != null) facts.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted block', text: 'Order value' }), el('span', { class: 'font-semibold', text: '₹' + Number(o.orderValue).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })]));
     if (o.deliveredDate && o.deliveryStatus !== 'PENDING') {
       facts.appendChild(el('p', { class: 'text-xs text-muted', text: 'Last supplied ' + fmtDate(o.deliveredDate) }));
@@ -872,7 +873,7 @@
           qty[i.id] = Math.round(v * 100) / 100; render();
         });
 
-        var metaBits = [i.category, i.brand].filter(Boolean).join(' · ');
+        var metaBits = [i.category, i.brand, i.unitPrice != null ? '@ ₹' + Number(i.unitPrice).toLocaleString('en-IN') : ''].filter(Boolean).join(' · ');
         var procLabel = labelOf(PROCUREMENT_STATUSES, i.procurementStatus);
         var procLine = procLabel + (i.expectedDeliveryDate ? ' · arriving ' + fmtDate(i.expectedDeliveryDate) : '');
 
@@ -1055,9 +1056,11 @@
         orderDate: order ? order.orderDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
         notes: order ? order.notes || '' : '',
         orderValue: order && order.orderValue != null ? order.orderValue : '',
+        poNumber: order ? order.poNumber || '' : '',
+        poInfo: null, poReading: false, valueTyped: !!(order && order.orderValue != null),
         engineerId: order ? order.engineer.id : (currentUser() && currentUser().id),
         items: order && order.items ? order.items.map(function (i) {
-          return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, unit: i.unit, category: i.category, brand: i.brand, quantity: i.quantity, stock: i.stock === undefined ? undefined : i.stock };
+          return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, unit: i.unit, category: i.category, brand: i.brand, quantity: i.quantity, unitPrice: i.unitPrice, stock: i.stock === undefined ? undefined : i.stock };
         }) : [],
         file: null
       };
@@ -1271,14 +1274,19 @@
         if (state.orderType === 'PO') {
           var fileLabel = state.file ? state.file.name : (order && order.poDocument ? order.poDocument.originalName + ' (current)' : 'No file chosen');
           var fileInput = el('input', { type: 'file', accept: '.pdf,.jpg,.jpeg,.png', class: 'hidden' });
-          fileInput.addEventListener('change', function () { state.file = fileInput.files[0] || null; render(); });
+          fileInput.addEventListener('change', function () { state.file = fileInput.files[0] || null; render(); if (state.file) readPO(state.file); });
+          var poNoI = el('input', { class: INPUT, id: 'ox-po-number', placeholder: 'Customer PO number', value: state.poNumber || '' });
+          poNoI.addEventListener('input', function () { state.poNumber = poNoI.value; });
           wrap.appendChild(el('div', {}, [
-            el('span', { class: 'text-xs text-muted', text: 'Purchase order document' }),
+            el('span', { class: 'text-xs text-muted', text: 'Purchase order document — a PDF PO is read automatically (items, quantities, prices, total, customer)' }),
             el('div', { class: 'mt-1 flex items-center gap-2' }, [
-              el('button', { class: 'btn-secondary', text: 'Choose file', onclick: function () { fileInput.click(); } }),
+              el('button', { class: 'btn-secondary', id: 'ox-po-choose', text: 'Choose file', onclick: function () { fileInput.click(); } }),
               el('span', { class: 'text-xs text-muted truncate', text: fileLabel }),
+              state.file && /\.pdf$/i.test(state.file.name) && !state.poReading ? el('button', { class: 'text-xs text-primary font-medium', text: '↻ Read again', onclick: function () { readPO(state.file); } }) : null,
               fileInput
-            ])
+            ]),
+            el('div', { class: 'mt-2' }, [poNoI]),
+            poBanner()
           ]));
         } else {
           var ta2 = el('textarea', { class: INPUT, rows: '2', placeholder: 'What was agreed on the call / in person?' });
@@ -1327,10 +1335,52 @@
         // Order value (optional) — counts in the Sales report by engineer
         var valI = el('input', { class: INPUT, id: 'ox-order-value', type: 'number', min: '0', step: '0.01', inputmode: 'decimal', placeholder: 'Optional — e.g. 125000' });
         valI.value = state.orderValue == null ? '' : state.orderValue;
-        valI.addEventListener('input', function () { state.orderValue = valI.value; });
+        valI.addEventListener('input', function () { state.orderValue = valI.value; state.valueTyped = valI.value !== ''; });
         wrap.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Order value (₹, before tax)' }), el('div', { class: 'mt-1' }, [valI])]));
 
         return wrap;
+      }
+
+      /* Read a PDF purchase order: items, quantities, prices, PO no., total and the customer. */
+      function readPO(file) {
+        if (!window.POExtract || !/\.pdf$/i.test(file.name || '')) { state.poInfo = { notPdf: true }; render(); return; }
+        state.poReading = true; state.poInfo = null; render();
+        POExtract.fromFile(file).then(function (r) {
+          if (!r.ok) { state.poReading = false; state.poInfo = { scanned: r.scanned, none: !r.scanned, total: r.total }; render(); return; }
+          var codes = r.items.map(function (x) { return x.itemCode; }).filter(Boolean);
+          return api('POST', '/orders/po-match', { text: r.text.slice(0, 150000), codes: codes }).catch(function () { return { data: { customer: null, products: {} } }; }).then(function (m) {
+            var prods = (m.data && m.data.products) || {}, cust = m.data && m.data.customer;
+            var lines = r.items.map(function (x) {
+              var p = x.itemCode ? prods[String(x.itemCode).toUpperCase()] : null;
+              return p ? { productId: p.id, itemCode: p.itemCode, productName: p.productName, unit: p.unit || x.unit || null, category: p.category || null, brand: p.brand || null, quantity: x.quantity, unitPrice: x.unitPrice, fromPO: true }
+                       : { productId: null, itemCode: x.itemCode || 'MANUAL', productName: x.description || x.itemCode, unit: x.unit || null, category: null, brand: null, quantity: x.quantity, unitPrice: x.unitPrice, fromPO: true };
+            });
+            if (state.items.length && !confirm('Replace the ' + state.items.length + ' item(s) already on this order with the ' + lines.length + ' item(s) read from the PO?')) lines = state.items.concat(lines);
+            state.items = lines;
+            if (r.poNumber && !state.poNumber) state.poNumber = r.poNumber;
+            var custSet = false;
+            if (cust && !state.customerId) { state.customerId = cust.id; state.customerLabel = cust.companyName; custSet = true; }
+            var value = r.itemsTotal || r.total;
+            if (value && !state.valueTyped) state.orderValue = value;
+            state.poInfo = { count: lines.length, matched: lines.filter(function (l) { return l.productId; }).length, total: r.total, itemsTotal: r.itemsTotal, poNumber: r.poNumber, poDate: r.poDate, customer: cust ? cust.companyName : null, custSet: custSet };
+            state.poReading = false; render();
+          });
+        }).catch(function (e) { state.poReading = false; state.poInfo = { error: e.message }; render(); });
+      }
+      function poBanner() {
+        var i = state.poInfo, box = function (cls, kids) { return el('div', { class: 'mt-2 text-xs rounded-lg px-3 py-2 ' + cls, id: 'ox-po-info' }, kids); };
+        if (state.poReading) return box('bg-slate-50 dark:bg-slate-800 text-muted', ['Reading the purchase order…']);
+        if (!i) return null;
+        if (i.notPdf) return box('bg-slate-50 dark:bg-slate-800 text-muted', ['Photos / scans are attached as they are — add the items below.']);
+        if (i.scanned) return box('bg-amber-50 text-amber-800', ['This PDF is a scanned picture (no text inside), so it cannot be read — add the items below.']);
+        if (i.none || i.error) return box('bg-amber-50 text-amber-800', [i.error ? 'Could not read the PO: ' + i.error : 'No item table was found in this PO — add the items below.']);
+        var bits = ['✓ Read ' + i.count + ' item' + (i.count === 1 ? '' : 's') + ' from the PO'];
+        if (i.poNumber) bits.push('PO no. ' + i.poNumber + (i.poDate ? ' · ' + i.poDate : ''));
+        if (i.itemsTotal) bits.push('items ₹' + Number(i.itemsTotal).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
+        if (i.total && Math.abs(i.total - i.itemsTotal) > 1) bits.push('PO total ₹' + Number(i.total).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + ' (incl. tax / charges)');
+        bits.push(i.customer ? 'customer: ' + i.customer + (i.custSet ? ' (filled in)' : '') : 'customer not found in the PO — pick it above');
+        bits.push(i.matched + ' of ' + i.count + ' found in Products; the rest are added as new products');
+        return box('bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-200', [bits.join(' · '), el('div', { class: 'mt-1 font-semibold', text: 'Check every line below — you can change the code, description, quantity and price.' })]);
       }
 
       function itemsEditor() {
@@ -1352,19 +1402,33 @@
               (q > st.hand ? (q > st.total ? ' — short by ' + fmtQty(q - st.total) : ' — ' + fmtQty(q - st.hand) + ' from other places') : ' — enough in hand') }));
           }
           paintStock();
-          qty.addEventListener('input', function () { state.items[idx].quantity = Number(qty.value) || 0; paintStock(); });
+          var price = el('input', { type: 'number', min: '0', step: '0.01', class: INPUT, style: 'max-width:105px', placeholder: '₹ price', 'data-line-price': String(idx), value: it.unitPrice == null ? '' : it.unitPrice });
+          var amt = el('span', { class: 'text-xs text-muted whitespace-nowrap', style: 'min-width:80px;text-align:right', 'data-line-amount': String(idx) });
+          function paintAmt() { var a = (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0); amt.textContent = it.unitPrice != null && it.unitPrice !== '' ? '₹' + a.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : ''; }
+          function autoValue() {
+            if (state.valueTyped) return;
+            var priced = state.items.filter(function (x) { return x.unitPrice != null && x.unitPrice !== ''; });
+            if (!priced.length) return;
+            state.orderValue = Math.round(state.items.reduce(function (a, x) { return a + (Number(x.unitPrice) || 0) * (Number(x.quantity) || 0); }, 0) * 100) / 100;
+            var ov = document.getElementById('ox-order-value'); if (ov) ov.value = state.orderValue;
+          }
+          paintAmt();
+          qty.addEventListener('input', function () { state.items[idx].quantity = Number(qty.value) || 0; paintStock(); paintAmt(); autoValue(); });
+          price.addEventListener('input', function () { state.items[idx].unitPrice = price.value === '' ? null : Number(price.value); paintAmt(); autoValue(); });
           var brand = brandSelect(it.brand, function (v) { state.items[idx].brand = v || null; });
-          var label = it.productName + (it.itemCode && it.itemCode !== 'MANUAL' ? ' (' + it.itemCode + ')' : '');
-          if (it.category) label += ' · ' + it.category;
-          if (!it.productId) label += ' · manual';
-          list.appendChild(el('div', { class: 'flex items-center gap-2' }, [
-            el('span', { class: 'flex-1 min-w-0' }, [el('span', { class: 'block text-sm truncate', text: label, title: label }), stockEl]),
-            brand,
-            qty,
-            el('button', {
-              class: 'p-1 text-slate-400 hover:text-red-500', 'aria-label': 'Remove', text: '✕',
-              onclick: function () { state.items.splice(idx, 1); render(); }
-            })
+          // code + description can be corrected (a changed line is saved as typed)
+          var codeI = el('input', { class: INPUT, style: 'max-width:150px', 'data-line-code': String(idx), value: it.itemCode && it.itemCode !== 'MANUAL' ? it.itemCode : '', placeholder: 'Item code' });
+          var nameI = el('input', { class: INPUT, 'data-line-name': String(idx), value: it.productName || '', placeholder: 'Description' });
+          codeI.addEventListener('change', function () { var v = codeI.value.trim(); if (v !== it.itemCode) { it.itemCode = v || 'MANUAL'; it.productId = null; it.stock = undefined; render(); } });
+          nameI.addEventListener('change', function () { var v = nameI.value.trim(); if (v && v !== it.productName) { it.productName = v; if (it.productId) it.productId = null; } });
+          var tags = [it.category, it.productId ? null : 'new product', it.fromPO ? 'from PO' : null].filter(Boolean).join(' · ');
+          list.appendChild(el('div', { class: 'ox-edit-line rounded-lg border border-slate-200 dark:border-slate-700 p-2', 'data-edit-line': String(idx) }, [
+            el('div', { class: 'flex items-center gap-2' }, [codeI, nameI,
+              el('button', { class: 'p-1 text-slate-400 hover:text-red-500', 'aria-label': 'Remove line', title: 'Remove line', text: '✕', onclick: function () { state.items.splice(idx, 1); render(); } })]),
+            el('div', { class: 'flex items-center gap-2 mt-1 flex-wrap' }, [
+              el('span', { class: 'text-xs text-muted', text: 'Qty' }), qty, el('span', { class: 'text-xs text-muted', text: 'Price' }), price, amt, brand,
+              tags ? el('span', { class: 'text-xs text-muted', text: tags }) : null]),
+            stockEl
           ]));
         });
         wrap.appendChild(list);
@@ -1505,8 +1569,9 @@
         fd.append('notes', state.notes || '');
         fd.append('orderValue', state.orderValue == null ? '' : String(state.orderValue));
         fd.append('items', JSON.stringify(state.items.map(function (i) {
-          return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand };
+          return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand, unitPrice: i.unitPrice == null ? '' : i.unitPrice };
         })));
+        fd.append('poNumber', state.orderType === 'PO' ? (state.poNumber || '') : '');
         if (state.orderType === 'VERBAL') fd.append('verbalDetails', state.verbalDetails);
         if (state.orderType === 'PO' && state.file) fd.append('file', state.file);
         if (isAdmin() && state.engineerId) fd.append('engineerId', state.engineerId);
@@ -1537,8 +1602,9 @@
           notes: state.notes,
           orderValue: state.orderValue == null ? '' : String(state.orderValue),
           items: state.items.map(function (i) {
-            return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand };
+            return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand, unitPrice: i.unitPrice == null ? '' : i.unitPrice };
           }),
+          poNumber: state.orderType === 'PO' ? (state.poNumber || '') : '',
         };
         if (state.orderType === 'VERBAL') body2.verbalDetails = state.verbalDetails;
 

@@ -12,9 +12,140 @@
  * officialKm = closingMeter - openingMeter - personalKm
  * fuelCost   = (officialKm / mileageUsed) * fuelPriceUsed
  * totalAmount = fuelCost + miscAmount
+ *
+ * Bills (FuelExpenseBill): petrol bills and miscellaneous items (parking, toll,
+ * courier…) — each with description, amount, bill no. and a photo / PDF of the bill.
+ * When a day has misc items, miscAmount = their total (and miscDesc lists them).
+ *   GET    /api/fuel-expense/:id/bills
+ *   POST   /api/fuel-expense/:id/bills          multipart: kind (PETROL|MISC), description, amount, billNo, file?
+ *   GET    /api/fuel-expense/:id/bills/:bid     the bill file (?download=1)
+ *   DELETE /api/fuel-expense/:id/bills/:bid
  */
 class FuelExpenseController
 {
+    public function __construct()
+    {
+        ensure_schema(['FuelExpenseBill' => ['create' => "CREATE TABLE IF NOT EXISTS `FuelExpenseBill` (
+  `id` VARCHAR(30) NOT NULL, `expenseId` VARCHAR(30) NOT NULL, `kind` VARCHAR(10) NOT NULL DEFAULT 'MISC',
+  `description` VARCHAR(255) NULL, `amount` DECIMAL(12,2) NULL, `billNo` VARCHAR(80) NULL,
+  `fileName` VARCHAR(255) NULL, `storedName` VARCHAR(80) NULL, `size` INT NULL,
+  `uploadedById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`), KEY `FuelExpenseBill_exp` (`expenseId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"]], 'Fuel expense bills');
+    }
+
+    /** [total, description] of the day's misc items, or null when there are none. */
+    private function miscFromBills(string $expenseId): ?array
+    {
+        $s = db()->prepare("SELECT description, amount FROM `FuelExpenseBill` WHERE expenseId=? AND kind='MISC' ORDER BY createdAt");
+        $s->execute([$expenseId]);
+        $rows = $s->fetchAll();
+        if (!$rows) return null;
+        $sum = 0.0; $d = [];
+        foreach ($rows as $r) { $sum += (float) $r['amount']; $d[] = ($r['description'] ?: 'Misc') . ' ₹' . rtrim(rtrim(number_format((float) $r['amount'], 2, '.', ''), '0'), '.'); }
+        return [round2($sum), mb_substr(implode('; ', $d), 0, 2000)];
+    }
+
+    /** Keeps miscAmount / miscDesc / totalAmount in step with the misc items. */
+    private function syncMisc(string $expenseId): void
+    {
+        $s = db()->prepare('SELECT * FROM `FuelExpense` WHERE id=?'); $s->execute([$expenseId]);
+        $rec = $s->fetch();
+        if (!$rec) return;
+        $m = $this->miscFromBills($expenseId);
+        $misc = $m ? $m[0] : 0.0; $desc = $m ? $m[1] : null;
+        $total = $rec['fuelCost'] !== null ? round2((float) $rec['fuelCost'] + $misc) : null;
+        db()->prepare('UPDATE `FuelExpense` SET miscAmount=?, miscDesc=?, totalAmount=?, updatedAt=? WHERE id=?')->execute([$misc, $desc, $total, now_sql(), $expenseId]);
+    }
+
+    private function billRecord(array $auth, string $id): array
+    {
+        $s = db()->prepare('SELECT * FROM `FuelExpense` WHERE id=?'); $s->execute([$id]);
+        $rec = $s->fetch();
+        if (!$rec) sendError('Fuel expense record not found.', 404);
+        if ($rec['userId'] !== $auth['id'] && !is_admin_tier($auth['role']) && $auth['role'] !== 'ACCOUNTS') sendError('Not authorized.', 403);
+        return $rec;
+    }
+
+    private function billsOf(string $id): array
+    {
+        $s = db()->prepare('SELECT b.id, b.kind, b.description, b.amount, b.billNo, b.fileName, b.size, b.createdAt, u.name AS uploadedByName FROM `FuelExpenseBill` b LEFT JOIN `User` u ON u.id=b.uploadedById WHERE b.expenseId=? ORDER BY b.kind DESC, b.createdAt');
+        $s->execute([$id]);
+        return array_map(function ($b) { $b['amount'] = $b['amount'] !== null ? (float) $b['amount'] : null; $b['hasFile'] = !empty($b['fileName']); return $b; }, $s->fetchAll());
+    }
+
+    // GET /api/fuel-expense/:id/bills
+    public function bills(string $id): void
+    {
+        $auth = authenticate();
+        $rec = $this->billRecord($auth, $id);
+        sendSuccess(['bills' => $this->billsOf($id), 'miscAmount' => (float) $rec['miscAmount'], 'totalAmount' => $rec['totalAmount'] !== null ? (float) $rec['totalAmount'] : null]);
+    }
+
+    // POST /api/fuel-expense/:id/bills
+    public function addBill(string $id): void
+    {
+        $auth = authenticate();
+        $rec = $this->billRecord($auth, $id);
+        if ($rec['userId'] !== $auth['id'] && !is_admin_tier($auth['role'])) sendError('Only the employee or an admin can add bills.', 403);
+        $kind = strtoupper(trim((string) ($_POST['kind'] ?? 'MISC'))) === 'PETROL' ? 'PETROL' : 'MISC';
+        $desc = mb_substr(trim((string) ($_POST['description'] ?? '')), 0, 255);
+        $amtRaw = str_replace([',', '₹', ' '], '', (string) ($_POST['amount'] ?? ''));
+        $amount = $amtRaw === '' ? null : (is_numeric($amtRaw) && (float) $amtRaw >= 0 ? round2((float) $amtRaw) : sendError('Enter the amount as a number.', 400));
+        if ($kind === 'MISC' && $desc === '') sendError('Write what the misc. expense was for.', 400);
+        if ($kind === 'MISC' && $amount === null) sendError('Enter the amount.', 400);
+        $f = $_FILES['file'] ?? null;
+        $fileName = $stored = null; $size = null;
+        if ($f && $f['error'] === UPLOAD_ERR_OK) {
+            if ($f['size'] > 15 * 1024 * 1024) sendError('The bill file is larger than 15 MB.', 400);
+            $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'heic', 'pdf'], true)) sendError('Attach the bill as a photo (JPG / PNG) or PDF.', 400);
+            $dir = UPLOADS_PATH . '/fuel-bills';
+            if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the bill on the server.', 500);
+            $stored = gen_id() . '.' . $ext;
+            if (!move_uploaded_file($f['tmp_name'], "$dir/$stored") && !rename($f['tmp_name'], "$dir/$stored")) sendError('Could not save the bill on the server.', 500);
+            $fileName = mb_substr(preg_replace('/[^\w.\- ()]+/u', '_', (string) $f['name']), 0, 255); $size = (int) $f['size'];
+        } elseif ($kind === 'PETROL') sendError('Attach the petrol bill (photo or PDF).', 400);
+        db()->prepare('INSERT INTO `FuelExpenseBill` (id,expenseId,kind,description,amount,billNo,fileName,storedName,size,uploadedById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+            ->execute([gen_id(), $id, $kind, $desc ?: null, $amount, mb_substr(trim((string) ($_POST['billNo'] ?? '')), 0, 80) ?: null, $fileName, $stored, $size, $auth['id'], now_sql()]);
+        if ($kind === 'MISC') $this->syncMisc($id);
+        $s = db()->prepare('SELECT miscAmount, totalAmount FROM `FuelExpense` WHERE id=?'); $s->execute([$id]); $r = $s->fetch();
+        sendSuccess(['bills' => $this->billsOf($id), 'miscAmount' => (float) $r['miscAmount'], 'totalAmount' => $r['totalAmount'] !== null ? (float) $r['totalAmount'] : null], $kind === 'PETROL' ? 'Petrol bill attached' : 'Misc. item added', 201);
+    }
+
+    // GET /api/fuel-expense/:id/bills/:bid
+    public function billFile(string $id, string $bid): void
+    {
+        $auth = authenticate();
+        $this->billRecord($auth, $id);
+        $s = db()->prepare('SELECT * FROM `FuelExpenseBill` WHERE id=? AND expenseId=?'); $s->execute([$bid, $id]);
+        $b = $s->fetch();
+        $path = $b && $b['storedName'] ? UPLOADS_PATH . '/fuel-bills/' . basename($b['storedName']) : '';
+        if (!$b || !is_file($path)) sendError('No bill file.', 404);
+        $ext = strtolower(pathinfo($b['storedName'], PATHINFO_EXTENSION));
+        $types = ['pdf' => 'application/pdf', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'webp' => 'image/webp', 'heic' => 'image/heic'];
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+        header('Content-Disposition: ' . (qp('download') ? 'attachment' : 'inline') . '; filename="' . str_replace('"', '', $b['fileName']) . '"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path); exit;
+    }
+
+    // DELETE /api/fuel-expense/:id/bills/:bid
+    public function deleteBill(string $id, string $bid): void
+    {
+        $auth = authenticate();
+        $rec = $this->billRecord($auth, $id);
+        if ($rec['userId'] !== $auth['id'] && !is_admin_tier($auth['role'])) sendError('Only the employee or an admin can remove bills.', 403);
+        $s = db()->prepare('SELECT * FROM `FuelExpenseBill` WHERE id=? AND expenseId=?'); $s->execute([$bid, $id]);
+        $b = $s->fetch();
+        if (!$b) sendError('Bill not found.', 404);
+        if ($b['storedName']) @unlink(UPLOADS_PATH . '/fuel-bills/' . basename($b['storedName']));
+        db()->prepare('DELETE FROM `FuelExpenseBill` WHERE id=?')->execute([$bid]);
+        if ($b['kind'] === 'MISC') $this->syncMisc($id);
+        $s = db()->prepare('SELECT miscAmount, totalAmount FROM `FuelExpense` WHERE id=?'); $s->execute([$id]); $r = $s->fetch();
+        sendSuccess(['bills' => $this->billsOf($id), 'miscAmount' => (float) $r['miscAmount'], 'totalAmount' => $r['totalAmount'] !== null ? (float) $r['totalAmount'] : null], 'Removed');
+    }
     /** Today's Attendance record for $userId, or null. Mirrors the lookup AttendanceController uses. */
     private function todaysAttendance(string $userId): ?array
     {
@@ -159,6 +290,7 @@ class FuelExpenseController
         if ($miscAmount < 0) sendError('Misc. amount cannot be negative.', 400);
         $totalAmount = round2($fuelCost + $miscAmount);
         $miscDesc = bp_trim($b, 'miscDesc');
+        if ($m = $this->miscFromBills($existing['id'])) { [$miscAmount, $miscDesc] = $m; $totalAmount = round2($fuelCost + $miscAmount); }
         $customersVisited = bp_trim($b, 'customersVisited');
 
         db()->prepare(
@@ -282,6 +414,7 @@ class FuelExpenseController
         $miscDesc = bp_has($b, 'miscDesc') ? bp_trim($b, 'miscDesc') : $rec['miscDesc'];
         $miscAmount = bp_has($b, 'miscAmount') ? num($b['miscAmount'], (float)$rec['miscAmount']) : (float)$rec['miscAmount'];
         $customersVisited = bp_has($b, 'customersVisited') ? bp_trim($b, 'customersVisited') : $rec['customersVisited'];
+        if ($m = $this->miscFromBills($id)) [$miscAmount, $miscDesc] = $m;   // itemised misc wins over a typed amount
 
         $officialKm = $rec['officialKm'] !== null ? (float)$rec['officialKm'] : null;
         $fuelCost   = $rec['fuelCost']   !== null ? (float)$rec['fuelCost']   : null;

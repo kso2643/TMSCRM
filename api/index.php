@@ -339,6 +339,10 @@ try {
             $method === 'GET'   && $c1 === 'export'                       => $exp->exportFuelExpense(),
             $method === 'GET'   && $c1 === ''                             => $ctrl->index(),
             $method === 'PATCH' && $c1 !== '' && $c2 === ''               => $ctrl->update($c1),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'bills' && $c3 === '' => $ctrl->bills($c1),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'bills' && $c3 === '' => $ctrl->addBill($c1),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'bills' && $c3 !== '' => $ctrl->billFile($c1, $c3),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === 'bills' && $c3 !== '' => $ctrl->deleteBill($c1, $c3),
             default => sendError("Route /api/fuel-expense/$c1/$c2 not found", 404),
         };
     }
@@ -359,6 +363,8 @@ try {
         match (true) {
             $method === 'GET'   && $c1 === 'meta'                     => $ctrl->meta(),
             $method === 'GET'   && $c1 === 'engineers'                => $ctrl->engineers(),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'confirm'    => $ctrl->confirm($c1),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'visit'      => $ctrl->visit($c1),
             $method === 'GET'   && $c1 === 'reminders'                => $ctrl->reminders(),
             $method === 'PATCH' && $c1 === 'alerts' && $c3 === 'read' => $ctrl->markAlertRead($c2),
             $method === 'GET'   && $c1 === ''                         => $ctrl->index(),
@@ -375,6 +381,7 @@ try {
     elseif ($c0 === 'orders') {
         $ctrl = new OrderController();
         match (true) {
+            $method === 'POST'  && $c1 === 'po-match'                          => $ctrl->poMatch(),
             $method === 'GET'   && $c1 === 'meta'                          => $ctrl->meta(),
             $method === 'GET'   && $c1 === 'engineers'                     => $ctrl->engineers(),
             $method === 'GET'   && $c1 === 'stock-check'                   => $ctrl->stockCheck(),
@@ -425,6 +432,7 @@ try {
     elseif ($c0 === 'price-requests') {
         $ctrl = new PriceRequestController();
         match (true) {
+            $method === 'GET'   && $c1 === 'existing-price'                => $ctrl->existingPrice(),
             $method === 'GET'   && $c1 === 'by-no' && $c2 !== ''       => $ctrl->byNumber($c2),
             $method === 'GET'   && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->index($c2),
             $method === 'POST'  && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->ask($c2),
@@ -451,6 +459,7 @@ try {
         $ctrl = new TrialController();
         match (true) {
             $method === 'GET'    && $c1 === 'meta'                     => $ctrl->meta(),
+            $method === 'PATCH'  && $c1 !== '' && $c2 === 'progress'   => $ctrl->setProgress($c1),
             $method === 'GET'    && $c1 === 'next-no'                  => $ctrl->nextNo(),
             $method === 'GET'    && $c1 === ''                         => $ctrl->index(),
             $method === 'POST'   && $c1 === ''                         => $ctrl->create(),
@@ -589,6 +598,7 @@ try {
         match (true) {
             $method === 'GET'    && $c1 === ''                    => $ctrl->index(),
             $method === 'GET'    && $c1 === 'recipients'          => $ctrl->recipients(),
+            $method === 'GET'    && $c1 === 'by-no' && $c2 !== ''  => $ctrl->byNumber($c2),
             $method === 'GET'    && $c1 === 'quotations' && $c2 === '' => $ctrl->quotations(),
             $method === 'GET'    && $c1 === 'quotations' && $c2 !== '' => $ctrl->quotationItems($c2),
             $method === 'GET'    && $c1 === 'unread'              => $ctrl->unread(),

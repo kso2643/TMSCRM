@@ -87,6 +87,36 @@ class AlertFeedController
             $ev[] = ['id' => $id, 'type' => $type, 'title' => $title, 'body' => $body, 'link' => $link, 'at' => $at];
         };
 
+        // Appointments: did the visit happen? (to the engineer, once the visit time has passed)
+        try {
+            $nowDt = now_sql();
+            foreach (self::rows(
+                "SELECT a.id, a.appointmentDate, a.appointmentTime, a.title, c.companyName,
+                        CONCAT(a.appointmentDate, ' ', IF(a.appointmentTime REGEXP '^[0-9]{1,2}:[0-9]{2}', CONCAT(a.appointmentTime, ':00'), '17:00:00')) AS dueAt
+                 FROM `Appointment` a LEFT JOIN `Customer` c ON c.id=a.customerId
+                 WHERE a.assignedToId=? AND a.status='SCHEDULED' AND a.visitStatus IS NULL AND a.appointmentDate BETWEEN ? AND ?
+                 ORDER BY a.appointmentDate DESC LIMIT $per", [$me, substr($since, 0, 10), substr($nowDt, 0, 10)]) as $r) {
+                $due = date('Y-m-d H:i:s', strtotime($r['dueAt']) + 3600);   // an hour after the planned time
+                if ($due > $nowDt || $due <= $since) continue;
+                $add('appt-visit-' . $r['id'], 'APPOINTMENT_VISIT', 'Did you visit ' . ($r['companyName'] ?: 'the customer') . '?',
+                    'Visit on ' . date('j M', strtotime($r['appointmentDate'])) . ($r['appointmentTime'] ? ' ' . $r['appointmentTime'] : '') . ' — mark visited / not visited and the next follow-up',
+                    '/appointments/?date=' . $r['appointmentDate'] . '&visit=' . rawurlencode($r['id']), $due);
+            }
+            // to the person who booked it: confirmed by the engineer / visit outcome
+            foreach (self::rows(
+                "SELECT a.id, a.appointmentDate, a.confirmedAt, a.visitStatus, a.visitReason, a.visitMarkedAt, c.companyName, e.name AS engName
+                 FROM `Appointment` a LEFT JOIN `Customer` c ON c.id=a.customerId LEFT JOIN `User` e ON e.id=a.assignedToId
+                 WHERE a.userId=? AND a.assignedToId<>? AND ((a.confirmedAt>? AND a.confirmedById<>?) OR (a.visitMarkedAt>? AND a.visitMarkedById<>?)) LIMIT $per",
+                [$me, $me, $since, $me, $since, $me]) as $r) {
+                if ($r['confirmedAt'] && $r['confirmedAt'] > $since)
+                    $add('appt-conf-' . $r['id'], 'APPOINTMENT_CONFIRMED', '✓ Visit confirmed by ' . ($r['engName'] ?: 'the engineer'),
+                        ($r['companyName'] ?: '') . ' · ' . date('j M', strtotime($r['appointmentDate'])), '/appointments/?date=' . $r['appointmentDate'], $r['confirmedAt']);
+                if ($r['visitMarkedAt'] && $r['visitMarkedAt'] > $since)
+                    $add('appt-out-' . $r['id'], 'APPOINTMENT_VISIT', ($r['visitStatus'] === 'VISITED' ? '✓ Visited: ' : '✕ Not visited: ') . ($r['companyName'] ?: ''),
+                        ($r['engName'] ?: '') . ' · ' . date('j M', strtotime($r['appointmentDate'])) . ($r['visitReason'] ? ' — ' . $r['visitReason'] : ''), '/appointments/?date=' . $r['appointmentDate'], $r['visitMarkedAt']);
+            }
+        } catch (Throwable $e) {}
+
         // Tasks assigned to me (by someone else)
         foreach (self::rows(
             "SELECT t.id, t.title, t.priority, t.createdAt, b.name AS byName FROM `AdminTask` t

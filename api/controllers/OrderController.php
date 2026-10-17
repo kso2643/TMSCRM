@@ -145,6 +145,8 @@ class OrderController
                     'proformaStatus'         => "VARCHAR(20) NOT NULL DEFAULT 'NOT_CONFIRMED'",
                     // order value in ₹ (optional) — for the sales report by engineer
                     'orderValue'             => 'DECIMAL(14,2) NULL',
+                    // customer's PO number (read from the PO PDF or typed)
+                    'poNumber'               => 'VARCHAR(80) NULL',
                     'createdAt'              => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
                     'updatedAt'              => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
                 ],
@@ -178,9 +180,44 @@ class OrderController
                     'createdAt'   => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
                     // quantity supplied so far (partial supply); NULL on old lines = all or nothing by "supplied"
                     'suppliedQty' => 'DECIMAL(14,2) NULL',
+                    // price per unit on the customer's PO (optional)
+                    'unitPrice'   => 'DECIMAL(14,2) NULL',
                 ],
             ],
         ];
+    }
+
+    /**
+     * POST /api/orders/po-match { text, codes[] } — helps the order form after a PO PDF is read
+     * in the browser: which customer's name appears on the PO, and which item codes are in Products.
+     */
+    public function poMatch(): void
+    {
+        authenticate();
+        $b = request_body();
+        $norm = function (string $t): string {
+            $t = mb_strtolower($t);
+            $t = preg_replace('/\b(private|pvt|limited|ltd|llp|inc|co|company|india|the|and|m\/s|ms)\b\.?/u', ' ', $t);
+            return trim(preg_replace('/[^a-z0-9]+/u', ' ', $t));
+        };
+        $text = ' ' . $norm(mb_substr((string) ($b['text'] ?? ''), 0, 200000)) . ' ';
+        $best = null; $bestLen = 0;
+        foreach (db()->query('SELECT id, companyName FROM `Customer`')->fetchAll() as $c) {
+            $n = $norm((string) $c['companyName']);
+            if (mb_strlen($n) < 4) continue;
+            if (str_contains($text, ' ' . $n . ' ') && mb_strlen($n) > $bestLen) { $best = $c; $bestLen = mb_strlen($n); }
+        }
+        // our own companies are on every PO as the supplier — never pick them as the customer
+        if ($best && preg_match('/\b(apj|tms)\b/i', $best['companyName']) && preg_match('/tech|tool|machine/i', $best['companyName'])) $best = null;
+        $codes = array_slice(array_values(array_unique(array_filter(array_map(fn($x) => strtoupper(trim((string) $x)), (array) ($b['codes'] ?? []))))), 0, 300);
+        $products = [];
+        if ($codes) {
+            $in = implode(',', array_fill(0, count($codes), '?'));
+            $q = db()->prepare("SELECT id, itemCode, productName, unit, brand, category FROM `Product` WHERE UPPER(itemCode) IN ($in)");
+            $q->execute($codes);
+            foreach ($q->fetchAll() as $p) $products[strtoupper($p['itemCode'])] = $p;
+        }
+        sendSuccess(['customer' => $best, 'products' => (object) $products]);
     }
 
     /** Optional order value (₹) from the body → number or null. */
@@ -246,10 +283,12 @@ class OrderController
             'proformaStatus'     => $row['proformaStatus'],
             'notes'              => $row['notes'],
             'orderValue'         => isset($row['orderValue']) && $row['orderValue'] !== null ? (float) $row['orderValue'] : null,
+            'poNumber'           => $row['poNumber'] ?? null,
             'items'              => $items !== null ? array_map(fn($i) => [
                 'id' => $i['id'], 'productId' => $i['productId'], 'itemCode' => $i['itemCode'],
                 'productName' => $i['productName'], 'unit' => $i['unit'], 'category' => $i['category'],
                 'brand' => $i['brand'], 'quantity' => (float) $i['quantity'],
+                'unitPrice' => isset($i['unitPrice']) && $i['unitPrice'] !== null ? (float) $i['unitPrice'] : null,
                 'supplied' => (bool) $i['supplied'], 'suppliedAt' => $i['suppliedAt'],
                 'suppliedQty' => self::suppliedQty($i), 'pendingQty' => max(0, round((float) $i['quantity'] - self::suppliedQty($i), 2)),
                 'stock' => $i['_stock'] ?? null,
@@ -338,6 +377,8 @@ class OrderController
         foreach ($raw as $line) {
             $qty = is_numeric($line['quantity'] ?? null) ? (float) $line['quantity'] : 0;
             if ($qty <= 0) continue;
+            $up = str_replace([',', '₹', ' '], '', (string) ($line['unitPrice'] ?? ''));
+            $unitPrice = ($up !== '' && is_numeric($up) && (float) $up >= 0) ? round((float) $up, 2) : null;
 
             $productId = trim((string) ($line['productId'] ?? ''));
             if ($productId) {
@@ -350,7 +391,7 @@ class OrderController
                     'productId' => $product['id'], 'itemCode' => $product['itemCode'],
                     'productName' => $product['productName'], 'unit' => $product['unit'],
                     'category' => trim((string) ($line['category'] ?? '')) ?: null,
-                    'brand' => trim((string) ($line['brand'] ?? '')) ?: null, 'quantity' => $qty,
+                    'brand' => trim((string) ($line['brand'] ?? '')) ?: null, 'quantity' => $qty, 'unitPrice' => $unitPrice,
                 ];
                 continue;
             }
@@ -365,7 +406,7 @@ class OrderController
                 'unit' => trim((string) ($line['unit'] ?? '')) ?: null,
                 'category' => trim((string) ($line['category'] ?? '')) ?: null,
                 'brand' => trim((string) ($line['brand'] ?? '')) ?: null,
-                'quantity' => $qty,
+                'quantity' => $qty, 'unitPrice' => $unitPrice,
             ];
         }
         return $items;
@@ -392,8 +433,8 @@ class OrderController
         db()->prepare('DELETE FROM `CustomerOrderItem` WHERE orderId=?')->execute([$orderId]);
         $ins = db()->prepare(
             'INSERT INTO `CustomerOrderItem`
-                (id,orderId,productId,itemCode,productName,unit,category,brand,quantity,supplied,suppliedAt,procurementStatus,expectedDeliveryDate,createdAt,suppliedQty)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                (id,orderId,productId,itemCode,productName,unit,category,brand,quantity,supplied,suppliedAt,procurementStatus,expectedDeliveryDate,createdAt,suppliedQty,unitPrice)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         foreach ($items as $it) {
             if (!$it['productId']) {   // typed in by hand → also added to Products and Stock
@@ -408,6 +449,7 @@ class OrderController
                 now_sql(),
                 // a partly supplied line keeps what was already sent (never more than the new quantity)
                 $carry && !$carry['supplied'] && $carry['suppliedQty'] !== null ? min((float) $carry['suppliedQty'], (float) $it['quantity']) : null,
+                $it['unitPrice'] ?? null,
             ]);
         }
     }
@@ -610,6 +652,7 @@ class OrderController
             $verbalDetails, $orderDate, bp_trim($b, 'notes'), now_sql(), now_sql(),
         ]);
         if (($ov = self::orderValue($b)) !== null) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([$ov, $id]);
+        if (($pn = mb_substr(trim((string) ($b['poNumber'] ?? '')), 0, 80)) !== '') db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([$pn, $id]);
         $this->replaceItems($id, $items);
 
         StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
@@ -666,6 +709,7 @@ class OrderController
              poDocumentMime=?,poDocumentSize=?,verbalDetails=?,orderDate=?,notes=?,updatedAt=? WHERE id=?'
         )->execute([$customerId, $orderType, $poOriginal, $poStored, $poMime, $poSize, $verbalDetails, $orderDate, $notes, now_sql(), $id]);
         if (bp_has($b, 'orderValue')) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([self::orderValue($b), $id]);
+        if (bp_has($b, 'poNumber')) db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([mb_substr(trim((string) $b['poNumber']), 0, 80) ?: null, $id]);
 
         if (bp_has($b, 'items')) {
             $items = $this->parseItems($b['items']);

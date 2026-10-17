@@ -274,6 +274,7 @@
       var preview = el('div', { class: 'rounded-lg border border-slate-200 dark:border-slate-700 text-sm hidden' });
       var miscDescWrap = field('What was the misc. expense for?', miscDesc);
       miscDescWrap.classList.add('hidden');
+      var billsSlot = el('div', {});
       var rec = null;
 
       api('GET', '/fuel-expense/today').then(function (res) {
@@ -282,12 +283,17 @@
           startedLine.textContent = 'Started at ' + fmt(rec.openingMeter) + ' km' +
             (rec.vehicleDetails ? ' · ' + rec.vehicleDetails : '');
           startedLine.classList.remove('hidden');
+          billsSlot.appendChild(billsPanel(rec.id, function (misc, total, hasMisc) {
+            if (hasMisc) { miscAmt.value = misc; miscAmt.readOnly = true; miscDescWrap.classList.add('hidden'); }
+            else miscAmt.readOnly = false;
+            recalc();
+          }));
         }
         recalc();
       }).catch(function () {});
 
       function recalc() {
-        miscDescWrap.classList.toggle('hidden', !(num(miscAmt.value) > 0));
+        miscDescWrap.classList.toggle('hidden', !(num(miscAmt.value) > 0) || miscAmt.readOnly);
         if (!rec || !meter.value) { preview.classList.add('hidden'); return; }
         var official = num(meter.value) - num(rec.openingMeter) - num(personal.value);
         preview.classList.remove('hidden');
@@ -346,6 +352,7 @@
           field('Misc. amount (₹)', miscAmt)
         ]),
         miscDescWrap,
+        billsSlot,
         field('Customers visited', customers),
         preview, errP
       ]));
@@ -553,6 +560,10 @@
                 el('button', {
                   class: 'p-1 rounded text-slate-400 hover:text-slate-600', title: 'Edit', text: '✎',
                   onclick: function () { openEdit(r, loadAll); }
+                }),
+                el('button', {
+                  class: 'p-1 rounded text-slate-400 hover:text-slate-600', title: 'Bills & misc. items', text: '🧾', 'data-open-bills': r.id,
+                  onclick: function () { openBills(r, loadAll); }
                 })
               ])
             ]));
@@ -590,7 +601,7 @@
         var wrap = el('div', { class: 'space-y-4' });
         days.forEach(function (day) {
           var total = day.records.reduce(function (s, r) { return s + num(r.totalAmount); }, 0);
-          var heads = ['Employee','Vehicle','Opening','Closing','Official','Fuel ₹','Misc ₹','Total ₹'];
+          var heads = ['Employee','Vehicle','Opening','Closing','Official','Fuel ₹','Misc ₹','Total ₹','Bills'];
           var tbody = el('tbody');
           day.records.forEach(function (r) {
             var closingCell = r.closingMeter != null
@@ -604,7 +615,8 @@
               el('td', { class: 'px-4 py-2.5', text: r.officialKm != null ? fmt(r.officialKm) : '—' }),
               el('td', { class: 'px-4 py-2.5', text: r.fuelCost != null ? fmt(r.fuelCost) : '—' }),
               el('td', { class: 'px-4 py-2.5', text: fmt(r.miscAmount) }),
-              el('td', { class: 'px-4 py-2.5 font-semibold', text: r.totalAmount != null ? fmt(r.totalAmount) : '—' })
+              el('td', { class: 'px-4 py-2.5 font-semibold', text: r.totalAmount != null ? fmt(r.totalAmount) : '—' }),
+              el('td', { class: 'px-4 py-2.5' }, [el('button', { class: 'text-xs text-primary', 'data-open-bills': r.id, text: '🧾 View', onclick: function () { openBills(r); } })])
             ]));
           });
           wrap.appendChild(el('div', { class: 'card overflow-hidden' }, [
@@ -652,6 +664,94 @@
     buildTabs();
     loadProfile();
     loadAll();
+  }
+
+  // ── bills: petrol bills + itemised misc expenses (each with a bill photo / PDF) ──
+  function upload(path, fd) {
+    return fetch(API + '/api' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || '') }, body: fd }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.success === false) throw new Error(j.message || 'Upload failed'); return j; });
+    });
+  }
+  function openBillFile(expId, b, download) {
+    fetch(API + '/api/fuel-expense/' + expId + '/bills/' + b.id + (download ? '?download=1' : ''), { headers: { Authorization: 'Bearer ' + (token() || '') } })
+      .then(function (r) { if (!r.ok) throw new Error('Could not open the bill'); return r.blob(); })
+      .then(function (blob) {
+        var u = URL.createObjectURL(blob);
+        if (!download && /^image\//.test(blob.type)) {
+          var ov = el('div', { class: 'fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center p-4', onclick: function () { ov.remove(); URL.revokeObjectURL(u); } },
+            [el('img', { src: u, style: 'max-width:100%;max-height:100%;background:#fff', alt: b.fileName || 'Bill' })]);
+          document.body.appendChild(ov); return;
+        }
+        if (!download && blob.type === 'application/pdf' && window.PdfView) { PdfView.show(API + '/api/fuel-expense/' + expId + '/bills/' + b.id, { title: b.fileName, fileName: b.fileName }); return; }
+        var a = el('a', { href: u, download: b.fileName || 'bill' }); document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 3000);
+      }).catch(function (e) { alert(e.message); });
+  }
+  /** Bills & misc items for one day's entry. onChange(miscAmount, totalAmount, hasMiscItems) after every change. */
+  function billsPanel(expId, onChange, readOnly) {
+    var box = el('div', { class: 'rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2', 'data-bills': expId });
+    var listEl = el('div', { class: 'space-y-1' });
+    var err = el('p', { class: 'text-xs text-red-600 hidden' });
+    function draw(d) {
+      listEl.innerHTML = '';
+      var bills = d.bills || [];
+      if (!bills.length) listEl.appendChild(el('p', { class: 'text-xs text-muted', text: 'No bills yet.' }));
+      bills.forEach(function (b) {
+        listEl.appendChild(el('div', { class: 'flex items-center gap-2 text-sm', 'data-bill': b.id }, [
+          el('span', { class: 'badge ' + (b.kind === 'PETROL' ? 'badge-blue' : 'badge-gray'), text: b.kind === 'PETROL' ? '⛽ Petrol' : 'Misc' }),
+          el('span', { class: 'flex-1 min-w-0 truncate', text: (b.description || (b.kind === 'PETROL' ? 'Petrol bill' : '')) + (b.billNo ? ' · bill ' + b.billNo : '') }),
+          el('span', { class: 'font-semibold whitespace-nowrap', text: b.amount != null ? '₹' + fmt(b.amount) : '' }),
+          b.hasFile ? el('button', { class: 'text-xs text-primary', title: 'View bill', text: '👁', onclick: function () { openBillFile(expId, b, false); } }) : el('span', { class: 'text-xs text-muted', text: 'no bill' }),
+          b.hasFile ? el('button', { class: 'text-xs text-primary', title: 'Download bill', text: '⬇', onclick: function () { openBillFile(expId, b, true); } }) : null,
+          readOnly ? null : el('button', { class: 'text-xs text-red-500', title: 'Remove', text: '✕', onclick: function () {
+            if (!confirm('Remove this ' + (b.kind === 'PETROL' ? 'petrol bill' : 'item') + '?')) return;
+            api('DELETE', '/fuel-expense/' + expId + '/bills/' + b.id).then(function (j) { draw(j.data); }).catch(function (e) { err.textContent = e.message; err.classList.remove('hidden'); });
+          } })
+        ]));
+      });
+      var hasMisc = bills.some(function (b) { return b.kind === 'MISC'; });
+      if (onChange) onChange(d.miscAmount, d.totalAmount, hasMisc);
+    }
+    box.appendChild(el('div', { class: 'text-xs font-semibold text-slate-700 dark:text-slate-200', text: '🧾 Bills & misc. items' }));
+    box.appendChild(listEl);
+    if (!readOnly) {
+      var kind = el('select', { class: INPUT, 'data-bill-kind': '' }, [el('option', { value: 'MISC', text: 'Misc. item' }), el('option', { value: 'PETROL', text: 'Petrol bill' })]);
+      var desc = input({ placeholder: 'Parking, toll, courier, food…', 'data-bill-desc': '' });
+      var amt = input({ type: 'number', inputmode: 'decimal', placeholder: '₹ amount', 'data-bill-amount': '' });
+      var billNo = input({ placeholder: 'Bill no. (optional)', 'data-bill-no': '' });
+      var file = el('input', { type: 'file', accept: 'image/*,.pdf', capture: null, class: 'text-xs', 'data-bill-file': '' });
+      kind.addEventListener('change', function () { desc.placeholder = kind.value === 'PETROL' ? 'Petrol / diesel (litres, pump)' : 'Parking, toll, courier, food…'; });
+      var add = el('button', { class: 'btn-secondary text-xs', 'data-bill-add': '', text: '+ Add' });
+      add.addEventListener('click', function () {
+        err.classList.add('hidden');
+        var fd = new FormData();
+        fd.append('kind', kind.value); fd.append('description', desc.value.trim()); fd.append('amount', amt.value); fd.append('billNo', billNo.value.trim());
+        if (file.files[0]) fd.append('file', file.files[0]);
+        add.disabled = true;
+        upload('/fuel-expense/' + expId + '/bills', fd).then(function (j) {
+          desc.value = ''; amt.value = ''; billNo.value = ''; file.value = ''; add.disabled = false; draw(j.data);
+        }).catch(function (e) { add.disabled = false; err.textContent = e.message; err.classList.remove('hidden'); });
+      });
+      box.appendChild(el('div', { class: 'grid grid-cols-2 gap-2', style: 'grid-template-columns:repeat(2,minmax(0,1fr))' }, [kind, amt, desc, billNo]));
+      file.style.minWidth = '0'; file.style.maxWidth = '100%';
+      box.appendChild(el('div', { class: 'flex flex-wrap items-center gap-2' }, [el('span', { class: 'text-xs text-muted', text: 'Bill photo / PDF' }), file, add]));
+    }
+    box.appendChild(err);
+    api('GET', '/fuel-expense/' + expId + '/bills').then(function (j) { draw(j.data); }).catch(function (e) { listEl.textContent = e.message; });
+    return box;
+  }
+  function openBills(record, onDone) {
+    var overlay = el('div', { class: 'fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4' });
+    var changed = false;
+    function close() { overlay.remove(); if (changed && onDone) onDone(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    var mine = (currentUser() || {}).id === record.userId || isAdmin();
+    overlay.appendChild(el('div', { class: 'card w-full p-5 rounded-b-none sm:rounded-xl max-h-[92vh] overflow-y-auto', style: 'max-width:34rem;min-width:0', role: 'dialog' }, [
+      el('h2', { class: 'section-title', text: 'Bills — ' + fmtDate(record.date) + (record.user && record.user.name ? ' · ' + record.user.name : '') }),
+      el('div', { class: 'mt-3' }, [billsPanel(record.id, function () { changed = true; }, !mine)]),
+      el('div', { class: 'flex justify-end mt-4' }, [el('button', { class: 'btn-primary', text: 'Done', onclick: close })])
+    ]));
+    document.body.appendChild(overlay);
   }
 
   // ── edit an existing entry ──────────────────────────────────────────
@@ -702,6 +802,7 @@
           field('Personal km', personal), field('Misc. amount (₹)', miscAmt)
         ]),
         field('Misc. description', miscDesc),
+        billsPanel(record.id, function (misc, total, hasMisc) { if (hasMisc) { miscAmt.value = misc; miscAmt.readOnly = true; miscDesc.readOnly = true; } else { miscAmt.readOnly = false; miscDesc.readOnly = false; } }),
         field('Customers visited', customers),
         errP
       ]),

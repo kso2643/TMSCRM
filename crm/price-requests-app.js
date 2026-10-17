@@ -257,7 +257,18 @@
   function go(tab) { state.tab = tab; history.replaceState(null, '', '#' + tab); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
   /* ── New request ─────────────────────────────────────────────────── */
-  function blankItem() { return { productId: '', itemCode: '', productName: '', category: '', brand: '', supplyType: '', quantity: '', unit: '', requestedPrice: '', priority: 'NORMAL', notes: '', listPrice: null, problems: [] }; }
+  function blankItem() { return { productId: '', itemCode: '', productName: '', category: '', brand: '', supplyType: '', quantity: '', unit: '', requestedPrice: '', existingPrice: '', existingHint: '', priority: 'NORMAL', notes: '', listPrice: null, problems: [] }; }
+  /** The customer's current price for this item (last order / quotation) → fills "Customer's existing price" if empty. */
+  function lookupExisting(it, customer, done) {
+    if (!customer || !customer.id || !it.itemCode) return;
+    api('GET', '/price-requests/existing-price?customerId=' + encodeURIComponent(customer.id) + '&itemCode=' + encodeURIComponent(it.itemCode)).then(function (r) {
+      var p = r.data && r.data.price;
+      if (!p) { it.existingHint = 'No earlier price for ' + customer.companyName; if (done) done(); return; }
+      if (it.existingPrice === '' || it.existingPrice == null) it.existingPrice = p.price;
+      it.existingHint = 'Last ' + p.source.toLowerCase() + ' ' + (p.ref || '') + ' · ' + p.date;
+      if (done) done();
+    }).catch(function () {});
+  }
 
   function renderNew(body) {
     if (!state.form) state.form = { customer: null, notes: '', items: [blankItem()], source: 'FORM', problems: [] };
@@ -387,6 +398,7 @@
                 if (!it.unit && p.unit) it.unit = p.unit;
                 if (!it.category && p.categoryRef && p.categoryRef.name) it.category = p.categoryRef.name;
                 ps.remove(); ps = null; drawItems();
+                lookupExisting(it, F.customer, function () { drawItems(); });
               } }, [el('b', { text: p.productName }), el('span', { class: 's', text: [p.itemCode, p.standardPrice ? 'List ' + money(p.standardPrice) : ''].filter(Boolean).join(' · ') })]));
             });
             pWrap.appendChild(ps);
@@ -418,10 +430,12 @@
         el('div', { class: 'pr-f' }, [el('label', {}, ['Regular / One time ', el('span', { class: 'req', text: '*' })]), seg]),
         field('quantity', 'Quantity', { req: true, type: 'number', ph: '0' }),
         field('unit', 'Unit', { ph: 'PCS' }),
+        field('existingPrice', 'Customer\u2019s existing ₹/unit', { type: 'number', ph: '0.00' }),
         field('requestedPrice', 'Target ₹/unit (optional)', { type: 'number', ph: '0.00' }),
         priority,
         field('notes', 'Note', { cls: 'wide', ph: 'Competitor price, application, drawing reference…' })
       ]));
+      if (it.existingHint) c.appendChild(el('div', { class: 'pr-meta', 'data-existing-hint': String(idx), text: 'Existing price: ' + it.existingHint }));
       if (it.problems && it.problems.length) c.appendChild(el('div', { class: 'pr-err', text: it.problems.join(' · ') }));
       return c;
     }
@@ -448,7 +462,7 @@
           var rows = j.data.items.map(function (x) {
             return { productId: x.productId || '', itemCode: x.itemCode || '', productName: x.productName || '', category: x.category || '', brand: x.brand || '',
               supplyType: x.supplyType === 'REGULAR' || x.supplyType === 'ONE_TIME' ? x.supplyType : '', quantity: x.quantity == null ? '' : x.quantity,
-              unit: x.unit || '', requestedPrice: x.requestedPrice == null ? '' : x.requestedPrice, priority: x.priority || 'NORMAL',
+              unit: x.unit || '', requestedPrice: x.requestedPrice == null ? '' : x.requestedPrice, existingPrice: x.existingPrice == null ? '' : x.existingPrice, priority: x.priority || 'NORMAL',
               notes: x.notes || '', listPrice: x.listPrice, problems: (x.problems || []).map(function (p) { return p.replace(/^Row \d+: /, ''); }) };
           });
           var empty = F.items.every(function (i) { return !i.productName.trim() && !i.brand.trim(); });
@@ -496,7 +510,7 @@
         customerId: F.customer.id, notes: F.notes, source: F.source,
         items: F.items.map(function (i) {
           return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, category: i.category, brand: i.brand, supplyType: i.supplyType,
-            quantity: i.quantity, unit: i.unit, requestedPrice: i.requestedPrice, priority: i.priority || 'NORMAL', notes: i.notes };
+            quantity: i.quantity, unit: i.unit, requestedPrice: i.requestedPrice, existingPrice: i.existingPrice, priority: i.priority || 'NORMAL', notes: i.notes };
         })
       }).then(function (r) {
         toast(r.message);
@@ -624,8 +638,8 @@
       var editing = state.editing || (state.editing = {});
       var answering = canRespond && (b.counts.PENDING > 0 || b.items.some(function (x) { return editing[x.id]; }));
       var tbl = el('table', { class: 'pr-tbl' });
-      tbl.appendChild(el('thead', {}, [el('tr', {}, ['#', 'Product', 'Category · Brand', 'Type', 'Qty', 'List', 'Asked', 'Priority', 'Answer'].map(function (h, i) {
-        return el('th', { class: i >= 4 && i <= 6 ? 'r' : null, text: h });
+      tbl.appendChild(el('thead', {}, [el('tr', {}, ['#', 'Product', 'Category · Brand', 'Type', 'Qty', 'List', 'Existing', 'Asked', 'Priority', 'Answer'].map(function (h, i) {
+        return el('th', { class: i >= 4 && i <= 7 ? 'r' : null, text: h });
       }))]));
       var tb = el('tbody');
       b.items.forEach(function (it, i) {
@@ -690,6 +704,7 @@
           el('td', { text: TYPES[it.supplyType] || '—' }),
           el('td', { class: 'r', text: (it.quantity != null ? Number(it.quantity).toLocaleString('en-IN') : '—') + (it.unit ? ' ' + it.unit : '') }),
           el('td', { class: 'r', text: money(it.listPrice) }),
+          el('td', { class: 'r', 'data-existing': it.id, text: money(it.existingPrice) }),
           el('td', { class: 'r', text: money(it.requestedPrice) }),
           el('td', {}, [prioBadge(it.priority),
             it.discount != null || it.leadTime ? el('div', { class: 'pr-meta', text: [it.discount != null ? 'asked ' + it.discount + '%' : '', it.leadTime || '', it.expectedDelivery ? 'by ' + dmyDate(it.expectedDelivery) : ''].filter(Boolean).join(' · ') }) : null]),

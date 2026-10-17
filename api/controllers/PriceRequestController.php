@@ -78,6 +78,8 @@ class PriceRequestController
                     'history'          => 'TEXT NULL',
                     'originalItemCode' => 'VARCHAR(255) NULL',
                     'priority'         => 'VARCHAR(10) NULL',
+                    // the price the customer pays today (typed, or from their last order / quotation)
+                    'existingPrice'    => 'DECIMAL(14,2) NULL',
                 ],
             ],
             'PriceRequestBatch' => [
@@ -364,6 +366,9 @@ $tail",
         if ($priceRaw === '') $price = null; // target price is optional
         elseif (!is_numeric($priceRaw) || (float) $priceRaw <= 0) $errs[] = "$label: price must be a number more than 0";
         else $price = round((float) $priceRaw, 2);
+        $exRaw = str_replace([',', '₹', 'Rs', 'rs', ' '], '', (string) ($it['existingPrice'] ?? ''));
+        $existing = null;
+        if ($exRaw !== '') { if (!is_numeric($exRaw) || (float) $exRaw < 0) $errs[] = "$label: customer's existing price must be a number"; else $existing = round((float) $exRaw, 2); }
         // Priority (engineers no longer give discount, lead time or delivery date — the admin does)
         $prio = self::priority($it['priority'] ?? '');
         if ($prio === false) $errs[] = "$label: priority must be Urgent, High, Normal or Low";
@@ -372,9 +377,33 @@ $tail",
             'category' => mb_substr($category, 0, 120) ?: null, 'brand' => mb_substr($brand, 0, 120) ?: null, 'supplyType' => $type,
             'quantity' => $qty, 'unit' => mb_substr(trim((string) ($it['unit'] ?? '')) ?: ($product['unit'] ?? ''), 0, 20) ?: null,
             'listPrice' => isset($product['standardPrice']) && $product['standardPrice'] !== null ? (float) $product['standardPrice'] : null,
-            'requestedPrice' => $price, 'discount' => null, 'notes' => trim((string) ($it['notes'] ?? '')) ?: null,
+            'requestedPrice' => $price, 'existingPrice' => $existing, 'discount' => null, 'notes' => trim((string) ($it['notes'] ?? '')) ?: null,
             'leadTime' => null, 'expectedDelivery' => null, 'priority' => $prio ?: 'NORMAL',
         ], $errs];
+    }
+
+    // GET /api/price-requests/existing-price?customerId=&itemCode= — what this customer pays today:
+    // the latest price on their orders or quotations for this item code.
+    public function existingPrice(): void
+    {
+        authenticate();
+        $cid = trim((string) qp('customerId', '')); $code = trim((string) qp('itemCode', ''));
+        if ($cid === '' || $code === '') sendSuccess(['price' => null]);
+        $found = [];
+        try {
+            $s = db()->prepare("SELECT i.unitPrice AS price, o.orderDate AS date, COALESCE(o.poNumber, 'order') AS ref FROM `CustomerOrderItem` i JOIN `CustomerOrder` o ON o.id=i.orderId
+                WHERE o.customerId=? AND UPPER(i.itemCode)=UPPER(?) AND i.unitPrice IS NOT NULL ORDER BY o.orderDate DESC, o.createdAt DESC LIMIT 1");
+            $s->execute([$cid, $code]);
+            if ($r = $s->fetch()) $found[] = ['price' => (float) $r['price'], 'date' => substr((string) $r['date'], 0, 10), 'source' => 'Order', 'ref' => $r['ref']];
+        } catch (Throwable $e) {}
+        try {
+            $s = db()->prepare("SELECT qi.netPrice AS price, COALESCE(q.quotationDate, q.createdAt) AS date, q.quotationNumber AS ref FROM `QuotationItem` qi JOIN `Quotation` q ON q.id=qi.quotationId
+                WHERE q.customerId=? AND UPPER(qi.itemCode)=UPPER(?) AND qi.netPrice IS NOT NULL ORDER BY COALESCE(q.quotationDate, q.createdAt) DESC LIMIT 1");
+            $s->execute([$cid, $code]);
+            if ($r = $s->fetch()) $found[] = ['price' => (float) $r['price'], 'date' => substr((string) $r['date'], 0, 10), 'source' => 'Quotation', 'ref' => $r['ref']];
+        } catch (Throwable $e) {}
+        usort($found, fn($a, $b) => strcmp($b['date'], $a['date']));
+        sendSuccess(['price' => $found[0] ?? null, 'all' => $found]);
     }
 
     /** "Urgent" / "high" / "URGENT" → key; blank → NORMAL; anything else → false. */
@@ -432,12 +461,12 @@ $tail",
             $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, createdAt) VALUES (?,?,?,?,?,?,?)')
                 ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', now_sql()]);
             $ins = $pdo->prepare('INSERT INTO `PriceRequest` (id,requestedById,customerId,productId,itemCode,productName,quantity,listPrice,requestedPrice,notes,status,
-                                  batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt,priority)
-                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?,?)');
+                                  batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt,priority,existingPrice)
+                                  VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?,?,?)');
             foreach ($clean as $pos => $ci) {
                 $ins->execute([gen_id(), $auth['id'], $customerId, $ci['productId'], $ci['itemCode'], $ci['productName'], $ci['quantity'], $ci['listPrice'],
                     $ci['requestedPrice'], $ci['notes'], $bid, $ci['category'], $ci['brand'], $ci['supplyType'], $ci['unit'], $ci['discount'],
-                    $ci['leadTime'], $ci['expectedDelivery'], $pos + 1, now_sql(), now_sql(), $ci['priority']]);
+                    $ci['leadTime'], $ci['expectedDelivery'], $pos + 1, now_sql(), now_sql(), $ci['priority'], $ci['existingPrice'] ?? null]);
             }
             $pdo->commit();
         } catch (Throwable $e) {

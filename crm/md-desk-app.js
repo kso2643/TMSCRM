@@ -413,7 +413,7 @@
       var sugg = el('div', { class: 'md-sugg', hidden: true });
       var qs = el('div', { class: 'md-qs' }, [pick, sugg]);
       g.appendChild(field('Pick from Quotations (optional)', qs, true));
-      add('quotationNo', 'Quotation no.', { placeholder: 'e.g. TMS/Q/26/101' });
+      add('quotationNo', 'Quotation no. (optional)', { placeholder: 'blank = a CEO-yymm-nnnn number is given' });
       add('amount', 'Quotation value (₹)', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'blank = total of the items' });
       g.appendChild(linesEditor(ctx));
       add('details', 'Notes', { tag: 'textarea', placeholder: 'Delivery, terms, follow-up…', rows: 2 }, true);
@@ -473,7 +473,7 @@
       if (state.type && i.type !== state.type) return false;
       if (state.status === 'OPEN' && i.status === 'DONE') return false;
       if (state.status === 'DONE' && i.status !== 'DONE') return false;
-      if (q && [i.title, i.details, i.customerName, i.itemCode, i.productName, i.quotationNo, i.fromName, i.toName, (i.items || []).map(function (l) { return [l.itemCode, l.productName, l.supplier].join(' '); }).join(' ')].join(' ').toLowerCase().indexOf(q) === -1) return false;
+      if (q && [i.deskNo, i.title, i.details, i.customerName, i.itemCode, i.productName, i.quotationNo, i.fromName, i.toName, (i.items || []).map(function (l) { return [l.itemCode, l.productName, l.supplier].join(' '); }).join(' ')].join(' ').toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
   }
@@ -518,7 +518,7 @@
         el('span', { class: 'i', text: T.icon }),
         el('div', {}, [
           el('b', { text: i.title }),
-          el('div', { class: 's', text: T.label + ' · ' + (i.mine ? 'to ' + toLabel(i) : 'from ' + (i.fromName || '—') + (i.toId ? '' : ' · to ' + toLabel(i))) }),
+          el('div', { class: 's', text: (i.deskNo ? i.deskNo + ' · ' : '') + T.label + ' · ' + (i.mine ? 'to ' + toLabel(i) : 'from ' + (i.fromName || '—') + (i.toId ? '' : ' · to ' + toLabel(i))) }),
           el('div', { class: 'x', text: itemLine(i) })
         ]),
         right
@@ -546,7 +546,9 @@
           el('div', { style: 'font-size:.8rem;color:#64748b;margin-top:.2rem', text: T.label + ' · from ' + (i.fromName || '—') + ' to ' + toLabel(i) + ' · ' + when(i.createdAt) }),
           el('div', { style: 'display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.35rem' }, [
             el('span', { class: 'md-badge', style: '--c:' + S[1], text: S[0] + (i.status === 'DONE' && i.doneByName ? ' by ' + i.doneByName : '') }),
-            el('span', { class: 'md-badge', style: '--c:' + P[1], text: P[0] + ' priority' })
+            el('span', { class: 'md-badge', style: '--c:' + P[1], text: P[0] + ' priority' }),
+            i.deskNo ? el('button', { type: 'button', class: 'md-badge', 'data-desk-no': i.deskNo, style: '--c:#0f766e;border:0;cursor:pointer', title: 'Copy — type this number on the Quotations page to load the customer and items',
+              text: '# ' + i.deskNo + ' ⧉', onclick: function () { try { navigator.clipboard.writeText(i.deskNo); toast('Copied ' + i.deskNo + ' — paste it on the Quotations page'); } catch (e) { prompt('Copy this number:', i.deskNo); } } }) : null
           ])
         ]),
         el('button', { class: 'md-btn sm', type: 'button', text: '✕', 'aria-label': 'Close', onclick: close })
@@ -554,7 +556,7 @@
       var facts = [];
       if (i.type === 'TASK' || (i.type === 'PRICE' && i.dueDate)) facts.push([i.type === 'PRICE' ? 'Need price by' : 'Due date', i.dueDate ? dmy(i.dueDate) + (i.overdue ? ' (overdue)' : '') : '—']);
       if (i.type === 'PRICE') facts.push(['Customer', i.customerName || '—'], ['Items', String((i.items || []).length || 1)], ['Priced', (i.items || []).filter(function (l) { return l.price != null; }).length + ' of ' + ((i.items || []).length || 1)]);
-      if (i.type === 'QUOTATION') facts.push(['Quotation no.', i.quotationNo], ['Customer', i.customerName], ['Value', i.amount != null ? money(i.amount) : '—']);
+      if (i.type === 'QUOTATION') facts.push(['CEO Desk no.', i.deskNo || '—'], ['Quotation no.', i.quotationNo || '—'], ['Customer', i.customerName], ['Value', i.amount != null ? money(i.amount) : '—']);
       function ppl(lbl, list, c) {
         return el('div', { style: 'font-size:.8rem;margin-top:.3rem' }, [el('b', { text: lbl + ' ' }), el('span', { class: 'md-ppl', style: 'display:inline-flex' }, list.map(function (u) { return el('span', { class: 'md-chip', style: 'padding-right:.6rem;' + (c || ''), text: u.name }); }))]);
       }
@@ -576,6 +578,35 @@
             }))
           ]));
           if (gp && canWork) itemsBox.appendChild(el('div', { class: 'md-acts', style: 'justify-content:flex-start' }, [el('button', { type: 'button', class: 'md-btn grn sm', id: 'md-fill-prices', text: '💰 Enter supplier prices', onclick: editPrices })]));
+          if (i.type === 'QUOTATION' && canWork) itemsBox.appendChild(el('div', { class: 'md-acts', style: 'justify-content:flex-start' }, [
+            el('button', { type: 'button', class: 'md-btn sm', id: 'md-edit-items', text: '✎ Edit items', onclick: editQuoteItems }),
+            i.deskNo ? el('span', { class: 'md-sub', text: 'On the Quotations page type ' + i.deskNo + ' in "Price request / approval no." to load these items.' }) : null]));
+        };
+        /* Quotation: change code, product, qty, price, discount; add / remove lines */
+        var editQuoteItems = function () {
+          var rows = i.items.map(function (l) { return Object.assign({}, l); });
+          function draw2() {
+            clear(itemsBox);
+            function inp(r, k, attrs) { var x = el('input', Object.assign({ value: r[k] == null ? '' : String(r[k]), 'data-qe': k }, attrs || {})); x.oninput = function () { r[k] = x.value; }; return x; }
+            itemsBox.appendChild(el('table', { class: 'md-gp', id: 'md-qe' }, [
+              el('thead', {}, [el('tr', {}, ['Item code', 'Product', 'Qty', 'Price ₹', 'Disc %', ''].map(function (h) { return el('th', { text: h }); }))]),
+              el('tbody', {}, rows.map(function (r, k) {
+                return el('tr', {}, [el('td', { style: 'width:130px' }, [inp(r, 'itemCode')]), el('td', {}, [inp(r, 'productName')]),
+                  el('td', { style: 'width:70px' }, [inp(r, 'quantity', { type: 'number', min: '0', step: 'any' })]), el('td', { style: 'width:100px' }, [inp(r, 'price', { type: 'number', min: '0', step: '0.01' })]),
+                  el('td', { style: 'width:70px' }, [inp(r, 'discount', { type: 'number', min: '0', max: '100', step: '0.01' })]),
+                  el('td', {}, [el('button', { type: 'button', class: 'md-btn sm red', text: '✕', onclick: function () { rows.splice(k, 1); draw2(); } })])]);
+              }))
+            ]));
+            var save = el('button', { type: 'button', class: 'md-btn pri sm', id: 'md-qe-save', text: 'Save items' });
+            save.onclick = function () {
+              save.disabled = true;
+              api('PATCH', '/md-desk/' + encodeURIComponent(i.id) + '/items', { items: rows }).then(function (k) { toast('Items saved'); draw(k); }).catch(function (e) { toast(e.message, 'err'); save.disabled = false; });
+            };
+            itemsBox.appendChild(el('div', { class: 'md-acts', style: 'justify-content:flex-start' }, [
+              el('button', { type: 'button', class: 'md-btn sm', text: '+ Add line', onclick: function () { rows.push({ itemCode: '', productName: '', quantity: '', price: '', discount: '' }); draw2(); } }),
+              save, el('button', { type: 'button', class: 'md-btn sm', text: 'Cancel', onclick: drawItems })]));
+          }
+          draw2();
         };
         /* Get price: the assignee types the supplier, price, discount and lead time per line */
         var editPrices = function () {

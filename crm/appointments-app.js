@@ -450,6 +450,53 @@
   // ══════════════════════════════════════════════════════════════════
   // Page
   // ══════════════════════════════════════════════════════════════════
+  /* After the visit day: visited or not (with the reason), a note, and the next follow-up visit. */
+  function openVisitDialog(a, done) {
+    document.querySelectorAll('.ap-visit-modal').forEach(function (m) { m.remove(); });
+    var ov = el('div', { class: 'ap-visit-modal fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4' });
+    ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
+    var visited = null;
+    var yes = el('button', { type: 'button', class: 'btn-secondary', id: 'ap-v-yes', text: '✓ Visited' });
+    var no = el('button', { type: 'button', class: 'btn-secondary', id: 'ap-v-no', text: '✕ Not visited' });
+    var reasonSel = el('select', { class: 'w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm', id: 'ap-v-reason-sel' },
+      ['', 'Customer not available', 'Customer postponed', 'Customer cancelled', 'Another urgent visit / work', 'Travel / vehicle problem', 'Leave / not well', 'Other'].map(function (t) { return el('option', { value: t, text: t || 'Pick the reason…' }); }));
+    var reason = el('input', { class: 'w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm', id: 'ap-v-reason', placeholder: 'Details (optional)' });
+    var note = el('textarea', { class: 'w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm', id: 'ap-v-note', rows: '2', placeholder: 'What happened at the visit? (optional)' });
+    var nd = el('input', { type: 'date', class: 'rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm', id: 'ap-v-next', min: toDateStr(new Date()) });
+    var nt = el('input', { type: 'time', class: 'rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm', id: 'ap-v-next-time' });
+    var reasonBox = el('div', { class: 'space-y-2 hidden' }, [el('span', { class: 'text-xs text-muted', text: 'Why didn\u2019t the visit happen?' }), reasonSel, reason]);
+    var noteBox = el('div', { class: 'hidden' }, [note]);
+    var err = el('p', { class: 'text-xs text-red-600 hidden' });
+    function pick(v) {
+      visited = v;
+      yes.className = v === true ? 'btn-primary' : 'btn-secondary'; no.className = v === false ? 'btn-primary' : 'btn-secondary';
+      reasonBox.classList.toggle('hidden', v !== false); noteBox.classList.toggle('hidden', v !== true);
+    }
+    yes.onclick = function () { pick(true); }; no.onclick = function () { pick(false); };
+    var save = el('button', { class: 'btn-primary', id: 'ap-v-save', text: 'Save' });
+    save.onclick = function () {
+      err.classList.add('hidden');
+      if (visited === null) { err.textContent = 'Choose visited or not visited.'; err.classList.remove('hidden'); return; }
+      var r = [reasonSel.value, reason.value.trim()].filter(Boolean).join(' — ');
+      if (visited === false && !r) { err.textContent = 'Pick or write the reason.'; err.classList.remove('hidden'); return; }
+      save.disabled = true;
+      api('POST', '/appointments/' + a.id + '/visit', { visited: visited, reason: r, note: note.value.trim(), nextDate: nd.value || null, nextTime: nt.value || null })
+        .then(function () { ov.remove(); if (done) done(); })
+        .catch(function (e) { save.disabled = false; err.textContent = e.message; err.classList.remove('hidden'); });
+    };
+    ov.appendChild(el('div', { class: 'card w-full sm:max-w-md p-5 rounded-b-none sm:rounded-xl space-y-3', role: 'dialog' }, [
+      el('h2', { class: 'section-title', text: 'Visit — ' + (a.customer ? a.customer.companyName : '') }),
+      el('p', { class: 'text-xs text-muted', text: fmtDateLong(a.appointmentDate) + (a.appointmentTime ? ' · ' + fmtTime12(a.appointmentTime) : '') + ' · ' + a.title }),
+      el('div', { class: 'flex gap-2' }, [yes, no]),
+      reasonBox, noteBox,
+      el('div', { class: 'space-y-1' }, [el('span', { class: 'text-xs text-muted', text: 'Next follow-up visit (optional — books it for the same engineer)' }), el('div', { class: 'flex gap-2' }, [nd, nt])]),
+      err,
+      el('div', { class: 'flex gap-2 justify-end' }, [el('button', { class: 'btn-secondary', text: 'Cancel', onclick: function () { ov.remove(); } }), save])
+    ]));
+    document.body.appendChild(ov);
+  }
+  function fmtDateLong(s) { var d = parseDateStr(String(s).slice(0, 10)); return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); }
+
   function mountPage(root) {
     var params = new URLSearchParams(location.search);
     var qDate = params.get('date');
@@ -467,14 +514,33 @@
 
     var bodySlot = el('div', { class: 'mt-4' });
     var headerHost = el('div');
+    var pendingHost = el('div', { id: 'ap-pending' });
+    /* my visits from the last 2 weeks that still need "visited / not visited" */
+    function loadPending() {
+      var me = currentUser(); if (!me) return;
+      var from = toDateStr(new Date(Date.now() - 14 * 864e5)), to = toDateStr(new Date());
+      api('GET', '/appointments?from=' + from + '&to=' + to + '&assignedToId=' + encodeURIComponent(me.id)).then(function (res) {
+        var list = ((res.data && res.data.appointments) || []).filter(function (a) { return a.status === 'SCHEDULED' && !a.visitStatus && String(a.appointmentDate).slice(0, 10) < to; });
+        pendingHost.innerHTML = '';
+        if (!list.length) return;
+        pendingHost.appendChild(el('div', { class: 'card p-3 border-l-4', style: 'border-left-color:#d97706' }, [
+          el('p', { class: 'text-sm font-semibold', text: '📋 ' + list.length + ' past visit' + (list.length === 1 ? '' : 's') + ' to update — did they happen?' }),
+          el('div', { class: 'flex flex-wrap gap-2 mt-2' }, list.slice(0, 12).map(function (a) {
+            return el('button', { class: 'btn-secondary text-xs', 'data-pending-visit': a.id, text: (a.customer ? a.customer.companyName : a.title) + ' · ' + fmtDateLong(a.appointmentDate),
+              onclick: function () { openVisitDialog(a, function () { loadPending(); loadAndRenderBody(); }); } });
+          }))
+        ]));
+      }).catch(function () {});
+    }
     injectCalendarCss();
 
     function render() {
       root.innerHTML = '';
       headerHost.innerHTML = '';
       headerHost.appendChild(buildHeader());
-      root.appendChild(el('div', { class: 'space-y-4' }, [headerHost, bodySlot]));
+      root.appendChild(el('div', { class: 'space-y-4' }, [pendingHost, headerHost, bodySlot]));
       loadAndRenderBody();
+      loadPending();
     }
 
     function renderHeaderOnly() { headerHost.innerHTML = ''; headerHost.appendChild(buildHeader()); }
@@ -498,6 +564,9 @@
         bodySlot.innerHTML = '';
         if (state.view === 'customers') return renderCustomersView();
         bodySlot.appendChild(state.view === 'month' ? renderMonthGrid() : state.view === 'planner' ? renderPlannerView() : state.view === 'week' ? renderWeekView() : renderDayList());
+        // opened from the "Did you visit…?" alert
+        var vid = params.get('visit');
+        if (vid) { params.delete('visit'); var va = state.appointments.filter(function (x) { return x.id === vid; })[0]; if (va && va.status === 'SCHEDULED') openVisitDialog(va, function () { loadAndRenderBody(); loadPending(); }); }
       }).catch(function (e) {
         bodySlot.innerHTML = '';
         bodySlot.appendChild(el('p', { class: 'text-xs text-red-600 dark:text-red-400', text: e.message }));
@@ -1006,6 +1075,14 @@
         return el('div', { class: 'space-y-2', 'data-day-eng': g.id }, [el('p', { class: 'text-sm font-semibold flex items-center gap-2' }, [el('span', { class: 'ap-wdot', style: 'background:' + colorFor(g.id) }), g.name + ' · ' + g.items.length + ' visit' + (g.items.length === 1 ? '' : 's')])].concat(dayCards(g.items)));
       }));
     }
+    function visitLine(a) {
+      var bits = [];
+      if (a.confirmedAt) bits.push(el('span', { class: 'text-[11px] text-green-700', text: '✓ Confirmed' }));
+      if (a.visitStatus === 'VISITED') bits.push(el('span', { class: 'text-[11px] text-green-700 font-semibold', text: '✓ Visited' + (a.visitNote ? ' — ' + a.visitNote : '') }));
+      if (a.visitStatus === 'NOT_VISITED') bits.push(el('span', { class: 'text-[11px] text-red-600 font-semibold', text: '✕ Not visited — ' + (a.visitReason || '') }));
+      if (a.nextAppointmentId) bits.push(el('span', { class: 'text-[11px] text-slate-500', text: '→ next follow-up booked' }));
+      return bits.length ? el('div', { class: 'flex flex-wrap gap-x-3 mt-1', 'data-visit-line': a.id }, bits) : null;
+    }
     function dayCards(sorted) {
       return sorted.map(function (a) {
         var me = currentUser();
@@ -1021,7 +1098,8 @@
             ]),
             el('p', { class: 'text-xs text-muted mt-0.5', text: a.customer.companyName + (a.customer.contactPerson ? ' \u00b7 ' + a.customer.contactPerson : '') }),
             el('p', { class: 'text-xs text-slate-400 mt-0.5', text: 'Engineer: ' + (a.assignedTo ? a.assignedTo.name : '\u2014') }),
-            a.notes ? el('p', { class: 'text-xs text-slate-500 dark:text-slate-400 mt-1.5 italic', text: a.notes }) : null
+            a.notes ? el('p', { class: 'text-xs text-slate-500 dark:text-slate-400 mt-1.5 italic', text: a.notes }) : null,
+            visitLine(a)
           ]),
           el('div', { class: 'flex flex-col items-end gap-1 shrink-0' }, [
             canEdit ? el('button', {
@@ -1031,6 +1109,16 @@
             (isAdmin() || (me && a.user && a.user.id === me.id)) && a.status === 'SCHEDULED' ? el('button', {
               class: 'text-xs text-amber-700 dark:text-amber-300 font-medium', 'data-remind': a.id,
               text: '🔔 Remind', onclick: function () { sendReminder(a); }
+            }) : null,
+            // the engineer confirms the visit
+            me && a.assignedTo && a.assignedTo.id === me.id && a.status === 'SCHEDULED' && !a.confirmedAt && String(a.appointmentDate).slice(0, 10) >= toDateStr(new Date()) ? el('button', {
+              class: 'text-xs text-green-700 font-semibold', 'data-confirm': a.id, text: '✓ Confirm visit',
+              onclick: function () { api('POST', '/appointments/' + a.id + '/confirm').then(loadAndRenderBody).catch(function (e) { alert(e.message); }); }
+            }) : null,
+            // on / after the day: visited or not
+            canEdit && a.status === 'SCHEDULED' && String(a.appointmentDate).slice(0, 10) <= toDateStr(new Date()) ? el('button', {
+              class: 'text-xs text-primary font-semibold', 'data-visit': a.id, text: 'Visited?',
+              onclick: function () { openVisitDialog(a, function () { loadAndRenderBody(); loadPending(); }); }
             }) : null
           ])
         ]);

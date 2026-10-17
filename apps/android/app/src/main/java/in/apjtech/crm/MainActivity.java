@@ -2,7 +2,16 @@ package in.apjtech.crm;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
+import android.media.AudioAttributes;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -43,6 +52,8 @@ import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -67,7 +78,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String APP_URL = BuildConfig.APP_URL;
     private static final String[] ALLOWED_HOSTS = {"crm.apjtech.in", "api.apjtech.in"};
     private static final long LOCK_AFTER_MS = 2 * 60 * 1000L;
-    private static final int REQ_FILE = 11, REQ_PERM_GEO = 21, REQ_PERM_MEDIA = 22, REQ_PERM_CAMERA_FILE = 23;
+    private static final int REQ_FILE = 11, REQ_PERM_GEO = 21, REQ_PERM_MEDIA = 22, REQ_PERM_CAMERA_FILE = 23, REQ_PERM_NOTIFY = 24;
+    private static final String CHANNEL_ID = "crm_alerts_v1";
+    private volatile boolean inForeground = false;
+    private int notifyId = 1000;
 
     private WebView web;
     private FrameLayout root;
@@ -132,22 +146,32 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        createChannel();
         web.setVisibility(View.INVISIBLE);
+        String link = getIntent() != null ? getIntent().getStringExtra("link") : null;
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
-        else web.loadUrl(APP_URL + "/dashboard/");
+        else web.loadUrl(link != null && isAllowed(Uri.parse(link)) ? link : APP_URL + "/dashboard/");
         requireUnlock();
     }
 
     @Override protected void onSaveInstanceState(@NonNull Bundle out) { super.onSaveInstanceState(out); web.saveState(out); }
 
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        String link = intent.getStringExtra("link");
+        if (link != null && isAllowed(Uri.parse(link))) web.loadUrl(link);
+    }
+
     @Override protected void onPause() {
         super.onPause();
+        inForeground = false;
         backgroundAt = SystemClock.elapsedRealtime();
         CookieManager.getInstance().flush();
     }
 
     @Override protected void onResume() {
         super.onResume();
+        inForeground = true;
         if (unlocked && backgroundAt > 0 && SystemClock.elapsedRealtime() - backgroundAt > LOCK_AFTER_MS) {
             unlocked = false;
             web.setVisibility(View.INVISIBLE);
@@ -201,10 +225,71 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onUnlocked() {
+        askNotifyPermission();
         unlocked = true;
         backgroundAt = 0;
         if (lockView != null) { root.removeView(lockView); lockView = null; }
         web.setVisibility(View.VISIBLE);
+    }
+
+    // ── alert sound + notifications ─────────────────────────────────────
+    private void createChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "CRM alerts", NotificationManager.IMPORTANCE_HIGH);
+        ch.setDescription("Tasks, CEO Desk messages, reminders and other CRM alerts");
+        ch.enableVibration(true);
+        ch.setVibrationPattern(new long[]{0, 180, 80, 180});
+        ch.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.createNotificationChannel(ch);
+    }
+
+    private boolean notifyAsked = false;
+    private void askNotifyPermission() {
+        if (notifyAsked || Build.VERSION.SDK_INT < 33) return;
+        notifyAsked = true;
+        if (!has(Manifest.permission.POST_NOTIFICATIONS)) requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_PERM_NOTIFY);
+    }
+
+    private long lastSoundAt = 0;
+    /** Plays the phone's notification sound + vibration (when the app is open). */
+    void playAlertSound(boolean urgent) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastSoundAt < 1500) return;
+        lastSoundAt = now;
+        try {
+            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
+            if (r != null) r.play();
+        } catch (Exception ignored) { }
+        try {
+            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                long[] pat = urgent ? new long[]{0, 180, 80, 180, 80, 180} : new long[]{0, 140};
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) v.vibrate(VibrationEffect.createWaveform(pat, -1)); else v.vibrate(pat, -1);
+            }
+        } catch (Exception ignored) { }
+    }
+
+    /** A real Android notification (with sound) — used when the app is in the background. */
+    void postNotification(String title, String body, String link) {
+        Intent open = new Intent(this, MainActivity.class);
+        open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        if (link != null && !link.isEmpty()) open.putExtra("link", link.startsWith("http") ? link : APP_URL + (link.startsWith("/") ? link : "/" + link));
+        int id = ++notifyId;
+        PendingIntent pi = PendingIntent.getActivity(this, id, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_notify)
+                .setContentTitle(title == null || title.isEmpty() ? "APJ CRM" : title)
+                .setContentText(body == null ? "" : body)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(body == null ? "" : body))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setAutoCancel(true)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setContentIntent(pi);
+        try { NotificationManagerCompat.from(this).notify(id, b.build()); } catch (SecurityException ignored) { /* notifications not allowed */ }
     }
 
     // ── navigation ──────────────────────────────────────────────────────
@@ -385,6 +470,23 @@ public class MainActivity extends AppCompatActivity {
 
     /** Called from the page: saves a file to Downloads and opens it. Only answers the CRM's own pages. */
     class Bridge {
+        /** The page's alert sound → the phone's notification sound (only while the app is on screen). */
+        @JavascriptInterface
+        public void playSound(String level) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || !inForeground) return;
+            runOnUiThread(() -> playAlertSound("urgent".equals(level)));
+        }
+
+        /** An alert while the app is in the background → Android notification with sound. */
+        @JavascriptInterface
+        public void showNotification(String title, String body, String link) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || inForeground) return;
+            runOnUiThread(() -> postNotification(title, body, link));
+        }
+
+        @JavascriptInterface
+        public boolean isNative() { return true; }
+
         @JavascriptInterface
         public void saveFile(String dataUrl, String name, String mime) {
             if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl))) return;

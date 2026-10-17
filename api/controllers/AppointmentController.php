@@ -15,6 +15,61 @@ class AppointmentController
         ensure_schema($schema, 'migration_appointments.sql');
         // a reminder sent by hand carries its own message and who sent it
         ensure_schema(['AppointmentAlert' => ['create' => '', 'columns' => ['note' => 'VARCHAR(255) NULL', 'sentById' => 'VARCHAR(30) NULL']]], 'Appointment reminders');
+        // the engineer confirms the visit; after the visit: visited or not (reason) and the next follow-up
+        ensure_schema(['Appointment' => ['create' => '', 'columns' => [
+            'confirmedAt' => 'DATETIME NULL', 'confirmedById' => 'VARCHAR(30) NULL',
+            'visitStatus' => 'VARCHAR(12) NULL', 'visitReason' => 'TEXT NULL', 'visitNote' => 'TEXT NULL',
+            'visitMarkedAt' => 'DATETIME NULL', 'visitMarkedById' => 'VARCHAR(30) NULL', 'nextAppointmentId' => 'VARCHAR(30) NULL',
+        ]]], 'Appointment visit outcome');
+    }
+
+    // POST /api/appointments/:id/confirm — the engineer confirms the visit
+    public function confirm(string $id): void
+    {
+        $auth = authenticate();
+        $a = $this->fetchRow($id);
+        if (!$a) sendError('Appointment not found.', 404);
+        if (($a['assignedToId'] ?: $a['userId']) !== $auth['id'] && !self::seesAll($auth)) sendError('Only the engineer the visit is assigned to can confirm it.', 403);
+        db()->prepare('UPDATE `Appointment` SET confirmedAt=?, confirmedById=?, updatedAt=? WHERE id=?')->execute([now_sql(), $auth['id'], now_sql(), $id]);
+        db()->prepare("UPDATE `AppointmentAlert` SET isRead=1 WHERE appointmentId=? AND userId=? AND alertType='TASK_ASSIGNED'")->execute([$id, $auth['id']]);
+        log_activity($auth['id'], 'APPOINTMENT_CONFIRMED', 'Appointment', $id);
+        $this->show($id);
+    }
+
+    /**
+     * POST /api/appointments/:id/visit { visited: bool, reason?, note?, nextDate?, nextTime? }
+     * After the visit day: visited (→ Completed) or not visited with the reason; a next date books the
+     * follow-up visit (same customer, same engineer) and is shown on the old one.
+     */
+    public function visit(string $id): void
+    {
+        $auth = authenticate();
+        $a = $this->fetchRow($id);
+        if (!$a) sendError('Appointment not found.', 404);
+        $mine = ($a['assignedToId'] ?: $a['userId']) === $auth['id'] || $a['userId'] === $auth['id'];
+        if (!$mine && !self::seesAll($auth)) sendError('Only the engineer, the person who booked it or an Admin can update the visit.', 403);
+        $b = request_body();
+        $visited = filter_var($b['visited'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($visited === null) sendError('Choose visited or not visited.', 400);
+        $reason = trim((string) ($b['reason'] ?? ''));
+        if (!$visited && $reason === '') sendError('Write why the visit did not happen.', 400);
+        $note = trim((string) ($b['note'] ?? ''));
+        $nextDate = to_date_only($b['nextDate'] ?? null);
+        $nextTime = preg_match('/^\d{1,2}:\d{2}$/', (string) ($b['nextTime'] ?? '')) ? $b['nextTime'] : null;
+        if ($nextDate && $nextDate < date('Y-m-d')) sendError('The next follow-up date cannot be in the past.', 400);
+        $nextId = null;
+        if ($nextDate) {
+            $nextId = gen_id();
+            $title = $visited ? 'Follow-up: ' . preg_replace('/^Follow-up:\s*/', '', (string) $a['title']) : (string) $a['title'];
+            db()->prepare("INSERT INTO `Appointment` (id,userId,customerId,assignedToId,title,appointmentDate,appointmentTime,notes,status,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,'SCHEDULED',?,?)")
+                ->execute([$nextId, $auth['id'], $a['customerId'], $a['assignedToId'] ?: $a['userId'], mb_substr($title, 0, 255), $nextDate, $nextTime,
+                    ($visited ? 'Next follow-up after the visit on ' : 'Re-planned — not visited on ') . date('j M', strtotime((string) $a['appointmentDate'])) . ($visited ? '' : ': ' . $reason), now_sql(), now_sql()]);
+        }
+        $status = $visited ? 'COMPLETED' : ($nextDate ? 'RESCHEDULED' : 'CANCELLED');
+        db()->prepare('UPDATE `Appointment` SET status=?, visitStatus=?, visitReason=?, visitNote=?, visitMarkedAt=?, visitMarkedById=?, nextAppointmentId=?, updatedAt=? WHERE id=?')
+            ->execute([$status, $visited ? 'VISITED' : 'NOT_VISITED', $visited ? null : mb_substr($reason, 0, 2000), $note !== '' ? mb_substr($note, 0, 2000) : null, now_sql(), $auth['id'], $nextId, now_sql(), $id]);
+        log_activity($auth['id'], $visited ? 'APPOINTMENT_VISITED' : 'APPOINTMENT_NOT_VISITED', 'Appointment', $id, ['reason' => $reason, 'next' => $nextDate]);
+        $this->show($id);
     }
 
     // POST /api/appointments/:id/remind { note } — remind the assigned engineer now (pops up on every page for them)

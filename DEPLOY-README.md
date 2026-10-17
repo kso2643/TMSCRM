@@ -1,3 +1,40 @@
+# Update — 17 Oct (a): PO PDF reading, existing price, fuel bills, trial progress, app sound, CEO Desk numbers, visit check
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `crm/po-extract.js`.
+- **New folder:** `api/uploads/fuel-bills/` is created automatically.
+- **Database:** all new columns and the table `FuelExpenseBill` are added automatically.
+- **Phone app:** install the new APK from Releases (needed for the notification sound).
+
+1. **Orders — read the PO PDF:**
+   - Choose **Purchase order** and pick the PO PDF. The CRM reads item code, description, quantity, price, line value, PO number, PO date, PO total and the customer name.
+   - Works with different PO layouts (one- or two-line headings, serial-number columns, descriptions on the next line, discount columns).
+   - Every line stays editable: code, name, qty and price. The order value updates as you edit unless you typed your own.
+   - The customer is filled in automatically when the name on the PO matches a customer.
+   - **Verbal** orders work as before: add the items by hand.
+   - Scanned PDFs (photos with no text) can't be read; you'll see a message and can add the items by hand.
+2. **Price requests — customer's existing price:**
+   - New field **"Customer's existing ₹/unit"**. It fills itself from the last order or quotation price for that customer and code, and can be edited.
+   - It is shown in a new **Existing** column.
+3. **Fuel expense — bills and misc. items:**
+   - On the close form, in Edit and with the 🧾 button: add misc. items (description, amount, bill no., photo or PDF) and attach petrol bills.
+   - The **Misc.** amount becomes the total of the misc. items.
+   - Admin sees all bills with **🧾 View**.
+4. **Trials — progress dropdown** (approved trials):
+   - Choose **Trial running**, **Postponed** (asks for the new date), **Completed** (opens the trial for the report) or **Other reason** (asks for the reason).
+5. **Phone app sound:**
+   - Alerts now play the phone's notification sound and vibrate.
+   - When the app is in the background, a phone notification appears; tapping it opens the right page.
+   - Android 13+ asks once for notification permission.
+6. **CEO Desk — numbers:**
+   - Every CEO Desk item now gets a number like **CEO-2610-0001** (older items numbered automatically).
+   - On the Quotations page, type that number in the price-request box to load the customer and items. Everything stays editable.
+   - Quotation items on the CEO Desk can be edited with **✎ Edit items**.
+7. **Appointments — confirm and visit check:**
+   - The engineer presses **Confirm**, and the person who booked the visit is told.
+   - After the visit time the engineer gets **"Did you visit …?"**. They answer **Visited** (with a note) or **Not visited** (with a reason) and can book the next follow-up date.
+   - Past visits with no answer are listed at the top of the Appointments page.
+
 # Update — 16 Oct (e): Android app (.apk), Windows app (.exe), server security hardening
 
 **Upload:** `api/` and `crm/` (icons fixed), then press **Ctrl+Shift+R** once.

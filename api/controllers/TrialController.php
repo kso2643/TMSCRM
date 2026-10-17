@@ -88,7 +88,10 @@ $tail",
                                'quotationNo' => 'VARCHAR(40) NULL',
                                // DC approval: tools sent on delivery challan for the allotted trial date
                                'dcStatus' => 'VARCHAR(20) NULL', 'dcDate' => 'DATE NULL', 'dcNo' => 'VARCHAR(60) NULL', 'dcNote' => 'TEXT NULL',
-                               'dcApprovedById' => 'VARCHAR(30) NULL', 'dcApprovedAt' => 'DATETIME NULL'],
+                               'dcApprovedById' => 'VARCHAR(30) NULL', 'dcApprovedAt' => 'DATETIME NULL',
+                               // where an approved trial stands: RUNNING / POSTPONED (to a date) / REPORT_DUE (done, report to fill) / OTHER (reason)
+                               'progress' => 'VARCHAR(12) NULL', 'progressDate' => 'DATE NULL', 'progressReason' => 'TEXT NULL',
+                               'progressAt' => 'DATETIME NULL', 'progressById' => 'VARCHAR(30) NULL'],
             ],
         ];
     }
@@ -168,6 +171,10 @@ $tail",
             'edaFileId'      => $r['edaFileId'] ?? null,
             'cmpFileId'      => self::canSeeSavings($this->viewer(), $r) ? ($r['cmpFileId'] ?? null) : null,
             'completedAt'    => $r['completedAt'],
+            'progress'       => $r['status'] === 'COMPLETED' ? 'COMPLETED' : ($r['progress'] ?? null),
+            'progressDate'   => $r['progressDate'] ?? null,
+            'progressReason' => $r['progressReason'] ?? null,
+            'progressAt'     => $r['progressAt'] ?? null,
             'createdAt'      => $r['createdAt'],
             'updatedAt'      => $r['updatedAt'],
         ];
@@ -474,6 +481,33 @@ $tail",
         $s = db()->prepare("SELECT MAX(CAST(SUBSTRING(quotationNo, ?) AS UNSIGNED)) FROM `Trial` WHERE quotationNo LIKE ?");
         $s->execute([strlen($prefix) + 1, $prefix . '%']);
         return $prefix . str_pad((string) (((int) $s->fetchColumn()) + 1), 4, '0', STR_PAD_LEFT);
+    }
+
+    // PATCH /api/trials/:id/progress { progress: RUNNING|POSTPONED|COMPLETED|OTHER, date?, reason? }
+    // COMPLETED marks the trial done and asks for the trial (savings) report — the trial only
+    // becomes "Completed" once that report is submitted.
+    public function setProgress(string $id): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Trial not found.', 404);
+        if (!$this->canEdit($auth, $row)) sendError('Only the engineer who raised it or an Admin can update the trial.', 403);
+        if ($row['status'] === 'COMPLETED') sendError('This trial is already completed (report submitted).', 400);
+        if ($row['status'] !== 'APPROVED') sendError('The trial status can be set once the trial is approved.', 400);
+        $b = request_body();
+        $p = strtoupper(trim((string) ($b['progress'] ?? '')));
+        $map = ['RUNNING' => 'RUNNING', 'POSTPONED' => 'POSTPONED', 'COMPLETED' => 'REPORT_DUE', 'REPORT_DUE' => 'REPORT_DUE', 'OTHER' => 'OTHER'];
+        if (!isset($map[$p])) sendError('Pick: running, postponed, completed or other.', 400);
+        $p = $map[$p];
+        $date = to_date_only($b['date'] ?? null);
+        $reason = trim((string) ($b['reason'] ?? ''));
+        if ($p === 'POSTPONED' && !$date) sendError('Pick the date the trial is postponed to.', 400);
+        if ($p === 'OTHER' && $reason === '') sendError('Write the reason.', 400);
+        db()->prepare('UPDATE `Trial` SET progress=?, progressDate=?, progressReason=?, progressAt=?, progressById=? WHERE id=?')
+            ->execute([$p, $p === 'POSTPONED' ? $date : null, $reason !== '' ? mb_substr($reason, 0, 2000) : null, now_sql(), $auth['id'], $id]);
+        log_activity($auth['id'], 'TRIAL_PROGRESS', 'Trial', $id, ['progress' => $p, 'date' => $date, 'reason' => $reason]);
+        $msg = ['RUNNING' => 'Marked running', 'POSTPONED' => 'Postponed to ' . date('j M Y', strtotime((string) $date)), 'REPORT_DUE' => 'Trial done — fill the trial report to complete it', 'OTHER' => 'Saved'][$p];
+        sendSuccess(['trial' => $this->shape($this->fetchRow($id), false)], $msg);
     }
 
     // PATCH /api/trials/:id/dc — Admin / Super Admin approve the DC with the allotted trial date { dcDate, dcNo?, note? }

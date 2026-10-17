@@ -546,9 +546,12 @@
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'running') audioUnlocked = true;
   } catch (e) {}
+  // In the Android app the phone plays its own notification sound (web audio is often blocked there).
+  function nativeApp() { try { return !!(window.CRMNative && window.CRMNative.playSound); } catch (e) { return false; } }
   function chime(level) {
     if (lsGet(SOUND_KEY) === 'off') return;
     level = level === 'urgent' ? 'urgent' : 'normal';
+    if (nativeApp()) { try { window.CRMNative.playSound(level); } catch (e) {} return; }
     if (!audioCtx || !audioUnlocked || audioCtx.state !== 'running') {
       if (audioCtx && audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
       if (!audioCtx || audioCtx.state !== 'running') { if (pendingChime !== 'urgent') pendingChime = level; return; }
@@ -651,8 +654,8 @@
       more.className = 'a more';
     }
     var muted = lsGet(SOUND_KEY) === 'off';
-    var needClick = !audioUnlocked && !muted;
-    var canAsk = 'Notification' in window && Notification.permission === 'default';
+    var needClick = !audioUnlocked && !muted && !nativeApp();
+    var canAsk = !nativeApp() && 'Notification' in window && Notification.permission === 'default';
     hintEl = mk('div', 'bar');
     hintEl.appendChild(mk('span', '', muted ? '🔇 Sound is off' : needClick ? '🔈 Click anywhere on the page to turn on alert sounds' : '🔔 Alert sounds on'));
     var acts = mk('span');
@@ -725,6 +728,8 @@
     return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   }
   function desktop(ev) {
+    // Android app: a real phone notification (with sound) when the app is in the background
+    if (nativeApp() && window.CRMNative.showNotification) { try { window.CRMNative.showNotification(String(ev.title || 'APJ CRM'), String(ev.body || ''), String(ev.link || '')); } catch (e) {} return; }
     try {
       if (!('Notification' in window) || Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
       var n = new Notification(ev.title, { body: ev.body, tag: ev.id, icon: '/icons/icon-192x192.png' });
