@@ -23,6 +23,7 @@
  *   LOCATION_OFF           someone punched in has location turned off (Super Admin)
  *   MD_DESK_NEW / _REPLY / _DONE  MD desk items between the Super Admin and Admins
  *   INVOICE_OVERDUE / BILL_DUE     accounts reminders (accounts team + Super Admin)
+ *   PETTY_CASH_LOW         petty cash dropped to the low-balance alert (people with petty cash access)
  *
  * GET /api/alerts-feed/history?days=30 returns the same events over the
  * last N days (max 60) for the Alerts & reminders page.
@@ -266,6 +267,20 @@ class AlertFeedController
                     ($r['partyName'] ?: '') . ' — balance ₹' . number_format((float) $r['balance'], 2), $inv ? '/accounts/#/invoices' : '/accounts/#/bills', $at);
             }
         }
+
+        // Petty cash low (everyone who can see petty cash)
+        try {
+            if (class_exists('PettyCashController') && PageAccess::levelFor($auth, 'petty-cash') !== 'hidden') {
+                new PettyCashController();
+                $pc = PettyCashController::settings();
+                if ($pc['lowAt'] && $pc['lowAt'] > $since && $pc['lowAt'] <= now_sql()) {
+                    $top = $pc['limit'] !== null ? max(0, $pc['limit'] - (float) $pc['lowBalance']) : null;
+                    $add('petty-low-' . $pc['lowAt'], 'PETTY_CASH_LOW', '💵 Petty cash is low',
+                        'Balance ₹' . number_format((float) $pc['lowBalance']) . ' — at or below the alert amount of ₹' . number_format((float) $pc['lowAlert'])
+                        . ($top !== null ? '. Top up ₹' . number_format($top) . ' to reach the limit.' : '.'), '/fuel-expense/#petty-cash', $pc['lowAt']);
+                }
+            }
+        } catch (Throwable $e) {}
 
         // Chat messages to me
         try { new ChatController(); } catch (Throwable $e) {}

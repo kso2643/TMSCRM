@@ -1,3 +1,31 @@
+# Update — 20 Oct (b): Petty cash limit + low-balance alert, Quick search across the whole CRM
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New file:** `api/controllers/SearchController.php`.
+- **Database:** table `PettyCashSetting` is created automatically.
+
+1. **Petty cash limit and low-balance alert:**
+   - Super Admin / Admin press **⚙ Limit & alert** on the Petty cash tab and set:
+     - the **limit** (the most cash to keep in hand, e.g. ₹20,000)
+     - the **alert amount** (e.g. ₹3,000)
+   - Cash received that would take the balance above the limit is refused, and the message says how much can still be received.
+   - An expense can never be more than the cash in hand.
+   - When an expense takes the balance to the alert amount or below:
+     - a red **"Petty cash is low"** banner shows how much to top up, with a **+ Record top-up** button that fills in the amount
+     - everyone with petty cash access gets a **💵 Petty cash is low** alert (toast, sound and the Alerts page)
+   - The *Balance in hand* tile shows a bar against the limit.
+   - Leave a box empty to turn that check off.
+2. **Quick search:**
+   - Press **Ctrl + K** (⌘ K on Mac) anywhere, or click **Quick search…** in the top bar. On phones, use the ⌕ icon.
+   - One box searches:
+     - pages
+     - customers, products, quotations, orders, price requests, trials, appointments
+     - CEO Desk, MOM, internal meetings
+     - vendors, purchase orders and people (admins)
+     - petty cash (people with access)
+   - Each person only finds what they can already see. Engineers find their own quotations, orders, requests and visits, and pages set to *Hidden* are left out.
+   - Use ↑ ↓ and Enter, or click a result. It opens the page with that record already typed into the page's search box (customers open their detail page, trials open the trial).
+
 # Update — 20 Oct (a): Petty cash (Fuel expense page) with bills and page access
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

@@ -238,6 +238,11 @@
         themeBtn.textContent = isDark ? '☀' : '☾';
       }
     });
+    if (!document.getElementById('qs-shell-css')) {
+      var qcss = document.createElement('style'); qcss.id = 'qs-shell-css';
+      qcss.textContent = '@media (max-width:767px){[data-quick-search] .qs-lbl{display:none}}';
+      document.head.appendChild(qcss);
+    }
     return e('header', {
       class: 'h-16 fixed top-0 right-0 left-0 md:left-64 z-20 flex items-center gap-3 px-4 ' +
              'bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700'
@@ -246,6 +251,10 @@
         [icon('Menu', 'w-5 h-5')]),
       e('h1', { class: 'text-base font-semibold text-slate-900 dark:text-slate-100 truncate hidden sm:block', text: title }),
       e('div', { class: 'flex-1' }),
+      e('button', {
+        'data-quick-search': '1', title: 'Quick search (Ctrl K)', 'aria-label': 'Quick search',
+        class: 'flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 transition-colors'
+      }, [e('span', { text: '⌕' }), e('span', { class: 'qs-lbl', text: 'Quick search…' }), e('kbd', { class: 'qs-lbl', style: 'margin-left:.4rem;font-size:10px;background:rgba(148,163,184,.18);border-radius:4px;padding:1px 4px', text: 'Ctrl K' })]),
       themeBtn
     ]);
   }

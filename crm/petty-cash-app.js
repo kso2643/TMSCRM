@@ -82,6 +82,10 @@
       '.pc-chip i{font-style:normal;color:#b91c1c;margin-left:.15rem}.pc-nobill{color:#b45309;font-size:.72rem;font-weight:600}',
       '.pc-warn{background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:.6rem;padding:.45rem .7rem;font-size:.82rem;margin-bottom:.8rem}.dark .pc-warn{background:#422006;color:#fde68a;border-color:#a16207}',
       '.pc-empty{padding:2rem;text-align:center;color:#64748b}',
+      '.pc-low{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;border-radius:.7rem;padding:.6rem .9rem;font-size:.88rem;font-weight:600;margin-bottom:.8rem}',
+      '.dark .pc-low{background:#450a0a;color:#fecaca;border-color:#b91c1c}.pc-tile small{display:block;font-size:.72rem;color:#64748b;margin-top:.15rem}',
+      '.pc-meter{height:.4rem;border-radius:999px;background:#e2e8f0;overflow:hidden;margin-top:.35rem}.pc-meter i{display:block;height:100%;background:var(--m)}.dark .pc-meter{background:#334155}',
+      '.pc-hint{font-size:.78rem;color:#475569;background:#f8fafc;border-radius:.5rem;padding:.4rem .6rem;margin-bottom:.6rem}.dark .pc-hint{background:#0f172a;color:#cbd5e1}',
       '.pc-modal{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:2147483400;display:flex;align-items:flex-start;justify-content:center;padding:5vh 1rem;overflow:auto}',
       '.pc-dlg{background:#fff;border-radius:1rem;max-width:560px;width:100%;padding:1.2rem;box-sizing:border-box}.dark .pc-dlg{background:#1e293b}.pc-dlg h2{margin:0 0 .8rem;font-size:1.1rem}',
       '.pc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}.pc-f{display:flex;flex-direction:column;gap:.2rem;min-width:0}.pc-f.w{grid-column:1/-1}.pc-f label{font-size:.73rem;font-weight:600;color:#475569}.dark .pc-f label{color:#cbd5e1}',
@@ -130,7 +134,8 @@
     var xl = el('button', { class: 'pc-btn', id: 'pc-excel', text: '⬇ Excel', onclick: function () {
       blob('/petty-cash/export?from=' + st.from + '&to=' + st.to).then(function (b) { save(b, 'petty-cash-' + st.from + '-to-' + st.to + '.xlsx'); }).catch(function (e) { toast(e.message, 'err'); });
     } });
-    var actions = el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, [xl, addIn, addOut]);
+    var setBtn = el('button', { class: 'pc-btn', id: 'pc-settings', text: '⚙ Limit & alert', style: 'display:none', onclick: function () { settings(); } });
+    var actions = el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, [setBtn, xl, addIn, addOut]);
     root.appendChild(el('div', { class: 'pc-wrap' }, [
       el('div', { class: 'pc-head' }, [el('div', {}, [el('h1', { text: 'Petty cash' }), el('p', { text: 'Cash received and spent, with the bills, and the balance in hand.' })]), actions]),
       el('div', { class: 'pc-bar' }, [from, el('span', { class: 'pc-sub', text: 'to' }), to, type, search]),
@@ -141,7 +146,8 @@
     function load() {
       var q = 'from=' + st.from + '&to=' + st.to + (st.type ? '&type=' + st.type : '') + (st.search ? '&search=' + encodeURIComponent(st.search) : '');
       api('GET', '/petty-cash?' + q).then(function (j) {
-        var d = j.data; st.level = d.level; st.categories = d.categories || [];
+        var d = j.data; st.level = d.level; st.categories = d.categories || []; st.limits = d.limits || {};
+        setBtn.style.display = st.limits.canSet ? '' : 'none';
         addIn.style.display = addOut.style.display = canAdd() ? '' : 'none';
         render(d);
       }).catch(function (e) { clear(card).appendChild(el('div', { class: 'pc-empty', text: e.message })); });
@@ -152,7 +158,18 @@
       [['Opening balance', s.opening, '#64748b'], ['Received', s['in'], '#15803d'], ['Spent', s.out, '#b91c1c'], ['Balance in hand', s.closing, '#1e3a8a']].forEach(function (t, i) {
         tiles.appendChild(el('div', { class: 'pc-tile', style: '--c:' + t[2], 'data-pc-tile': String(i) }, [el('span', { text: t[0] }), el('b', { text: money(t[1]) || '₹0' })]));
       });
+      var L = st.limits || {};
+      if (L.limit != null) {
+        var pct = Math.max(0, Math.min(100, Math.round(100 * L.balanceNow / L.limit)));
+        var t3 = tiles.querySelector('[data-pc-tile="3"]');
+        t3.appendChild(el('small', { 'data-pc-limit': '', text: 'in hand now ' + money(L.balanceNow) + ' of ' + money(L.limit) + ' limit' }));
+        t3.appendChild(el('div', { class: 'pc-meter', style: '--m:' + (L.low ? '#dc2626' : pct < 40 ? '#d97706' : '#16a34a') }, [el('i', { style: 'width:' + pct + '%' })]));
+      }
       clear(warn);
+      if (L.low) warn.appendChild(el('div', { class: 'pc-low', id: 'pc-low', role: 'alert' }, [
+        el('span', { text: '⚠ Petty cash is low — ' + money(L.balanceNow) + ' in hand (alert at ' + money(L.lowAlert) + ').' + (L.topUp ? ' Top up ' + money(L.topUp) + ' to reach the limit.' : '') }),
+        canAdd() ? el('button', { class: 'pc-btn sm grn', id: 'pc-topup', text: '+ Record top-up', onclick: function () { editor(null, 'IN', L.topUp); } }) : null
+      ]));
       if (s.outWithoutBill) warn.appendChild(el('div', { class: 'pc-warn', id: 'pc-nobill', text: '⚠ ' + s.outWithoutBill + ' expense' + (s.outWithoutBill > 1 ? 's have' : ' has') + ' no bill attached.' }));
       clear(card);
       var filtered = !!(st.type || st.search);
@@ -197,7 +214,35 @@
       ]));
     }
 
-    function editor(x, kind) {
+    function settings() {
+      var L = st.limits || {};
+      var ov = el('div', { class: 'pc-modal' });
+      function close() { ov.remove(); }
+      ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
+      var lim = el('input', { type: 'number', class: 'pc-in', id: 'pc-s-limit', min: '0', step: '1', placeholder: 'e.g. 20000', value: L.limit != null ? String(L.limit) : '' });
+      var low = el('input', { type: 'number', class: 'pc-in', id: 'pc-s-low', min: '0', step: '1', placeholder: 'e.g. 3000', value: L.lowAlert != null ? String(L.lowAlert) : '' });
+      var err = el('div', { class: 'pc-err' });
+      var save = el('button', { class: 'pc-btn pri', id: 'pc-s-save', text: 'Save' });
+      save.addEventListener('click', function () {
+        err.textContent = ''; save.disabled = true;
+        api('PUT', '/petty-cash/settings', { limit: lim.value, lowAlert: low.value }).then(function (j) { toast(j.message); close(); load(); })
+          .catch(function (e) { err.textContent = e.message; save.disabled = false; });
+      });
+      ov.appendChild(el('div', { class: 'pc-dlg', role: 'dialog', 'aria-modal': 'true' }, [
+        el('h2', { text: 'Petty cash limit & low-balance alert' }),
+        el('div', { class: 'pc-hint', text: 'Cash in hand now: ' + (money(L.balanceNow) || '₹0') + '. Cash received cannot take the balance above the limit; when expenses bring it down to the alert amount, everyone with petty cash access gets an alert.' }),
+        el('div', { class: 'pc-grid' }, [
+          el('div', { class: 'pc-f' }, [el('label', { text: 'Petty cash limit (₹)' }), lim]),
+          el('div', { class: 'pc-f' }, [el('label', { text: 'Alert when balance is at or below (₹)' }), low])
+        ]),
+        el('p', { class: 'pc-sub', text: 'Leave a box empty to turn it off.' }),
+        err,
+        el('div', { class: 'pc-foot' }, [el('button', { class: 'pc-btn', type: 'button', text: 'Cancel', onclick: close }), save])
+      ]));
+      document.body.appendChild(ov);
+    }
+
+    function editor(x, kind, preset) {
       var ov = el('div', { class: 'pc-modal' });
       function close() { ov.remove(); }
       ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
@@ -209,13 +254,20 @@
         seg.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-k') === k); });
         if (catF) catF.style.display = k === 'OUT' ? '' : 'none';
         if (paidLab) paidLab.textContent = k === 'OUT' ? 'Paid to' : 'Received from';
+        drawHint();
         desc.placeholder = k === 'OUT' ? 'What was it for? e.g. Courier to Hosur customer' : 'e.g. Cash withdrawn from bank / given by MD';
       }
       [['IN', 'Cash received', 'in'], ['OUT', 'Expense (cash spent)', 'out']].forEach(function (k) {
         seg.appendChild(el('button', { type: 'button', 'data-k': k[0], class: k[2], text: k[1], onclick: function () { setKind(k[0]); } }));
       });
       var date = el('input', { type: 'date', class: 'pc-in', id: 'pc-e-date', value: x ? x.entryDate : iso(new Date()), max: iso(new Date()) });
-      var amt = el('input', { type: 'number', class: 'pc-in', id: 'pc-e-amount', min: '0', step: '0.01', inputmode: 'decimal', placeholder: '0', value: x ? String(x.amount) : '' });
+      var amt = el('input', { type: 'number', class: 'pc-in', id: 'pc-e-amount', min: '0', step: '0.01', inputmode: 'decimal', placeholder: '0', value: x ? String(x.amount) : (preset ? String(preset) : '') });
+      var L = st.limits || {};
+      var hint = el('div', { class: 'pc-hint', id: 'pc-e-hint' });
+      function drawHint() {
+        var hand = (L.balanceNow || 0) - (x ? (x.type === 'IN' ? x.amount : -x.amount) : 0);
+        hint.textContent = 'Cash in hand: ' + (money(hand) || '₹0') + (L.limit != null ? ' · limit ' + money(L.limit) + (cur === 'IN' ? ' · you can receive up to ' + money(Math.max(0, L.limit - hand)) : '') : '');
+      }
       var cat = el('select', { class: 'pc-in', id: 'pc-e-cat' }, st.categories.map(function (c) { return el('option', { value: c, text: c }); }));
       cat.value = x && x.category ? x.category : 'Other';
       if (x && x.category && st.categories.indexOf(x.category) < 0) { cat.appendChild(el('option', { value: x.category, text: x.category })); cat.value = x.category; }
@@ -240,7 +292,7 @@
       });
       ov.appendChild(el('div', { class: 'pc-dlg', role: 'dialog', 'aria-modal': 'true' }, [
         el('h2', { text: x ? 'Edit petty cash entry' : 'New petty cash entry' }),
-        seg,
+        seg, hint,
         el('div', { class: 'pc-grid' }, [
           el('div', { class: 'pc-f' }, [el('label', { text: 'Date *' }), date]),
           el('div', { class: 'pc-f' }, [el('label', { text: 'Amount (₹) *' }), amt]),

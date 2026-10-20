@@ -1018,4 +1018,141 @@
       return true;
     }
   };
+
+  // ── Quick search (Ctrl / ⌘ + K, or "Quick search…" in the top bar) ───
+  // One box for the whole CRM: pages from the menu, plus customers, products,
+  // quotations, orders, price requests, trials, appointments, CEO Desk, MOM,
+  // meetings, vendors / POs, people and petty cash from GET /api/search (which
+  // applies each page's visibility). Results open the page; links with ?q=
+  // fill that page's own search box (qsPrefill below).
+  var qs = null;
+  function qsPages() {
+    var seen = {}, out = [];
+    var links = document.querySelectorAll('aside a[href^="/"], nav a[href^="/"]');
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i], href = a.getAttribute('href'), label = (a.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!label || seen[href] || /login/.test(href)) continue;
+      if (getComputedStyle(a).display === 'none') continue;   // hidden by page access
+      seen[href] = 1; out.push({ title: label, sub: 'Page', link: href });
+    }
+    return out;
+  }
+  function qsOpen() {
+    if (!token()) return;
+    if (!qs) qsBuild();
+    qs.host.style.display = 'block';
+    qs.input.value = ''; qsRender([], ''); qs.input.focus();
+  }
+  function qsClose() { if (qs) { qs.host.style.display = 'none'; clearTimeout(qs.t); } }
+  function qsBuild() {
+    var host = document.createElement('div'); host.id = 'crm-qs';
+    host.style.cssText = 'position:fixed;inset:0;z-index:2147483450;display:none';
+    var root = host.attachShadow({ mode: 'open' });
+    root.innerHTML = '<style>' +
+      ':host{all:initial}.ov{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;justify-content:center;align-items:flex-start;padding:10vh 1rem 1rem;font:14px/1.4 Inter,system-ui,-apple-system,Segoe UI,sans-serif}' +
+      '.bx{width:min(640px,100%);background:#fff;color:#0f172a;border-radius:14px;box-shadow:0 24px 60px rgba(15,23,42,.35);overflow:hidden;display:flex;flex-direction:column;max-height:78vh}' +
+      '.in{display:flex;align-items:center;gap:.6rem;padding:.8rem 1rem;border-bottom:1px solid #e2e8f0}.in span{color:#94a3b8;font-size:1.1rem}' +
+      'input{flex:1;border:0;outline:0;font:inherit;font-size:1.02rem;background:transparent;color:inherit;min-width:0}kbd{font:600 11px Inter,system-ui;color:#64748b;background:#f1f5f9;border-radius:5px;padding:.1rem .35rem}' +
+      '.rs{overflow:auto;padding:.35rem 0}.g{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#64748b;padding:.55rem 1rem .25rem}' +
+      '.it{display:block;padding:.45rem 1rem;cursor:pointer;text-decoration:none;color:inherit;border-left:3px solid transparent}.it b{display:block;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.it small{display:block;color:#64748b;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.it.on{background:#eff6ff;border-left-color:#1e3a8a}' +
+      '.em{padding:1.2rem 1rem;color:#64748b;text-align:center}.ft{display:flex;gap:1rem;padding:.45rem 1rem;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px}' +
+      '.dark .bx{background:#0f172a;color:#f1f5f9}.dark .in,.dark .ft{border-color:#334155}.dark .it.on{background:#1e293b;border-left-color:#93c5fd}.dark kbd{background:#1e293b;color:#cbd5e1}' +
+      '</style><div class="ov"><div class="bx" role="dialog" aria-label="Quick search"><div class="in"><span>⌕</span><input id="q" placeholder="Search customers, orders, quotations, products, pages…" autocomplete="off" aria-label="Quick search"><kbd>Esc</kbd></div>' +
+      '<div class="rs" id="rs"></div><div class="ft"><span>↑ ↓ to move</span><span>Enter to open</span><span>Ctrl K anywhere</span></div></div></div>';
+    document.body.appendChild(host);
+    qs = { host: host, root: root, input: root.getElementById('q'), list: root.getElementById('rs'), items: [], sel: 0, t: null, seq: 0 };
+    root.querySelector('.ov').addEventListener('mousedown', function (e) { if (e.target.classList.contains('ov')) qsClose(); });
+    qs.input.addEventListener('input', function () {
+      var v = qs.input.value.trim();
+      clearTimeout(qs.t);
+      qsRender([], v, v.length >= 2);
+      if (v.length < 2) return;
+      var seq = ++qs.seq;
+      qs.t = setTimeout(function () {
+        fetch(API + '/api/search?q=' + encodeURIComponent(v), { headers: { Authorization: 'Bearer ' + token() } })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { if (seq === qs.seq) qsRender((j && j.data && j.data.groups) || [], v); })
+          .catch(function () { if (seq === qs.seq) qsRender([], v); });
+      }, 220);
+    });
+    qs.input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); qsClose(); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); qsMove(e.key === 'ArrowDown' ? 1 : -1); }
+      else if (e.key === 'Enter') { e.preventDefault(); var it = qs.items[qs.sel]; if (it) qsGo(it.link); }
+    });
+  }
+  function qsGo(link) { qsClose(); location.href = link; }
+  function qsMove(d) {
+    if (!qs.items.length) return;
+    qs.sel = (qs.sel + d + qs.items.length) % qs.items.length;
+    var nodes = qs.list.querySelectorAll('.it');
+    for (var i = 0; i < nodes.length; i++) nodes[i].classList.toggle('on', i === qs.sel);
+    if (nodes[qs.sel]) nodes[qs.sel].scrollIntoView({ block: 'nearest' });
+  }
+  function qsRender(groups, v, loading) {
+    var lv = v.toLowerCase();
+    var pages = qsPages().filter(function (p) { return !lv || p.title.toLowerCase().indexOf(lv) >= 0; }).slice(0, lv ? 6 : 8);
+    var all = (pages.length ? [{ label: lv ? 'Pages' : 'Go to', items: pages }] : []).concat(groups);
+    qs.root.querySelector('.bx').parentNode.classList.toggle('dark', document.documentElement.classList.contains('dark'));
+    qs.items = []; qs.sel = 0;
+    var html = '';
+    all.forEach(function (g) {
+      html += '<div class="g">' + esc(g.label) + '</div>';
+      g.items.forEach(function (it) {
+        html += '<a class="it' + (qs.items.length ? '' : ' on') + '" data-i="' + qs.items.length + '" href="' + esc(it.link) + '"><b>' + esc(it.title) + '</b>' + (it.sub ? '<small>' + esc(it.sub) + '</small>' : '') + '</a>';
+        qs.items.push(it);
+      });
+    });
+    if (!qs.items.length) html = '<div class="em">' + (loading ? 'Searching…' : v.length >= 2 ? 'Nothing found for “' + esc(v) + '”' : 'Type at least 2 letters') + '</div>';
+    else if (loading) html += '<div class="em">Searching…</div>';
+    qs.list.innerHTML = html;
+    var nodes = qs.list.querySelectorAll('.it');
+    for (var i = 0; i < nodes.length; i++) nodes[i].addEventListener('click', function (e) { e.preventDefault(); qsGo(qs.items[+this.getAttribute('data-i')].link); });
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); if (qs && qs.host.style.display === 'block') qsClose(); else qsOpen(); }
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('button, [data-quick-search]');
+    if (!b) return;
+    if (b.hasAttribute('data-quick-search') || /Quick search/i.test(b.textContent || '')) { e.preventDefault(); qsOpen(); }
+  }, true);
+  window.CRMQuickSearch = { open: qsOpen, close: qsClose };
+  // The React top bar hides its "Quick search…" button on phones: add an icon button there.
+  function qsMobileBtn() {
+    var bs = document.querySelectorAll('header button');
+    for (var i = 0; i < bs.length; i++) {
+      var b = bs[i];
+      if (b.hasAttribute('data-quick-search') || !/Quick search/.test(b.textContent || '') || b.previousElementSibling && b.previousElementSibling.hasAttribute('data-qs-mobile')) continue;
+      var m = document.createElement('button');
+      m.setAttribute('data-quick-search', '1'); m.setAttribute('data-qs-mobile', '1'); m.setAttribute('aria-label', 'Quick search');
+      m.className = 'md:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800';
+      m.textContent = '⌕'; m.style.fontSize = '1.15rem';
+      b.parentNode.insertBefore(m, b);
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', qsMobileBtn); else qsMobileBtn();
+  setTimeout(qsMobileBtn, 1500); setTimeout(qsMobileBtn, 4000);
+
+  // ?q=… from a quick-search result: type it into the page's own search box.
+  (function qsPrefill() {
+    var q = null;
+    try { q = new URLSearchParams(location.search).get('q'); } catch (e) {}
+    if (!q) return;
+    var tries = 0;
+    (function look() {
+      var cands = document.querySelectorAll('input[type="search"], input[placeholder^="Search" i], input[placeholder^="search" i]');
+      for (var i = 0; i < cands.length; i++) {
+        var inp = cands[i];
+        if (!inp.offsetParent || inp.disabled || inp.readOnly) continue;
+        var set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        set.call(inp, q);
+        ['input', 'keyup', 'change'].forEach(function (t) { inp.dispatchEvent(new Event(t, { bubbles: true })); });
+        return;
+      }
+      if (++tries < 40) setTimeout(look, 300);
+    })();
+  })();
 })();

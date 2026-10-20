@@ -20,6 +20,13 @@
  *   POST   /api/petty-cash/:id/bills                    multipart "file" (photo / PDF)
  *   GET    /api/petty-cash/:id/bills/:bid[?download=1]
  *   DELETE /api/petty-cash/:id/bills/:bid
+ *   PUT    /api/petty-cash/settings                     { limit, lowAlert }   Super Admin / Admin
+ *
+ * Limit and low-balance alert: the limit is the most cash kept in hand —
+ * receiving cash that takes the balance above it is refused, and an expense
+ * can never be more than the cash in hand. When an expense takes the balance
+ * to the low-alert amount or below, everyone with petty cash access gets a
+ * "Petty cash is low" alert (AlertFeedController) and the tab shows a red banner.
  */
 class PettyCashController
 {
@@ -43,7 +50,73 @@ $tail"],
   `size` INT NULL, `uploadedById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `PettyCashBill_entry` (`entryId`)
 $tail"],
+            'PettyCashSetting' => ['create' => "CREATE TABLE IF NOT EXISTS `PettyCashSetting` (
+  `id` TINYINT NOT NULL, `cashLimit` DECIMAL(14,2) NULL, `lowAlert` DECIMAL(14,2) NULL,
+  `lowAt` DATETIME NULL, `lowBalance` DECIMAL(14,2) NULL, `updatedById` VARCHAR(30) NULL, `updatedAt` DATETIME NULL,
+  PRIMARY KEY (`id`)
+$tail"],
         ], 'Petty cash');
+    }
+
+    /** { limit, lowAlert, lowAt, lowBalance } — nulls when not set. */
+    public static function settings(): array
+    {
+        $r = db()->query('SELECT * FROM `PettyCashSetting` WHERE id=1')->fetch() ?: [];
+        $n = fn($v) => isset($v) && $v !== null ? (float) $v : null;
+        return ['limit' => $n($r['cashLimit'] ?? null), 'lowAlert' => $n($r['lowAlert'] ?? null), 'lowAt' => $r['lowAt'] ?? null, 'lowBalance' => $n($r['lowBalance'] ?? null)];
+    }
+
+    /** Cash in hand now (all entries), leaving out one entry when it is being edited. */
+    private static function balanceNow(string $except = ''): float
+    {
+        $s = db()->prepare("SELECT COALESCE(SUM(CASE WHEN type='IN' THEN amount ELSE -amount END),0) FROM `PettyCash` WHERE id<>?");
+        $s->execute([$except]);
+        return round((float) $s->fetchColumn(), 2);
+    }
+
+    private static function inr(float $v): string { return '₹' . number_format($v, $v == floor($v) ? 0 : 2); }
+
+    /** Refuses an entry that breaks the limit or spends more than the cash in hand; returns [before, after]. */
+    private static function checkLimits(array $f, string $except = ''): array
+    {
+        $before = self::balanceNow($except);
+        $after = round($before + ($f['type'] === 'IN' ? $f['amount'] : -$f['amount']), 2);
+        $set = self::settings();
+        if ($f['type'] === 'OUT' && $after < 0) sendError('Not enough petty cash — only ' . self::inr(max($before, 0)) . ' in hand. Record the cash received first.', 400);
+        if ($f['type'] === 'IN' && $set['limit'] !== null && $after > $set['limit'])
+            sendError('This takes the cash in hand to ' . self::inr($after) . ', above the petty cash limit of ' . self::inr($set['limit']) . '. You can receive up to ' . self::inr(max(0, $set['limit'] - $before)) . '.', 400);
+        return [$before, $after];
+    }
+
+    /** Raises the low-balance alert when the balance drops to / below the alert amount. */
+    private static function markLow(float $before, float $after): void
+    {
+        $set = self::settings();
+        if ($set['lowAlert'] === null || $after > $set['lowAlert'] || $before <= $set['lowAlert']) return;
+        db()->prepare('INSERT INTO `PettyCashSetting` (id, lowAt, lowBalance) VALUES (1,?,?) ON DUPLICATE KEY UPDATE lowAt=VALUES(lowAt), lowBalance=VALUES(lowBalance)')
+            ->execute([now_sql(), $after]);
+    }
+
+    // PUT /api/petty-cash/settings
+    public function saveSettings(): void
+    {
+        [$auth] = $this->viewer();
+        if (!in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true)) sendError('Only the Super Admin or an Admin can set the petty cash limit.', 403);
+        $b = request_body();
+        $num = function ($v, string $what) {
+            $v = str_replace([',', '₹', ' '], '', (string) ($v ?? ''));
+            if ($v === '') return null;
+            if (!is_numeric($v) || (float) $v < 0) sendError("Enter the $what as a number.", 400);
+            return round((float) $v, 2);
+        };
+        $limit = $num($b['limit'] ?? '', 'limit'); $low = $num($b['lowAlert'] ?? '', 'low-balance alert');
+        if ($limit !== null && $limit <= 0) sendError('The limit must be more than 0.', 400);
+        if ($limit !== null && $low !== null && $low >= $limit) sendError('The low-balance alert must be less than the limit.', 400);
+        db()->prepare('INSERT INTO `PettyCashSetting` (id, cashLimit, lowAlert, updatedById, updatedAt) VALUES (1,?,?,?,?)
+                       ON DUPLICATE KEY UPDATE cashLimit=VALUES(cashLimit), lowAlert=VALUES(lowAlert), updatedById=VALUES(updatedById), updatedAt=VALUES(updatedAt)')
+            ->execute([$limit, $low, $auth['id'], now_sql()]);
+        log_activity($auth['id'], 'PETTY_CASH_LIMIT_SET', 'PettyCashSetting', '1', ['limit' => $limit, 'lowAlert' => $low]);
+        sendSuccess(['settings' => self::settings()], 'Petty cash limit saved');
     }
 
     private static function dir(): string { return UPLOADS_PATH . '/petty-cash'; }
@@ -112,7 +185,7 @@ $tail"],
     // GET /api/petty-cash
     public function index(): void
     {
-        [, $lvl] = $this->viewer();
+        [$auth, $lvl] = $this->viewer();
         [$from, $to] = self::period();
         $rows = $this->entries($from, $to);
         $names = [];
@@ -130,7 +203,12 @@ $tail"],
         }
         $in = round((float) $t['i'], 2); $o = round((float) $t['o'], 2);
         $noBill = count(array_filter($out, fn($x) => $x['type'] === 'OUT' && !$x['bills']));
+        $set = self::settings(); $now = self::balanceNow();
         sendSuccess(['entries' => $out, 'from' => $from, 'to' => $to, 'level' => $lvl, 'categories' => self::CATEGORIES,
+                     'limits' => ['limit' => $set['limit'], 'lowAlert' => $set['lowAlert'], 'balanceNow' => $now,
+                                  'low' => $set['lowAlert'] !== null && $now <= $set['lowAlert'],
+                                  'topUp' => $set['limit'] !== null ? max(0, round($set['limit'] - $now, 2)) : null,
+                                  'canSet' => in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true)],
                      'summary' => ['opening' => $opening, 'in' => $in, 'out' => $o, 'closing' => round($opening + $in - $o, 2), 'outWithoutBill' => $noBill]]);
     }
 
@@ -166,11 +244,13 @@ $tail"],
     {
         [$auth] = $this->viewer();
         $f = $this->fields(request_body());
+        [$before, $after] = self::checkLimits($f);
         $id = gen_id();
         $cols = array_keys($f);
         db()->prepare('INSERT INTO `PettyCash` (id,' . implode(',', $cols) . ',createdById,createdAt,updatedAt) VALUES (?' . str_repeat(',?', count($cols)) . ',?,?,?)')
             ->execute(array_merge([$id], array_values($f), [$auth['id'], now_sql(), now_sql()]));
         log_activity($auth['id'], 'PETTY_CASH_ADDED', 'PettyCash', $id, ['type' => $f['type'], 'amount' => $f['amount']]);
+        self::markLow($before, $after);
         sendSuccess(['entry' => $this->one($id)], ($f['type'] === 'IN' ? 'Cash received' : 'Expense') . ' saved — attach the bill if you have one', 201);
     }
 
@@ -178,10 +258,13 @@ $tail"],
     public function update(string $id): void
     {
         [$auth] = $this->viewer();
-        $this->row($id);
+        $old = $this->row($id);
         $f = $this->fields(request_body());
+        [, $after] = self::checkLimits($f, $id);
+        $before = round(self::balanceNow($id) + ($old['type'] === 'IN' ? (float) $old['amount'] : -(float) $old['amount']), 2);
         $sets = implode(',', array_map(fn($c) => "$c=?", array_keys($f)));
         db()->prepare("UPDATE `PettyCash` SET $sets, updatedById=?, updatedAt=? WHERE id=?")->execute(array_merge(array_values($f), [$auth['id'], now_sql(), $id]));
+        self::markLow($before, $after);
         sendSuccess(['entry' => $this->one($id)], 'Entry updated');
     }
 
