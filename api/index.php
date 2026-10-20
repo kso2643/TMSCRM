@@ -94,6 +94,7 @@ require __DIR__ . '/controllers/OptionController.php';
 require __DIR__ . '/controllers/QuoteFollowController.php';
 require __DIR__ . '/controllers/SalesReportController.php';
 require __DIR__ . '/controllers/MeetingReportController.php';   // internal meeting reports + MOM   // sales report by engineer
+require __DIR__ . '/controllers/PettyCashController.php';   // petty cash (tab on the Fuel expense page)
 require __DIR__ . '/controllers/ToolingController.php';   // projects / tooled-up / machine accessories
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
@@ -579,6 +580,20 @@ try {
             $method === 'POST'   && $c1 === ''                           => $ctrl->create(),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''             => $ctrl->delete($c1),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'petty-cash') {
+        $ctrl = new PettyCashController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''                                   => $ctrl->index(),
+            $method === 'GET'    && $c1 === 'export'                             => $ctrl->export(),
+            $method === 'POST'   && $c1 === ''                                   => $ctrl->create(),
+            $method === 'PUT'    && $c1 !== '' && $c2 === ''                     => $ctrl->update($c1),
+            $method === 'DELETE' && $c1 !== '' && $c2 === ''                     => $ctrl->delete($c1),
+            $method === 'POST'   && $c1 !== '' && $c2 === 'bills' && $c3 === ''  => $ctrl->addBill($c1),
+            $method === 'GET'    && $c1 !== '' && $c2 === 'bills' && $c3 !== ''  => $ctrl->billFile($c1, $c3),
+            $method === 'DELETE' && $c1 !== '' && $c2 === 'bills' && $c3 !== ''  => $ctrl->deleteBill($c1, $c3),
             default => sendError('Route not found', 404),
         };
     }

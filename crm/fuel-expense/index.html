@@ -18,15 +18,16 @@
     }
   } catch (e) {}
 </script>
-<script src="/appointments-reminder-app.js?v=20261017d" defer></script><script src="/crm-global.js?v=20261017d" defer></script><link rel="stylesheet" href="/motion.css?v=20261017d"/></head>
+<script src="/appointments-reminder-app.js?v=20261020a" defer></script><script src="/crm-global.js?v=20261020a" defer></script><link rel="stylesheet" href="/motion.css?v=20261020a"/></head>
 <body class="font-sans antialiased bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors">
 
-<script src="/app-shell.js?v=20261017d"></script>
-<script src="/pdf-view.js?v=20261017d"></script>
-<script src="/fuel-expense-app.js?v=20261017d"></script>
+<script src="/app-shell.js?v=20261020a"></script>
+<script src="/pdf-view.js?v=20261020a"></script>
+<script src="/fuel-expense-app.js?v=20261020a"></script>
+<script src="/petty-cash-app.js?v=20261020a"></script>
 <script>
   AppShell.mount({ activeHref: '/fuel-expense/', title: 'Fuel expense' }, function (content) {
-    window.FuelExpense.mountPage(content);
+    window.PettyCash.mountTabs(content, function (el) { window.FuelExpense.mountPage(el); });
   });
 </script>
 </body>

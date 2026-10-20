@@ -1,3 +1,22 @@
+# Update — 20 Oct (a): Petty cash (Fuel expense page) with bills and page access
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `api/controllers/PettyCashController.php`, `crm/petty-cash-app.js`.
+- **Database:** tables `PettyCash` and `PettyCashBill` are created automatically.
+- **New folder:** `api/uploads/petty-cash/` (bills) is created automatically.
+
+1. **Petty cash tab** on the Fuel expense page (⛽ Fuel expense | 💵 Petty cash):
+   - **+ Cash received**: cash from the bank or MD.
+   - **+ Expense**: date, amount, what it was for, category, paid to, bill no. and how it was paid.
+   - Attach one or more **bill photos or PDFs** when saving, or later with **📎 Add bill** on the row. Tap a bill to view it.
+   - Tiles show the **opening balance**, **received**, **spent** and **balance in hand**, and each row shows the running balance.
+   - A warning lists expenses that still have no bill.
+   - **⬇ Excel** downloads the cash book for the chosen dates.
+2. **Who can see petty cash:**
+   - By default only the **Super Admin, Admin and Accounts** users can see petty cash.
+   - Everyone else doesn't see the tab until the Super Admin gives access. Go to **Users → Page access → "Petty cash"** and choose **View only**, **Edit (no delete)** or **Full access**.
+   - The server enforces this too: a hidden user cannot read petty cash, and a view-only user cannot add, edit or delete.
+
 # Update — 17 Oct (d): Internal meetings page, MOM page (TMS / APJ letterhead PDF)
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
