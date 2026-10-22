@@ -1,3 +1,29 @@
+# Update — 22 Oct (a): Petty cash monthly PDF, location required for sales engineers, Tasks inside CEO Desk, CEO Desk date-wise
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New file:** `api/includes/LocationGuard.php`.
+- No database changes. Nothing is removed from the CEO Desk or Tasks.
+
+1. **Petty cash: monthly PDF report**
+   - Press **📄 Monthly PDF**, then choose the month and the letterhead (TMS / APJ). Use **View** or **Download PDF**.
+   - The report shows the opening balance, received, spent and closing balance, the limit and alert amount, and every entry with its category, paid to, bill count and running balance.
+   - It ends with spending by category and signature lines for Prepared by, Checked by and Approved by.
+2. **Location required for sales engineers**
+   - For **Sales / Sales Engineer** users, location must be on to use the CRM.
+   - If location is off, or not allowed for the site or app, every page is covered by a **"Turn on your location"** screen with steps and a **Check again** button.
+   - The server enforces it too: saves from a sales engineer without a current location (less than 15 minutes old) are refused. Reading pages still works.
+   - Signing in or out and the "location off" report are always allowed.
+   - Admins, Managers and Accounts are not affected.
+3. **Tasks moved into CEO Desk**
+   - The sidebar now shows **CEO Desk & Tasks**, and the page has **📨 Desk | 📄 Quotations | ✅ Tasks** tabs.
+   - The Tasks tab is the full Tasks page (timers, own / assigned / team / completed).
+   - Old links and task alerts open the Tasks tab automatically. All existing CEO Desk items and tasks stay as they are.
+4. **CEO Desk: date-wise list and date filter**
+   - The list is newest first.
+   - Items you haven't read yet are on top under **"New — not read yet"**.
+   - Everything already read is below, grouped by date (Today, Yesterday, then by date).
+   - The new **date filter** offers All dates, Today, Yesterday, Last 7 days, This month, or **Pick dates…** (from / to).
+
 # Update — 20 Oct (b): Petty cash limit + low-balance alert, Quick search across the whole CRM
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

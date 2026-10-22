@@ -102,12 +102,11 @@
     { label: 'Attendance',            href: '/attendance/',     icon: 'clock',     section: 'Operations' },
     { label: 'Fuel expense',          href: '/fuel-expense/',   icon: 'fuel',      section: 'Operations' },
     { label: 'Appointments',          href: '/appointments/',   icon: 'appts',     section: 'Operations' },
-    { label: 'Tasks',                 href: '/tasks/',          icon: 'timer',     section: 'Operations' },
     { label: 'Leave',                 href: '/leaves/',         icon: 'calendar',  section: 'Operations' },
     { label: 'Chat',                  href: '/chat/',           icon: 'chat',      section: 'Operations' },
     { label: 'Internal meetings',     href: '/internal-meetings/', icon: 'clipboard', section: 'Operations' },
     { label: 'MOM',                   href: '/mom/',            icon: 'file',      section: 'Operations' },
-    { label: 'CEO Desk',              href: '/md-desk/',        icon: 'brief',     section: 'Operations' }
+    { label: 'CEO Desk & Tasks',      href: '/md-desk/',        icon: 'brief',     section: 'Operations' }
   ];
   var ADMIN_NAV = [
     { label: 'Live tracking', href: '/admin/live-tracking/', icon: 'nav',      roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },

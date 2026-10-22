@@ -2,6 +2,10 @@
 <html>
 <head>
 <meta charSet="utf-8"/>
+<script>
+  // Tasks now live on the CEO Desk page (CEO Desk & Tasks → ✅ Tasks); keep old links and alerts working.
+  (function () { var h = location.hash.replace(/^#\/?/, ''); location.replace('/md-desk/#tasks' + (h ? '-' + h : '')); })();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Tasks · Industrial CRM</title>
 <link rel="stylesheet" href="/_next/static/css/808bab28f4c17593.css"/>
@@ -15,12 +19,12 @@
     }
   } catch (e) {}
 </script>
-<link rel="stylesheet" href="/motion.css?v=20261020b"/></head>
+<link rel="stylesheet" href="/motion.css?v=20261022a"/></head>
 <body class="font-sans antialiased bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors">
 
-<script src="/app-shell.js?v=20261020b"></script>
-<script src="/tasks-app.js?v=20261020b"></script>
-<script src="/appointments-reminder-app.js?v=20261020b" defer></script><script src="/crm-global.js?v=20261020b" defer></script>
+<script src="/app-shell.js?v=20261022a"></script>
+<script src="/tasks-app.js?v=20261022a"></script>
+<script src="/appointments-reminder-app.js?v=20261022a" defer></script><script src="/crm-global.js?v=20261022a" defer></script>
 <script>
   AppShell.mount({ activeHref: '/tasks/', title: 'Tasks' }, function (content) {
     window.Tasks.mountPage(content);

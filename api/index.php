@@ -67,6 +67,7 @@ require __DIR__ . '/includes/SimplePdf.php';
 require __DIR__ . '/includes/ApjQuotationPdf.php';
 require __DIR__ . '/includes/TMSQuotationPdf.php';
 require __DIR__ . '/includes/PageAccess.php';   // per-user page access (full / edit / view / hidden)
+require __DIR__ . '/includes/LocationGuard.php'; // sales engineers save only with location on
 
 require __DIR__ . '/controllers/AuthController.php';
 require __DIR__ . '/controllers/UserController.php';
@@ -121,7 +122,7 @@ function sendCorsHeaders(): void
     }
     header('Access-Control-Allow-Credentials: true');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-CRM-Geo');
     // Let the CRM (a different origin) read download file names.
     header('Access-Control-Expose-Headers: Content-Disposition');
     header('Vary: Origin');
@@ -186,6 +187,7 @@ $c4 = $segs[4] ?? '';
 
 // Page access set by the Super Admin: refuse writes the user's level does not allow.
 PageAccess::guard($method, $segs);
+LocationGuard::guard($method, $segs);
 
 // Tiny router — match from most-specific to least-specific.
 // Convention: segment variables (IDs) are captured as $c1, $c2, etc.
@@ -595,6 +597,7 @@ try {
         match (true) {
             $method === 'GET'    && $c1 === ''                                   => $ctrl->index(),
             $method === 'GET'    && $c1 === 'export'                             => $ctrl->export(),
+            $method === 'GET'    && $c1 === 'report'                             => $ctrl->report(),
             $method === 'POST'   && $c1 === ''                                   => $ctrl->create(),
             $method === 'PUT'    && $c1 === 'settings'                           => $ctrl->saveSettings(),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''                     => $ctrl->update($c1),

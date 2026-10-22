@@ -105,7 +105,9 @@
       '.md-tab{padding:.5rem .9rem;font-size:.88rem;font-weight:600;color:#64748b;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}',
       '.md-tab.on{color:#1e3a8a;border-bottom-color:#1e3a8a}.dark .md-tab.on{color:#93c5fd;border-bottom-color:#93c5fd}',
       '.md-tab .n{display:inline-block;min-width:1.2rem;padding:0 .35rem;margin-left:.3rem;border-radius:999px;background:#dc2626;color:#fff;font-size:.7rem;line-height:1.2rem;text-align:center}',
-      '.md-bar{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.7rem}.md-bar select,.md-bar input{width:auto;min-width:130px}.md-bar input{flex:1}',
+      '.md-bar{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.7rem}.md-bar select,.md-bar input{width:auto;min-width:130px}.md-bar input{flex:1}.md-bar input[type=date]{flex:0 0 auto;min-width:0}',
+      '.md-day{font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;margin:.7rem 0 .35rem;display:flex;align-items:center;gap:.5rem}.md-day:first-child{margin-top:0}.md-day::after{content:"";flex:1;height:1px;background:#e2e8f0}.dark .md-day::after{background:#334155}',
+      '.md-day.new{color:#1d4ed8}',
       '.md-list{display:flex;flex-direction:column;gap:.5rem}',
       '.md-item{display:grid;grid-template-columns:2.2rem minmax(0,1fr) auto;gap:.7rem;align-items:start;padding:.75rem;border:1px solid #e2e8f0;border-left:4px solid var(--c);border-radius:.7rem;background:#fff;cursor:pointer;text-align:left;width:100%;color:inherit}',
       '.md-item:hover{background:#f8fafc}.md-item.unread{background:#eff6ff}.md-item.done{opacity:.7}.dark .md-item{background:#0f172a;border-color:#334155;border-left-color:var(--c)}.dark .md-item.unread{background:#1e3a8a33}',
@@ -162,7 +164,25 @@
     document.head.appendChild(st);
   }
 
-  var state = { items: [], users: [], tab: 'inbox', type: '', status: 'OPEN', q: '', compose: 'MESSAGE', role: me().role, me: me().id };
+  var state = { items: [], users: [], tab: 'inbox', type: '', status: 'OPEN', q: '', compose: 'MESSAGE', role: me().role, me: me().id, range: '', dfrom: '', dto: '' };
+  function isoDay(d) { var x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10); }
+  /** [from, to] (YYYY-MM-DD, '' = open) for the date filter. */
+  function dateRange() {
+    var t = new Date(), today = isoDay(t);
+    if (state.range === 'today') return [today, today];
+    if (state.range === 'yesterday') { var y = isoDay(new Date(t.getTime() - 864e5)); return [y, y]; }
+    if (state.range === '7d') return [isoDay(new Date(t.getTime() - 6 * 864e5)), today];
+    if (state.range === 'month') return [today.slice(0, 8) + '01', today];
+    if (state.range === 'custom') return [state.dfrom, state.dto];
+    return ['', ''];
+  }
+  function dayLabel(day) {
+    var t = isoDay(new Date()), y = isoDay(new Date(Date.now() - 864e5));
+    if (day === t) return 'Today';
+    if (day === y) return 'Yesterday';
+    var d = new Date(day + 'T00:00:00');
+    return isNaN(d) ? day : d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+  }
   var root, listBox, tabsBox, formBox, timer;
 
   // ── compose ─────────────────────────────────────────────────────────
@@ -473,6 +493,9 @@
       if (state.type && i.type !== state.type) return false;
       if (state.status === 'OPEN' && i.status === 'DONE') return false;
       if (state.status === 'DONE' && i.status !== 'DONE') return false;
+      var dr = dateRange(), day = String(i.createdAt || '').slice(0, 10);
+      if (dr[0] && day < dr[0]) return false;
+      if (dr[1] && day > dr[1]) return false;
       if (q && [i.deskNo, i.title, i.details, i.customerName, i.itemCode, i.productName, i.quotationNo, i.fromName, i.toName, (i.items || []).map(function (l) { return [l.itemCode, l.productName, l.supplier].join(' '); }).join(' ')].join(' ').toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -501,10 +524,20 @@
     clear(listBox);
     var list = visibleItems();
     if (!list.length) {
-      listBox.appendChild(el('div', { class: 'md-empty', text: state.tab === 'inbox' ? 'Nothing here. Items sent to you will show up here.' : state.tab === 'sent' ? 'You haven’t sent anything yet.' : 'No items.' }));
+      listBox.appendChild(el('div', { class: 'md-empty', text: state.range ? 'Nothing on these dates.' : state.tab === 'inbox' ? 'Nothing here. Items sent to you will show up here.' : state.tab === 'sent' ? 'You haven’t sent anything yet.' : 'No items.' }));
       return;
     }
-    list.forEach(function (i) {
+    // Newest first; items not read yet on top, then everything already read, date-wise
+    var byNew = function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); };
+    var fresh = list.filter(function (i) { return i.unread; }).sort(byNew);
+    var rest = list.filter(function (i) { return !i.unread; }).sort(byNew);
+    var lastDay = null;
+    if (fresh.length) listBox.appendChild(el('div', { class: 'md-day new', 'data-day': 'new', text: '● New — not read yet (' + fresh.length + ')' }));
+    fresh.concat(rest).forEach(function (i, k) {
+      if (k >= fresh.length) {
+        var day = String(i.createdAt || '').slice(0, 10);
+        if (day !== lastDay) { lastDay = day; listBox.appendChild(el('div', { class: 'md-day', 'data-day': day, text: (fresh.length && k === fresh.length ? 'Read · ' : '') + dayLabel(day) })); }
+      }
       var T = TYPES[i.type] || TYPES.MESSAGE, P = PRIO[i.priority] || PRIO.NORMAL, S = STATUS[i.status] || STATUS.OPEN;
       var right = el('div', { class: 'r' }, [
         when(i.createdAt),
@@ -725,26 +758,51 @@
     stSel.onchange = function () { state.status = stSel.value; renderList(); };
     var search = el('input', { type: 'search', placeholder: 'Search…', id: 'md-search' });
     search.oninput = function () { state.q = search.value.trim(); renderList(); };
-    var right = el('div', { class: 'md-card' }, [tabsBox, el('div', { class: 'md-bar' }, [typeSel, stSel, search]), listBox]);
+    var dFrom = el('input', { type: 'date', id: 'md-dfrom', 'aria-label': 'From date', style: 'display:none' });
+    var dTo = el('input', { type: 'date', id: 'md-dto', 'aria-label': 'To date', style: 'display:none' });
+    var rangeSel = el('select', { id: 'md-frange', 'aria-label': 'Date' }, [['', 'All dates'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['month', 'This month'], ['custom', 'Pick dates…']]
+      .map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+    rangeSel.onchange = function () {
+      state.range = rangeSel.value;
+      dFrom.style.display = dTo.style.display = state.range === 'custom' ? '' : 'none';
+      if (state.range === 'custom' && !dFrom.value) { dFrom.value = isoDay(new Date(Date.now() - 6 * 864e5)); dTo.value = isoDay(new Date()); state.dfrom = dFrom.value; state.dto = dTo.value; }
+      renderList();
+    };
+    dFrom.onchange = function () { state.dfrom = dFrom.value; renderList(); };
+    dTo.onchange = function () { state.dto = dTo.value; renderList(); };
+    var right = el('div', { class: 'md-card' }, [tabsBox, el('div', { class: 'md-bar' }, [typeSel, stSel, rangeSel, dFrom, dTo, search]), listBox]);
     var deskView = el('div', { class: 'md-cols' }, [formBox, right]);
     var quoteView = el('div', { id: 'md-quotes', style: 'display:none' });
-    // Desk (messages, tasks…) | Quotations (follow-up status, price negotiation)
-    var views = el('div', { class: 'md-tabs', style: 'margin-bottom:1rem' }, [['desk', '📨 Desk'], ['quotes', '📄 Quotations']].map(function (v) {
+    var taskView = el('div', { id: 'md-tasks', style: 'display:none' });
+    var tasksMounted = false;
+    // The Tasks page lives here now (unless the Super Admin hid Tasks for this user)
+    var tasksHidden = false;
+    try { tasksHidden = ((JSON.parse(localStorage.getItem('crm_page_access') || 'null') || {}).access || {}).tasks === 'hidden'; } catch (e) {}
+    var viewList = [['desk', '📨 Desk'], ['quotes', '📄 Quotations']];
+    if (!tasksHidden && window.Tasks) viewList.push(['tasks', '✅ Tasks']);
+    // Desk (messages, tasks…) | Quotations (follow-up status, price negotiation) | Tasks (the old Tasks page)
+    var views = el('div', { class: 'md-tabs', style: 'margin-bottom:1rem' }, viewList.map(function (v) {
       return el('button', { type: 'button', class: 'md-tab' + (v[0] === 'desk' ? ' on' : ''), 'data-view': v[0], text: v[1], onclick: function () { showView(v[0]); } });
     }));
     function showView(v) {
       Array.prototype.forEach.call(views.children, function (b) { b.classList.toggle('on', b.getAttribute('data-view') === v); });
-      deskView.style.display = v === 'desk' ? '' : 'none'; quoteView.style.display = v === 'quotes' ? '' : 'none';
+      deskView.style.display = v === 'desk' ? '' : 'none'; quoteView.style.display = v === 'quotes' ? '' : 'none'; taskView.style.display = v === 'tasks' ? '' : 'none';
       if (v === 'quotes') quotesView(quoteView);
-      try { history.replaceState(null, '', v === 'quotes' ? '#quotes' : location.pathname); } catch (e) {}
+      if (v === 'tasks' && !tasksMounted) { tasksMounted = true; window.Tasks.mountPage(taskView); }
+      try { history.replaceState(null, '', v === 'quotes' ? '#quotes' : v === 'tasks' ? '#tasks' : location.pathname); } catch (e) {}
     }
-    root.appendChild(views); root.appendChild(deskView); root.appendChild(quoteView);
+    root.appendChild(views); root.appendChild(deskView); root.appendChild(quoteView); root.appendChild(taskView);
     content.appendChild(root);
     if (location.hash === '#quotes') setTimeout(function () { showView('quotes'); }, 0);
+    var th = location.hash.match(/^#tasks(?:-([a-z]+))?$/);
+    if (th && !tasksHidden && window.Tasks) {
+      if (th[1]) try { localStorage.setItem('crm_tasks_tab', th[1]); } catch (e) {}
+      setTimeout(function () { showView('tasks'); }, 0);
+    }
     var origRender = renderList;
     renderList = function () { stSel.value = state.status; origRender(); };
     api('GET', '/md-desk/recipients').then(function (j) { state.users = j.data.users || []; state.allUsers = j.data.allUsers || state.users; state.canGroups = !!j.data.canSendToGroups; renderForm(); }).catch(function () { renderForm(); });
-    load().then(function () { var h = location.hash.slice(1); if (h && h !== 'quotes') open(decodeURIComponent(h)); });
+    load().then(function () { var h = location.hash.slice(1); if (h && h !== 'quotes' && !/^tasks/.test(h)) open(decodeURIComponent(h)); });
     timer = setInterval(function () { if (document.visibilityState === 'visible' && !document.querySelector('.md-modal')) load(); }, 30000);
   }
 

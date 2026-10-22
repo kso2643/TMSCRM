@@ -14,6 +14,7 @@
  *
  *   GET    /api/petty-cash?from=&to=&type=&search=     entries + balances + my level
  *   GET    /api/petty-cash/export?from=&to=            Excel
+ *   GET    /api/petty-cash/report?month=YYYY-MM&company=TMS|APJ   monthly PDF report
  *   POST   /api/petty-cash                              { entryDate, type, amount, category, description, paidTo, billNo, mode }
  *   PUT    /api/petty-cash/:id
  *   DELETE /api/petty-cash/:id
@@ -359,5 +360,178 @@ $tail"],
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="petty-cash-' . $from . '-to-' . $to . '.xlsx"');
         echo $bytes; exit;
+    }
+
+    // GET /api/petty-cash/report?month=YYYY-MM&company=TMS|APJ   monthly PDF
+    public function report(): void
+    {
+        [$auth] = $this->viewer();
+        $m = (string) qp('month', date('Y-m'));
+        if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $m)) sendError('Choose the month.', 400);
+        $from = $m . '-01'; $to = date('Y-m-t', strtotime($from));
+        $co = strtoupper((string) qp('company', 'TMS')) === 'APJ' ? 'APJ' : 'TMS';
+        $s = db()->prepare('SELECT p.*, u.name AS byName FROM `PettyCash` p LEFT JOIN `User` u ON u.id=p.createdById WHERE p.entryDate BETWEEN ? AND ? ORDER BY p.entryDate, p.createdAt');
+        $s->execute([$from, $to]);
+        $rows = $s->fetchAll();
+        $bills = $this->billsFor(array_column($rows, 'id'));
+        $opening = self::balanceBefore($from);
+        $names = db()->prepare('SELECT name FROM `User` WHERE id=?'); $names->execute([$auth['id']]);
+        $pdf = (new PettyCashPdf([
+            'month' => $m, 'from' => $from, 'to' => $to, 'rows' => $rows, 'bills' => $bills, 'opening' => $opening,
+            'settings' => self::settings(), 'by' => (string) $names->fetchColumn(),
+        ], PurchaseOrderController::profile($co), $co))->render();
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: ' . (qp('inline') === '1' ? 'inline' : 'attachment') . '; filename="Petty-cash-' . $m . '.pdf"');
+        echo $pdf->output(); exit;
+    }
+}
+
+
+/** Petty cash monthly report PDF on the TMS / APJ letterhead. */
+class PettyCashPdf
+{
+    private const MM = 2.8346456693;
+    private const BLUE = '#1A4FA0'; private const DARK = '#111827'; private const GREY = '#6B7280'; private const GREEN = '#166534'; private const RED = '#B91C1C';
+    private const BGBLUE = '#EFF6FF'; private const CELL = '#E5E7EB'; private const ALT = '#F9FAFB';
+    private const A4_W = 210.0; private const A4_H = 297.0; private const ML = 10.0; private const MR = 10.0; private const MT = 12.0; private const MB = 16.0;
+    private SimplePdf $pdf; private float $y = 0; private float $cw = 190;
+    public function __construct(private array $d, private array $co, private string $code) {}
+    private function mm(float $v): float { return $v * self::MM; }
+    private function t(string $s, float $x, float $y, array $o = []): void { $this->pdf->text($s, $this->mm($x), $this->mm($y), $o + ['baseline' => 'top']); }
+    private function font(string $f, float $s, string $c): void { $this->pdf->setFont($f, $s); $this->pdf->setFillColor($c); }
+    private function box(float $x, float $y, float $w, float $h, string $c, float $lw = 0.3): void
+    {
+        foreach ([[$x, $y, $x + $w, $y], [$x, $y + $h, $x + $w, $y + $h], [$x, $y, $x, $y + $h], [$x + $w, $y, $x + $w, $y + $h]] as $l)
+            $this->pdf->line($this->mm($l[0]), $this->mm($l[1]), $this->mm($l[2]), $this->mm($l[3]), $c, $this->mm($lw));
+    }
+    private function wrap(string $s, float $w): array { return trim($s) === '' ? [''] : $this->pdf->splitTextToSize($s, $this->mm($w)); }
+    private function rs(?float $v): string { return $v === null ? '' : 'Rs. ' . number_format($v, 2); }
+    private function newPage(): void { $this->pdf->addPage($this->mm(self::A4_W), $this->mm(self::A4_H)); $this->box(5, 5, 200, 287, self::BLUE, 0.4); $this->y = self::MT; }
+    private function need(float $h, ?callable $after = null): void { if ($this->y + $h > self::A4_H - self::MB) { $this->newPage(); if ($after) $after(); } }
+
+    public function render(): SimplePdf
+    {
+        $d = $this->d; $c = $this->co;
+        $this->pdf = new SimplePdf();
+        $this->newPage();
+        // letterhead
+        if ($this->code === 'APJ') { $lw = 24; $lh = 24; $logo = __DIR__ . '/../assets/apj-logo.png'; }
+        else { $lh = 18; $lw = 291 * 18 / 164; $logo = __DIR__ . '/../assets/tms-logo.png'; }
+        if (!$this->pdf->addImage($logo, $this->mm(self::ML), $this->mm($this->y), $this->mm($lw), $this->mm($lh))) { $this->font('Helvetica-Bold', 16, self::BLUE); $this->t($this->code, self::ML, $this->y + 6); }
+        $R = self::A4_W - self::MR;
+        $this->font('Helvetica-Bold', 13, self::BLUE); $this->t((string) $c['name'], $R, $this->y + 1, ['align' => 'right']);
+        $this->font('Helvetica', 7.5, self::DARK);
+        $hy = $this->y + 7;
+        $lines = array_filter(array_map('trim', explode("\n", (string) $c['address'])));
+        $tail = array_filter([$c['phone'] ? (stripos($c['phone'], 'phone') === false && stripos($c['phone'], 'mobile') === false ? 'Phone: ' : '') . $c['phone'] : '', $c['email'] ? 'E-Mail: ' . $c['email'] : '', $c['gstin'] ? 'GST No: ' . $c['gstin'] : '']);
+        foreach (array_merge($lines, [implode('  |  ', $tail)]) as $l) { foreach ($this->wrap($l, 150) as $w) { $this->t($w, $R, $hy, ['align' => 'right']); $hy += 3.8; } }
+        $this->y = max($hy, $this->y + $lh) + 2;
+        $this->pdf->line($this->mm(self::ML), $this->mm($this->y), $this->mm($R), $this->mm($this->y), self::BLUE, $this->mm(0.8));
+        $this->y += 3;
+        $this->font('Helvetica-Bold', 12, self::BLUE); $this->t('PETTY CASH REPORT — ' . strtoupper(date('F Y', strtotime($d['from']))), self::A4_W / 2, $this->y, ['align' => 'center']);
+        $this->y += 6;
+        $this->font('Helvetica', 7.5, self::GREY); $this->t(date('d-m-Y', strtotime($d['from'])) . ' to ' . date('d-m-Y', strtotime($d['to'])) . '   ·   generated ' . date('d-m-Y H:i') . ' by ' . $d['by'], self::A4_W / 2, $this->y, ['align' => 'center']);
+        $this->y += 7;
+        // summary boxes
+        $in = 0.0; $out = 0.0; $cats = [];
+        foreach ($d['rows'] as $r) { $a = (float) $r['amount']; if ($r['type'] === 'IN') $in += $a; else { $out += $a; $k = $r['category'] ?: 'Other'; $cats[$k] = ($cats[$k] ?? 0) + $a; } }
+        $close = $d['opening'] + $in - $out;
+        $st = $d['settings'];
+        $tiles = [['Opening balance', $d['opening'], self::DARK], ['Received', $in, self::GREEN], ['Spent', $out, self::RED], ['Closing balance', $close, self::BLUE]];
+        $tw = ($this->cw - 3 * 3) / 4;
+        foreach ($tiles as $k => [$lab, $v, $col]) {
+            $x = self::ML + $k * ($tw + 3);
+            $this->pdf->rect($this->mm($x), $this->mm($this->y), $this->mm($tw), $this->mm(15), self::ALT);
+            $this->box($x, $this->y, $tw, 15, self::CELL);
+            $this->font('Helvetica', 7, self::GREY); $this->t($lab, $x + 3, $this->y + 2.5);
+            $this->font('Helvetica-Bold', 11, $col); $this->t($this->rs($v), $x + 3, $this->y + 7.5);
+        }
+        $this->y += 18;
+        $noBill = 0; foreach ($d['rows'] as $r) if ($r['type'] === 'OUT' && empty($d['bills'][$r['id']])) $noBill++;
+        $note = [];
+        if ($st['limit'] !== null) $note[] = 'Limit ' . $this->rs($st['limit']);
+        if ($st['lowAlert'] !== null) $note[] = 'Low-balance alert at ' . $this->rs($st['lowAlert']);
+        $note[] = count($d['rows']) . ' entries';
+        $note[] = $noBill ? $noBill . ' expense(s) without a bill' : 'every expense has a bill';
+        $this->font('Helvetica', 7.5, self::DARK); $this->t(implode('   ·   ', $note), self::ML, $this->y);
+        $this->y += 7;
+        // entries table
+        $cols = [['Date', 17, 'l'], ['Description', 58, 'l'], ['Category', 27, 'l'], ['Paid to / from', 26, 'l'], ['Bill', 9, 'c'], ['Received', 18, 'r'], ['Spent', 18, 'r'], ['Balance', 17, 'r']];
+        $x = [self::ML]; foreach ($cols as $i => $col) if ($i) $x[] = $x[$i - 1] + $cols[$i - 1][1];
+        $head = function () use ($cols, $x) {
+            $this->pdf->rect($this->mm(self::ML), $this->mm($this->y), $this->mm($this->cw), $this->mm(7), self::BLUE);
+            $this->font('Helvetica-Bold', 7.3, '#FFFFFF');
+            foreach ($cols as $i => $col) {
+                $ax = $col[2] === 'r' ? $x[$i] + $col[1] - 1.5 : ($col[2] === 'c' ? $x[$i] + $col[1] / 2 : $x[$i] + 1.5);
+                $this->t($col[0], $ax, $this->y + 2.2, ['align' => $col[2] === 'r' ? 'right' : ($col[2] === 'c' ? 'center' : 'left')]);
+            }
+            $this->y += 7;
+        };
+        $head();
+        $this->font('Helvetica-Bold', 7.5, self::DARK);
+        $this->t('Opening balance', $x[1] + 1.5, $this->y + 1.6); $this->t(number_format($d['opening'], 2), $x[7] + $cols[7][1] - 1.5, $this->y + 1.6, ['align' => 'right']);
+        $this->y += 6;
+        $bal = $d['opening'];
+        foreach ($d['rows'] as $n => $r) {
+            $a = (float) $r['amount']; $isIn = $r['type'] === 'IN'; $bal += $isIn ? $a : -$a;
+            $this->font('Helvetica', 7.5, self::DARK);
+            $desc = $this->wrap($r['description'] . ($r['billNo'] ? ' (bill ' . $r['billNo'] . ')' : ''), $cols[1][1] - 3);
+            $paid = $this->wrap((string) $r['paidTo'], $cols[3][1] - 3);
+            $cat = $this->wrap($isIn ? 'Cash received' : (string) $r['category'], $cols[2][1] - 3);
+            $rh = max(6, 3.5 * max(count($desc), count($paid), count($cat)) + 2.6);
+            $this->need($rh, $head);
+            if ($n % 2) $this->pdf->rect($this->mm(self::ML), $this->mm($this->y), $this->mm($this->cw), $this->mm($rh), self::ALT);
+            $this->t(date('d-m-Y', strtotime($r['entryDate'])), $x[0] + 1.5, $this->y + 1.6);
+            foreach ($desc as $k => $l) $this->t($l, $x[1] + 1.5, $this->y + 1.6 + 3.5 * $k);
+            foreach ($cat as $k => $l) $this->t($l, $x[2] + 1.5, $this->y + 1.6 + 3.5 * $k);
+            foreach ($paid as $k => $l) $this->t($l, $x[3] + 1.5, $this->y + 1.6 + 3.5 * $k);
+            $nb = count($d['bills'][$r['id']] ?? []);
+            $this->font('Helvetica', 7.5, $nb ? self::GREEN : ($isIn ? self::GREY : self::RED));
+            $this->t($nb ? (string) $nb : ($isIn ? '-' : 'none'), $x[4] + $cols[4][1] / 2, $this->y + 1.6, ['align' => 'center']);
+            $this->font('Helvetica-Bold', 7.5, self::GREEN); if ($isIn) $this->t(number_format($a, 2), $x[5] + $cols[5][1] - 1.5, $this->y + 1.6, ['align' => 'right']);
+            $this->font('Helvetica-Bold', 7.5, self::RED); if (!$isIn) $this->t(number_format($a, 2), $x[6] + $cols[6][1] - 1.5, $this->y + 1.6, ['align' => 'right']);
+            $this->font('Helvetica', 7.5, self::DARK); $this->t(number_format($bal, 2), $x[7] + $cols[7][1] - 1.5, $this->y + 1.6, ['align' => 'right']);
+            for ($i = 1; $i < count($cols); $i++) $this->pdf->line($this->mm($x[$i]), $this->mm($this->y), $this->mm($x[$i]), $this->mm($this->y + $rh), self::CELL, $this->mm(0.2));
+            $this->y += $rh;
+            $this->pdf->line($this->mm(self::ML), $this->mm($this->y), $this->mm(self::ML + $this->cw), $this->mm($this->y), self::CELL, $this->mm(0.2));
+        }
+        if (!$d['rows']) { $this->font('Helvetica', 8, self::GREY); $this->t('No petty cash entries in this month.', self::A4_W / 2, $this->y + 2, ['align' => 'center']); $this->y += 8; }
+        $this->need(8);
+        $this->pdf->rect($this->mm(self::ML), $this->mm($this->y), $this->mm($this->cw), $this->mm(7), self::BGBLUE);
+        $this->font('Helvetica-Bold', 8, self::BLUE); $this->t('Total / closing balance', $x[1] + 1.5, $this->y + 2.2);
+        $this->font('Helvetica-Bold', 8, self::GREEN); $this->t(number_format($in, 2), $x[5] + $cols[5][1] - 1.5, $this->y + 2.2, ['align' => 'right']);
+        $this->font('Helvetica-Bold', 8, self::RED); $this->t(number_format($out, 2), $x[6] + $cols[6][1] - 1.5, $this->y + 2.2, ['align' => 'right']);
+        $this->font('Helvetica-Bold', 8, self::BLUE); $this->t(number_format($close, 2), $x[7] + $cols[7][1] - 1.5, $this->y + 2.2, ['align' => 'right']);
+        $this->y += 11;
+        // spent by category
+        if ($cats) {
+            arsort($cats);
+            $this->need(10 + 5 * count($cats));
+            $this->font('Helvetica-Bold', 9, self::BLUE); $this->t('Spent by category', self::ML, $this->y); $this->y += 6;
+            foreach ($cats as $k => $v) {
+                $this->font('Helvetica', 8, self::DARK); $this->t($k, self::ML + 2, $this->y);
+                $this->font('Helvetica-Bold', 8, self::DARK); $this->t($this->rs($v), self::ML + 85, $this->y, ['align' => 'right']);
+                $pct = $out > 0 ? $v / $out : 0;
+                $this->pdf->rect($this->mm(self::ML + 90), $this->mm($this->y + 0.6), $this->mm(80), $this->mm(2.6), '#E5E7EB');
+                $this->pdf->rect($this->mm(self::ML + 90), $this->mm($this->y + 0.6), $this->mm(max(0.5, 80 * $pct)), $this->mm(2.6), self::BLUE);
+                $this->font('Helvetica', 7, self::GREY); $this->t(round($pct * 100) . '%', self::ML + 173, $this->y);
+                $this->y += 5;
+            }
+            $this->y += 4;
+        }
+        // signatures
+        $this->need(24);
+        $this->y += 12;
+        foreach ([['Prepared by', self::ML], ['Checked by (Accounts)', self::ML + 68], ['Approved by', $R - 55]] as [$lab, $sx]) {
+            $this->pdf->line($this->mm($sx), $this->mm($this->y), $this->mm($sx + 55), $this->mm($this->y), self::GREY, $this->mm(0.3));
+            $this->font('Helvetica-Bold', 8, self::DARK); $this->t($lab, $sx, $this->y + 2);
+        }
+        for ($i = 0; $i < $this->pdf->pageCount(); $i++) {
+            $this->pdf->setActivePage($i);
+            $this->font('Helvetica', 6.8, self::GREY);
+            $this->t('Petty cash ' . date('F Y', strtotime($d['from'])) . '  ·  page ' . ($i + 1) . ' of ' . $this->pdf->pageCount(), self::A4_W / 2, self::A4_H - 10, ['align' => 'center']);
+        }
+        return $this->pdf;
     }
 }

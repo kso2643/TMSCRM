@@ -126,7 +126,7 @@ class AlertFeedController
             [$me, $me, $since]) as $r) {
             $add('task-assigned-' . $r['id'], 'TASK_ASSIGNED', 'New task assigned',
                 '“' . $r['title'] . '” from ' . ($r['byName'] ?: 'admin') . ($r['priority'] === 'URGENT' || $r['priority'] === 'HIGH' ? ' · ' . strtolower($r['priority']) . ' priority' : ''),
-                '/tasks/', $r['createdAt']);
+                '/md-desk/#tasks', $r['createdAt']);
         }
 
         // Tasks completed — ones I assigned (Super Admin: all)
@@ -140,7 +140,7 @@ class AlertFeedController
                 $add('task-done-' . $r['id'], 'TASK_COMPLETED', 'Task completed',
                     ($r['whoName'] ?: 'Someone') . ' completed “' . $r['title'] . '” in ' . self::fmtDuration((int) $r['workedSeconds']) .
                     ($r['completionNote'] ? ' — ' . mb_substr($r['completionNote'], 0, 80) : ''),
-                    '/tasks/#completed', $r['completedAt']);
+                    '/md-desk/#tasks-completed', $r['completedAt']);
             }
         }
 

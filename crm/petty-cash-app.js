@@ -135,7 +135,8 @@
       blob('/petty-cash/export?from=' + st.from + '&to=' + st.to).then(function (b) { save(b, 'petty-cash-' + st.from + '-to-' + st.to + '.xlsx'); }).catch(function (e) { toast(e.message, 'err'); });
     } });
     var setBtn = el('button', { class: 'pc-btn', id: 'pc-settings', text: '⚙ Limit & alert', style: 'display:none', onclick: function () { settings(); } });
-    var actions = el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, [setBtn, xl, addIn, addOut]);
+    var pdfBtn = el('button', { class: 'pc-btn', id: 'pc-pdf', text: '📄 Monthly PDF', onclick: function () { monthlyPdf(); } });
+    var actions = el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, [setBtn, pdfBtn, xl, addIn, addOut]);
     root.appendChild(el('div', { class: 'pc-wrap' }, [
       el('div', { class: 'pc-head' }, [el('div', {}, [el('h1', { text: 'Petty cash' }), el('p', { text: 'Cash received and spent, with the bills, and the balance in hand.' })]), actions]),
       el('div', { class: 'pc-bar' }, [from, el('span', { class: 'pc-sub', text: 'to' }), to, type, search]),
@@ -212,6 +213,35 @@
         el('tbody', {}, [filtered ? null : el('tr', { class: 'pc-open' }, [el('td', { text: dmy(d.from) }), el('td', { text: 'Opening balance' }), el('td'), el('td'), el('td', { class: 'n', text: money(s.opening) || '₹0' }), el('td'), el('td')])]
           .concat(rows.length ? rows : [el('tr', {}, [el('td', { colspan: String(head.length), class: 'pc-empty', text: 'No entries in this period.' })])]))
       ]));
+    }
+
+    function monthlyPdf() {
+      var ov = el('div', { class: 'pc-modal' });
+      function close() { ov.remove(); }
+      ov.addEventListener('mousedown', function (e) { if (e.target === ov) close(); });
+      var month = el('input', { type: 'month', class: 'pc-in', id: 'pc-r-month', value: st.from.slice(0, 7), max: iso(new Date()).slice(0, 7) });
+      var co = el('select', { class: 'pc-in', id: 'pc-r-co' }, [el('option', { value: 'TMS', text: 'TMS letterhead' }), el('option', { value: 'APJ', text: 'APJ letterhead' })]);
+      var err = el('div', { class: 'pc-err' });
+      function path() { return '/petty-cash/report?month=' + month.value + '&company=' + co.value; }
+      function name() { return 'Petty-cash-' + month.value + '.pdf'; }
+      var view = el('button', { class: 'pc-btn', id: 'pc-r-view', text: '👁 View', onclick: function () {
+        if (!month.value) { err.textContent = 'Choose the month.'; return; }
+        if (window.PdfView) { close(); PdfView.show(API + '/api' + path() + '&inline=1', { title: 'Petty cash ' + month.value, fileName: name() }); }
+        else blob(path()).then(function (b) { save(b, name()); close(); }).catch(function (e) { err.textContent = e.message; });
+      } });
+      var dl = el('button', { class: 'pc-btn pri', id: 'pc-r-dl', text: '⬇ Download PDF', onclick: function () {
+        if (!month.value) { err.textContent = 'Choose the month.'; return; }
+        dl.disabled = true;
+        blob(path()).then(function (b) { save(b, name()); toast('Downloaded ' + name()); close(); }).catch(function (e) { err.textContent = e.message; dl.disabled = false; });
+      } });
+      ov.appendChild(el('div', { class: 'pc-dlg', role: 'dialog', 'aria-modal': 'true' }, [
+        el('h2', { text: 'Petty cash monthly report (PDF)' }),
+        el('div', { class: 'pc-grid' }, [el('div', { class: 'pc-f' }, [el('label', { text: 'Month' }), month]), el('div', { class: 'pc-f' }, [el('label', { text: 'Letterhead' }), co])]),
+        el('p', { class: 'pc-sub', text: 'Opening and closing balance, every entry with its bill count and running balance, spending by category, and signature lines.' }),
+        err,
+        el('div', { class: 'pc-foot' }, [el('button', { class: 'pc-btn', type: 'button', text: 'Cancel', onclick: close }), view, dl])
+      ]));
+      document.body.appendChild(ov);
     }
 
     function settings() {

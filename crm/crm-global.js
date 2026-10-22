@@ -1019,6 +1019,88 @@
     }
   };
 
+  // ── Location gate for sales engineers ──────────────────────────────
+  // SALES / SALES_ENGINEER users must keep location on to use the CRM: a live
+  // fix is kept on every page and sent with each API call (X-CRM-Geo:
+  // lat,lng,accuracy,ageSec); the API refuses saves without it (LocationGuard),
+  // and while location is off the page is covered by a "Turn on location" lock.
+  var geo = { fix: null, off: false, started: false, lock: null, firstAt: 0 };
+  function geoRole() { try { var u = JSON.parse(localStorage.getItem('crm_user') || 'null'); return u && (u.role === 'SALES' || u.role === 'SALES_ENGINEER'); } catch (e) { return false; } }
+  function geoHeader() {
+    if (!geo.fix) return null;
+    return geo.fix.lat.toFixed(6) + ',' + geo.fix.lng.toFixed(6) + ',' + Math.round(geo.fix.acc || 0) + ',' + Math.max(0, Math.round((Date.now() - geo.fix.t) / 1000));
+  }
+  var API_HOST = 'api.' + 'apjtech.in';   // also matches when another script talks to the API by its full address
+  function isApi(url) {
+    var u = typeof url === 'string' ? url : (url && url.url ? String(url.url) : '');
+    return u.indexOf(API) === 0 || u.indexOf('//' + API_HOST + '/') > 0;
+  }
+  (function patchRequests() {
+    if (window.__crmGeoPatched) return; window.__crmGeoPatched = true;
+    var of = window.fetch;
+    if (of) window.fetch = function (input, init) {
+      var h = geoRole() && isApi(input) ? geoHeader() : null;
+      if (h) {
+        init = Object.assign({}, init || {});
+        var hd = new Headers(init.headers || (input && input.headers) || {});
+        hd.set('X-CRM-Geo', h); init.headers = hd;
+      }
+      return of.call(this, input, init).then(function (r) { if (r && r.status === 423 && geoRole()) geoCheck(true); return r; });
+    };
+    var oo = XMLHttpRequest.prototype.open, os = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (m, url) { this.__crmApi = isApi(String(url)); return oo.apply(this, arguments); };
+    XMLHttpRequest.prototype.send = function () {
+      if (this.__crmApi && geoRole()) { var h = geoHeader(); if (h) try { this.setRequestHeader('X-CRM-Geo', h); } catch (e) {} }
+      return os.apply(this, arguments);
+    };
+  })();
+  function geoOk(p) {
+    geo.fix = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, t: Date.now() };
+    geoSetOff(false);
+  }
+  function geoErr(err) {
+    if (err && (err.code === 1 || err.code === 2)) geoSetOff(true);
+    else if (!geo.fix && Date.now() - geo.firstAt > 45000) geoSetOff(true);   // still no fix after 45 s
+  }
+  function geoCheck(force) {
+    if (!navigator.geolocation) { geoSetOff(true); return; }
+    navigator.geolocation.getCurrentPosition(geoOk, geoErr, { enableHighAccuracy: !!force, maximumAge: force ? 0 : 60000, timeout: 30000 });
+  }
+  function geoStart() {
+    if (geo.started || !token() || !geoRole() || /^\/login/.test(location.pathname)) return;
+    geo.started = true; geo.firstAt = Date.now();
+    if (!navigator.geolocation) { geoSetOff(true); return; }
+    navigator.geolocation.watchPosition(geoOk, geoErr, { enableHighAccuracy: false, maximumAge: 120000, timeout: 45000 });
+    geoCheck(false);
+    setInterval(function () { if (document.visibilityState === 'visible') geoCheck(false); }, 120000);   // keep the fix fresh while standing still
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') geoCheck(false); });
+    // permission already refused → lock at once; changed in settings → check again
+    try { navigator.permissions.query({ name: 'geolocation' }).then(function (st) { if (st.state === 'denied') geoSetOff(true); st.onchange = function () { if (st.state === 'denied') geoSetOff(true); else geoCheck(true); }; }); } catch (e) {}
+    // the location prompt was ignored / GPS gives nothing: lock after 45 s without any fix
+    setTimeout(function () { if (!geo.fix) geoSetOff(true); }, 45000);
+  }
+  function geoSetOff(off) {
+    geo.off = off;
+    if (!off) { if (geo.lock) { geo.lock.remove(); geo.lock = null; } return; }
+    if (geo.lock || !document.body) return;
+    var host = document.createElement('div'); host.id = 'crm-geo-lock';
+    host.style.cssText = 'position:fixed;inset:0;z-index:2147483640';
+    var r = host.attachShadow({ mode: 'open' });
+    r.innerHTML = '<style>:host{all:initial}.w{position:fixed;inset:0;background:rgba(15,23,42,.92);display:flex;align-items:center;justify-content:center;padding:1rem;font:15px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#0f172a}' +
+      '.m{background:#fff;border-radius:16px;max-width:430px;width:100%;padding:1.4rem 1.3rem;text-align:center;box-shadow:0 30px 70px rgba(0,0,0,.4)}.big{font-size:2.6rem}h2{margin:.3rem 0 .4rem;font-size:1.2rem}' +
+      'p{margin:0 0 .8rem;color:#475569;font-size:.9rem}ol{text-align:left;margin:0 0 1rem;padding-left:1.2rem;color:#334155;font-size:.88rem}li{margin:.25rem 0}' +
+      'button{border:0;border-radius:10px;padding:.65rem 1rem;font:600 .92rem Inter,system-ui,sans-serif;cursor:pointer;background:#1e3a8a;color:#fff;width:100%}a{display:inline-block;margin-top:.7rem;color:#64748b;font-size:.82rem}</style>' +
+      '<div class="w" role="alertdialog" aria-modal="true" aria-labelledby="t"><div class="m"><div class="big">📍</div><h2 id="t">Turn on your location</h2>' +
+      '<p>Sales engineers can use the CRM only with location on. Nothing can be saved until it is back on.</p>' +
+      '<ol><li>Switch on <b>Location / GPS</b> on your phone or laptop.</li><li>Allow location for the CRM: in the app, phone Settings → Apps → APJ CRM → Permissions → Location → Allow; in a browser, tap the 🔒 next to the address → Location → Allow.</li><li>Press <b>Check again</b>.</li></ol>' +
+      '<button id="c">Check again</button><br><a href="/login/" id="o">Sign out</a></div></div>';
+    r.getElementById('c').addEventListener('click', function () { var b = this; b.textContent = 'Checking…'; geoCheck(true); setTimeout(function () { b.textContent = geo.off ? 'Still off — follow the steps above' : 'Check again'; }, 4000); });
+    r.getElementById('o').addEventListener('click', function () { try { localStorage.removeItem('crm_token'); } catch (e) {} });
+    document.body.appendChild(host); geo.lock = host;
+  }
+  window.CRMGeo = { check: function () { geoCheck(true); }, state: function () { return { off: geo.off, fix: geo.fix }; } };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', geoStart); else geoStart();
+
   // ── Quick search (Ctrl / ⌘ + K, or "Quick search…" in the top bar) ───
   // One box for the whole CRM: pages from the menu, plus customers, products,
   // quotations, orders, price requests, trials, appointments, CEO Desk, MOM,
