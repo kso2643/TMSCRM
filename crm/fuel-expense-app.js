@@ -412,7 +412,7 @@
     function render() {
       root.innerHTML = '';
       root.appendChild(el('div', { class: 'space-y-5' }, [
-        headerRow(), bannerSlot, statsSlot, vehicleLine, tabsSlot, bodySlot
+        headerRow(), bannerSlot, statsSlot, empSlot, vehicleLine, tabsSlot, bodySlot
       ]));
     }
 
@@ -421,6 +421,55 @@
     var vehicleLine = el('p', { class: 'text-xs text-muted hidden' });
     var tabsSlot = el('div', { class: 'flex gap-1 border-b border-slate-200 dark:border-slate-700 hidden' });
     var bodySlot = el('div');
+    var empSlot = el('div', { id: 'fx-emp' });
+    var empFilter = '';   // All employees tab: one engineer picked from the totals card
+
+    // Admin: each engineer's totals for the month at the top (km, fuel, misc, claim)
+    function loadEmpTotals() {
+      if (!isAdmin()) return;
+      api('GET', '/fuel-expense/all?month=' + month + '&year=' + year).then(function (res) {
+        var by = {};
+        ((res.data && res.data.days) || []).forEach(function (day) {
+          day.records.forEach(function (r) {
+            var id = (r.user && r.user.id) || r.userId;
+            var x = by[id] = by[id] || { id: id, name: (r.user && r.user.name) || '—', days: 0, km: 0, fuel: 0, misc: 0, total: 0, open: 0 };
+            x.days++; x.km += num(r.officialKm); x.fuel += num(r.fuelCost); x.misc += num(r.miscAmount); x.total += num(r.totalAmount);
+            if (r.closingMeter == null) x.open++;
+          });
+        });
+        var list = Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return b.total - a.total; });
+        empSlot.innerHTML = '';
+        if (!list.length) return;
+        var g = list.reduce(function (t, x) { t.km += x.km; t.fuel += x.fuel; t.misc += x.misc; t.total += x.total; t.days += x.days; return t; }, { km: 0, fuel: 0, misc: 0, total: 0, days: 0 });
+        var cell = 'px-4 py-2 text-right whitespace-nowrap';
+        var rows = list.map(function (x) {
+          return el('tr', { class: 'table-row cursor-pointer' + (empFilter === x.id ? ' bg-blue-50 dark:bg-slate-800' : ''), 'data-fx-emp': x.id, title: 'Show ' + x.name + '\u2019s entries',
+            onclick: function () { empFilter = empFilter === x.id ? '' : x.id; tab = 'all'; buildTabs(); loadEmpTotals(); loadBody(); } }, [
+            el('td', { class: 'px-4 py-2 font-medium', text: x.name + (x.open ? ' · ' + x.open + ' open' : '') }),
+            el('td', { class: cell, text: String(x.days) }),
+            el('td', { class: cell, text: fmt(x.km) + ' km' }),
+            el('td', { class: cell, text: '₹' + fmt(x.fuel) }),
+            el('td', { class: cell, text: '₹' + fmt(x.misc) }),
+            el('td', { class: cell + ' font-bold', text: '₹' + fmt(x.total) })
+          ]);
+        });
+        rows.push(el('tr', { class: 'bg-slate-50 dark:bg-slate-800/50 font-semibold' }, [
+          el('td', { class: 'px-4 py-2', text: 'All engineers' }), el('td', { class: cell, text: String(g.days) }), el('td', { class: cell, text: fmt(g.km) + ' km' }),
+          el('td', { class: cell, text: '₹' + fmt(g.fuel) }), el('td', { class: cell, text: '₹' + fmt(g.misc) }), el('td', { class: cell + ' font-bold', text: '₹' + fmt(g.total) })]));
+        empSlot.appendChild(el('div', { class: 'card overflow-hidden' }, [
+          el('div', { class: 'px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 flex-wrap' }, [
+            el('span', { class: 'text-sm font-semibold text-slate-900 dark:text-slate-100', text: '👥 Engineer-wise total — ' + MONTHS[month - 1] + ' ' + year }),
+            el('span', { class: 'text-xs text-muted', text: empFilter ? 'Showing one engineer below — click again to show all' : 'Click an engineer to see their entries' })
+          ]),
+          el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm', id: 'fx-emp-table' }, [
+            el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, ['Engineer', 'Days', 'Official km', 'Fuel', 'Misc.', 'Total claim'].map(function (h, i) {
+              return el('th', { class: 'table-head px-4 py-2.5 whitespace-nowrap ' + (i ? 'text-right' : 'text-left'), text: h });
+            }))]),
+            el('tbody', {}, rows)
+          ])])
+        ]));
+      }).catch(function () { empSlot.innerHTML = ''; });
+    }
 
     function headerRow() {
       var mSel = el('select', { class: selectCls() });
@@ -588,7 +637,7 @@
 
     function loadAllUsers() {
       setLoading();
-      api('GET', '/fuel-expense/all?month=' + month + '&year=' + year).then(function (res) {
+      api('GET', '/fuel-expense/all?month=' + month + '&year=' + year + (empFilter ? '&userId=' + encodeURIComponent(empFilter) : '')).then(function (res) {
         var days = (res.data && res.data.days) || [];
         bodySlot.innerHTML = '';
         if (!days.length) {
@@ -658,7 +707,7 @@
     }
 
     function loadBody() { tab === 'all' ? loadAllUsers() : loadMine(); }
-    function loadAll() { loadToday(); loadBody(); }
+    function loadAll() { loadToday(); loadBody(); loadEmpTotals(); }
 
     render();
     buildTabs();

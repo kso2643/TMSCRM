@@ -804,6 +804,7 @@ try {
         match (true) {
             $method === 'GET'   && $c1 === 'export'  => $exp->exportLeaves(),
             $method === 'GET'   && $c1 === 'summary' => $ctrl->summary(),
+            $method === 'GET'   && $c1 === 'by-employee' => $ctrl->byEmployee(),
             $method === 'DELETE'&& $c1 !== '' && $c2 === '' => $ctrl->withdraw($c1),
             $method === 'GET'   && $c1 === ''        => $ctrl->index(),
             $method === 'POST'  && $c1 === ''        => $ctrl->create(),

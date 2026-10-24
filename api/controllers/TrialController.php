@@ -133,17 +133,34 @@ $tail",
     private ?array $viewerCache = null;
     private function viewer(): array { return $this->viewerCache ??= authenticate(); }
 
+    /** How many open trial requests (waiting for approval or approved, not completed) an engineer may have. */
+    public const MAX_OPEN = 10;
+
     /**
-     * The engineer's trial that holds up a new request: one still waiting for approval, or an
-     * approved one whose trial progress (running / postponed / completed / other reason) has
-     * not been filled in yet. Once the engineer sets the progress, a new trial can be raised.
+     * What holds up the engineer's next trial request, or null:
+     *   - an open trial (waiting for approval or approved) whose trial progress — running /
+     *     postponed / completed / other reason — has not been filled in yet ('reason' => 'PROGRESS'), or
+     *   - MAX_OPEN open trials already ('reason' => 'LIMIT').
      */
     private static function openTrialOf(string $userId, string $exceptId = ''): ?array
     {
         $s = db()->prepare("SELECT id, trialNo, status, progress FROM `Trial` WHERE requestedById=? AND status IN ('PENDING_APPROVAL','APPROVED')
-            AND NOT (status='APPROVED' AND COALESCE(progress,'') <> '') AND id<>? ORDER BY createdAt LIMIT 1");
+            AND COALESCE(progress,'') = '' AND id<>? ORDER BY createdAt LIMIT 1");
         $s->execute([$userId, $exceptId]);
-        return $s->fetch() ?: null;
+        if ($r = $s->fetch()) return $r + ['reason' => 'PROGRESS', 'max' => self::MAX_OPEN];
+        $c = db()->prepare("SELECT COUNT(*) FROM `Trial` WHERE requestedById=? AND status IN ('PENDING_APPROVAL','APPROVED') AND id<>?");
+        $c->execute([$userId, $exceptId]);
+        $n = (int) $c->fetchColumn();
+        return $n >= self::MAX_OPEN ? ['id' => null, 'trialNo' => null, 'status' => null, 'progress' => null, 'reason' => 'LIMIT', 'open' => $n, 'max' => self::MAX_OPEN] : null;
+    }
+
+    /** Reasons typed under "Other reason" before, newest first — offered in every trial's progress dropdown. */
+    private static function otherReasons(): array
+    {
+        try {
+            return array_values(array_unique(array_column(db()->query("SELECT progressReason FROM `Trial` WHERE progress='OTHER' AND progressReason IS NOT NULL AND progressReason<>''
+                ORDER BY progressAt DESC LIMIT 60")->fetchAll(), 'progressReason')));
+        } catch (Throwable $e) { return []; }
     }
 
     private function canEdit(array $auth, array $row): bool
@@ -286,7 +303,8 @@ $tail",
             if (isset($counts[$r['status']])) $counts[$r['status']] = (int) $r['n'];
         }
         $open = self::isManager($auth) ? null : self::openTrialOf($auth['id']);
-        sendSuccess(['trials' => array_map(fn($r) => $this->shape($r, false), $rows), 'counts' => $counts, 'openTrial' => $open, 'canRaise' => !$open]);
+        sendSuccess(['trials' => array_map(fn($r) => $this->shape($r, false), $rows), 'counts' => $counts, 'openTrial' => $open, 'canRaise' => !$open,
+                     'otherReasons' => array_slice(self::otherReasons(), 0, 20), 'maxOpen' => self::MAX_OPEN]);
     }
 
     // GET /api/trials/:id
@@ -306,10 +324,12 @@ $tail",
     {
         $auth = authenticate();
         $b = request_body();
-        // The next trial can be raised once the last one is approved and its trial progress
-        // has been filled in by the engineer (admins are not limited).
+        // The next trial can be raised once every open trial (waiting for approval or approved)
+        // has its trial progress filled in, up to MAX_OPEN open trials (admins are not limited).
         if (!self::isManager($auth) && ($open = self::openTrialOf($auth['id']))) {
-            sendError('Finish trial ' . $open['trialNo'] . ' first — ' . ($open['status'] === 'PENDING_APPROVAL' ? 'it is waiting for approval' : 'set its trial progress (running / postponed / completed / other reason) on the Trials page') . '. A new trial can be raised after that.', 409);
+            sendError($open['reason'] === 'LIMIT'
+                ? 'You already have ' . $open['open'] . ' open trial requests (the most is ' . self::MAX_OPEN . '). Complete one before raising another.'
+                : 'Fill in the trial progress of ' . $open['trialNo'] . ' first (running / postponed / completed / other reason) on the Trials page. A new trial can be raised after that.', 409);
         }
         $eda = $b['existingData'] ?? null;
         $json = self::sheetJson($eda, 'eda', 'existing situation data analysis');
@@ -498,7 +518,7 @@ $tail",
         if (!$row) sendError('Trial not found.', 404);
         if (!$this->canEdit($auth, $row)) sendError('Only the engineer who raised it or an Admin can update the trial.', 403);
         if ($row['status'] === 'COMPLETED') sendError('This trial is already completed (report submitted).', 400);
-        if ($row['status'] !== 'APPROVED') sendError('The trial status can be set once the trial is approved.', 400);
+        if (!in_array($row['status'], ['APPROVED', 'PENDING_APPROVAL'], true)) sendError('The trial progress can be set while the trial is waiting for approval or approved.', 400);
         $b = request_body();
         $p = strtoupper(trim((string) ($b['progress'] ?? '')));
         $map = ['RUNNING' => 'RUNNING', 'POSTPONED' => 'POSTPONED', 'COMPLETED' => 'REPORT_DUE', 'REPORT_DUE' => 'REPORT_DUE', 'OTHER' => 'OTHER'];

@@ -249,6 +249,36 @@ class LeaveController
                      'types' => array_map(fn($k) => ['value' => $k, 'label' => self::LABELS[$k]], self::TYPES)]);
     }
 
+    // GET /api/leaves/by-employee?period=month|year&month=&year=   admin-tier: approved leave per employee
+    public function byEmployee(): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('Only admins can see everyone\'s leave.', 403);
+        $y = (int) (qp('year') ?: date('Y')); $m = (int) (qp('month') ?: date('n'));
+        if ($y < 2000 || $y > 2100 || $m < 1 || $m > 12) sendError('Choose a valid month.', 400);
+        $isYear = qp('period', 'month') === 'year';
+        $from = $isYear ? "$y-01-01" : sprintf('%04d-%02d-01', $y, $m);
+        $to = $isYear ? ($y + 1) . '-01-01' : date('Y-m-d', strtotime("$from +1 month"));
+        $s = db()->prepare("SELECT u.id, u.name, u.role,
+                SUM(CASE WHEN l.status='APPROVED' AND l.leaveType='CASUAL' AND COALESCE(l.originalType,'')<>'ABSENT' THEN l.totalDays ELSE 0 END) AS casual,
+                SUM(CASE WHEN l.status='APPROVED' AND l.leaveType='SICK' THEN l.totalDays ELSE 0 END) AS sick,
+                SUM(CASE WHEN l.status='APPROVED' AND l.leaveType='PERSONAL' THEN l.totalDays ELSE 0 END) AS personal,
+                SUM(CASE WHEN l.status='APPROVED' AND l.leaveType='HALF_DAY' THEN 1 ELSE 0 END) AS halfDays,
+                SUM(CASE WHEN l.status='APPROVED' AND l.leaveType='PERMISSION' THEN COALESCE(l.hours,0) ELSE 0 END) AS permissionHours,
+                SUM(CASE WHEN l.status='APPROVED' AND COALESCE(l.originalType,'')='ABSENT' THEN l.totalDays ELSE 0 END) AS absent,
+                SUM(CASE WHEN l.status='APPROVED' AND l.isLop=1 THEN l.totalDays ELSE 0 END) AS lop,
+                SUM(CASE WHEN l.status='APPROVED' AND l.leaveType<>'PERMISSION' THEN l.totalDays ELSE 0 END) AS totalDays,
+                SUM(CASE WHEN l.status='PENDING' THEN 1 ELSE 0 END) AS pending
+            FROM `Leave` l JOIN `User` u ON u.id=l.userId
+            WHERE l.fromDate >= ? AND l.fromDate < ?
+            GROUP BY u.id, u.name, u.role ORDER BY totalDays DESC, u.name");
+        $s->execute([$from, $to]);
+        $rows = array_map(fn($r) => ['id' => $r['id'], 'name' => $r['name'], 'role' => $r['role']] + array_map('floatval', array_diff_key($r, ['id' => 1, 'name' => 1, 'role' => 1])), $s->fetchAll());
+        $tot = [];
+        foreach (['casual', 'sick', 'personal', 'halfDays', 'permissionHours', 'absent', 'lop', 'totalDays', 'pending'] as $k) $tot[$k] = array_sum(array_column($rows, $k));
+        sendSuccess(['employees' => $rows, 'totals' => $tot, 'period' => $isYear ? 'year' : 'month', 'from' => $from, 'to' => date('Y-m-d', strtotime("$to -1 day"))]);
+    }
+
     private static function hhmm($v): ?string
     {
         $v = trim((string) $v);

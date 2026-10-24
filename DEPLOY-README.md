@@ -1,3 +1,21 @@
+# Update — 24 Oct (b): Trial progress while waiting for approval (up to 10 open trials), engineer-wise totals on Fuel expense and Leave
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.
+
+1. **Trials**
+   - The **Trial progress** dropdown now shows while a trial is **waiting for approval** too, not only after approval.
+   - An engineer can raise a new trial once **every** open trial (waiting for approval or approved) has its progress filled in.
+   - Each engineer can have up to **10 open trial requests**. The 11th is refused until one is completed.
+   - **Other reason:** a reason typed once is added to the dropdown under *"Other reasons used before"*, so anyone can pick it next time. **+ Other reason (type new)…** adds a new one.
+   - Picking *completed* while a trial still waits for approval saves the status. The savings report opens after approval.
+2. **Fuel expense (admins)**
+   - A new **Engineer-wise total** card at the top shows, for the chosen month, each engineer's days, official km, fuel, misc. and **total claim**, plus an *All engineers* total.
+   - Click an engineer to see only their entries in *All employees*. Click again to show everyone.
+3. **Leave (admins)**
+   - A new **Employee-wise leave** card at the top shows, for each person, total days, casual, sick, personal, half days, permission hours, absent, LOP days and pending requests, with a total row.
+   - Switch between **Month** and **Year**, and use ‹ › to move between periods.
+   - Engineers still see only their own figures.
+
 # Update — 24 Oct (a): Date filter in CEO Desk → Tasks, new trial after the trial progress is filled
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.

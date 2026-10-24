@@ -160,6 +160,54 @@
   }
 
   var state = { tab: 'mine', status: '', type: '', items: [], summary: null };
+  var emp = { period: 'month', y: new Date().getFullYear(), m: new Date().getMonth() + 1, data: null, box: null };
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  /** Admin: approved leave per employee (this month / this year) at the top of the page. */
+  function empCard() {
+    if (!isAdminTier) return null;
+    if (!emp.box) emp.box = el('div', { class: 'lv-card', id: 'lv-emp' });
+    drawEmp();
+    return emp.box;
+  }
+  function loadEmp() {
+    if (!isAdminTier) return Promise.resolve();
+    return api('GET', '/leaves/by-employee?period=' + emp.period + '&year=' + emp.y + '&month=' + emp.m).then(function (j) { emp.data = j.data; drawEmp(); })
+      .catch(function (e) { emp.data = { error: e.message }; drawEmp(); });
+  }
+  function drawEmp() {
+    var box = emp.box; if (!box) return;
+    clear(box);
+    var label = emp.period === 'year' ? String(emp.y) : MONTHS[emp.m - 1] + ' ' + emp.y;
+    function shift(d) {
+      if (emp.period === 'year') emp.y += d;
+      else { emp.m += d; if (emp.m < 1) { emp.m = 12; emp.y--; } if (emp.m > 12) { emp.m = 1; emp.y++; } }
+      loadEmp();
+    }
+    box.appendChild(el('div', { style: 'display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:space-between;margin-bottom:.6rem' }, [
+      el('b', { text: '👥 Employee-wise leave — ' + label }),
+      el('div', { style: 'display:flex;gap:.35rem;align-items:center' }, [
+        el('button', { class: 'lv-btn sm', type: 'button', 'aria-label': 'Previous', text: '‹', onclick: function () { shift(-1); } }),
+        el('button', { class: 'lv-btn sm', type: 'button', 'aria-label': 'Next', text: '›', onclick: function () { shift(1); } }),
+        el('button', { class: 'lv-btn sm' + (emp.period === 'month' ? ' pri' : ''), type: 'button', 'data-emp-period': 'month', text: 'Month', onclick: function () { emp.period = 'month'; loadEmp(); } }),
+        el('button', { class: 'lv-btn sm' + (emp.period === 'year' ? ' pri' : ''), type: 'button', 'data-emp-period': 'year', text: 'Year', onclick: function () { emp.period = 'year'; loadEmp(); } })
+      ])
+    ]));
+    var d = emp.data;
+    if (!d) { box.appendChild(el('div', { class: 'sub', text: 'Loading…' })); return; }
+    if (d.error) { box.appendChild(el('div', { class: 'sub', text: d.error })); return; }
+    if (!d.employees.length) { box.appendChild(el('div', { class: 'sub', style: 'color:#64748b', text: 'No leave in ' + label + '.' })); return; }
+    var cols = [['Employee', null], ['Total days', 'totalDays'], ['Casual', 'casual'], ['Sick', 'sick'], ['Personal', 'personal'], ['Half days', 'halfDays'], ['Permission', 'permissionHours'], ['Absent', 'absent'], ['LOP days', 'lop'], ['Pending', 'pending']];
+    function v(k, x) { var n = x[k] || 0; return k === 'permissionHours' ? (n ? hrs(n) : '—') : (n ? String(+n.toFixed(1)) : '—'); }
+    box.appendChild(el('div', { class: 'lv-tw' }, [el('table', { class: 'lv-table', id: 'lv-emp-table' }, [
+      el('thead', {}, [el('tr', {}, cols.map(function (c, i) { return el('th', { style: i ? 'text-align:right' : '', text: c[0] }); }))]),
+      el('tbody', {}, d.employees.map(function (x) {
+        return el('tr', { 'data-emp': x.id }, cols.map(function (c, i) {
+          return i ? el('td', { style: 'text-align:right;' + (c[1] === 'totalDays' ? 'font-weight:700' : '') + (c[1] === 'lop' && x.lop ? ';color:#b91c1c' : ''), text: v(c[1], x) }) : el('td', { style: 'font-weight:600', text: x.name });
+        }));
+      }).concat([el('tr', { style: 'background:#f8fafc' }, cols.map(function (c, i) { return el('td', { style: 'font-weight:700;' + (i ? 'text-align:right' : ''), text: i ? v(c[1], d.totals) : 'Total' }); }))]))
+    ])]));
+  }
   var ROOT;
 
   function field(label, input, req, extra) {
@@ -419,7 +467,7 @@
     clear(ROOT).appendChild(el('div', { class: 'lv-wrap' }, [
       el('div', { class: 'lv-head' }, [el('div', {}, [el('h1', { text: 'Leave & permission' }),
         el('p', { text: 'Apply for casual, sick, personal or half-day leave, or an hourly permission.' })]), exp]),
-      stats(), form(), listCard()
+      stats(), empCard(), form(), listCard()
     ]));
   }
 
@@ -428,6 +476,7 @@
     return Promise.all([api('GET', '/leaves' + q), api('GET', '/leaves/summary').catch(function () { return { data: null }; })]).then(function (res) {
       var d = res[0].data; state.items = Array.isArray(d) ? d : (d && (d.items || d.leaves || d.data)) || [];
       state.summary = res[1].data;
+      loadEmp();   // approvals / new leave change the employee-wise totals too
       var keep = document.getElementById('lv-reason'), draft = keep ? keep.value : '';
       var keepType = document.getElementById('lv-type'), tv = keepType ? keepType.value : null;
       render();

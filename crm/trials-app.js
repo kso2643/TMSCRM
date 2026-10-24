@@ -302,25 +302,36 @@
     if (x.progress === 'OTHER' && x.progressReason) t += ': ' + x.progressReason;
     return t;
   }
+  var OTHER_REASONS = [];   // reasons typed under "Other reason" before — offered again in the dropdown
   function progressCell(x, reload) {
     if (x.status === 'COMPLETED') return el('span', { class: 'badge badge-green', text: PROG.COMPLETED[0] });
-    if (x.status !== 'APPROVED') return el('span', { class: 'text-xs text-muted', text: '—' });
+    // the progress can be given while the trial waits for approval too
+    if (x.status !== 'APPROVED' && x.status !== 'PENDING_APPROVAL') return el('span', { class: 'text-xs text-muted', text: '—' });
     var me = currentUser() || {}, can = canManage() || (x.requestedBy && x.requestedBy.id === me.id);
     var label = x.progress ? el('div', { class: 'text-xs ' + (x.progress === 'REPORT_DUE' ? 'text-amber-700 font-semibold' : 'text-muted'), style: 'max-width:220px', 'data-progress-text': x.id, text: progressText(x) }) : null;
     if (!can) return el('div', {}, [x.progress ? el('span', { class: 'badge ' + PROG[x.progress][1], text: PROG[x.progress][0] }) : el('span', { class: 'text-xs text-muted', text: 'Not updated' }), label]);
     var sel = el('select', { class: INPUT + ' text-xs', 'data-progress': x.id, style: 'min-width:150px;padding:.25rem .4rem' }, [
       el('option', { value: '', text: 'Set trial status…' }), el('option', { value: 'RUNNING', text: 'Trial running' }), el('option', { value: 'POSTPONED', text: 'Trial postponed to…' }),
-      el('option', { value: 'COMPLETED', text: 'Trial completed → report' }), el('option', { value: 'OTHER', text: 'Other reason…' })]);
-    sel.value = x.progress === 'REPORT_DUE' ? 'COMPLETED' : (x.progress || '');
+      el('option', { value: 'COMPLETED', text: 'Trial completed → report' })]);
+    var reasons = OTHER_REASONS.slice();
+    if (x.progress === 'OTHER' && x.progressReason && reasons.indexOf(x.progressReason) < 0) reasons.unshift(x.progressReason);
+    if (reasons.length) sel.appendChild(el('optgroup', { label: 'Other reasons used before' }, reasons.map(function (r) {
+      return el('option', { value: 'OTHER::' + r, text: r.length > 40 ? r.slice(0, 38) + '…' : r, title: r });
+    })));
+    sel.appendChild(el('option', { value: 'OTHER', text: '+ Other reason (type new)…' }));
+    function current() { return x.progress === 'REPORT_DUE' ? 'COMPLETED' : x.progress === 'OTHER' && x.progressReason ? 'OTHER::' + x.progressReason : (x.progress || ''); }
+    sel.value = current();
     sel.addEventListener('change', function () {
       var v = sel.value, body = { progress: v };
       if (!v) return;
+      if (v.indexOf('OTHER::') === 0) { body = { progress: 'OTHER', reason: v.slice(7) }; v = 'OTHER'; }
       if (v === 'POSTPONED') { var d = prompt('Postponed to which date? (DD-MM-YYYY)', ''); if (!d) { sel.value = x.progress || ''; return; } body.date = d.trim().split(/[-\/.]/).reverse().join('-'); body.reason = prompt('Reason for postponing (optional):', '') || ''; }
-      if (v === 'OTHER') { var r = prompt('What is the reason?', x.progressReason || ''); if (!r || !r.trim()) { sel.value = x.progress || ''; return; } body.reason = r.trim(); }
+      if (v === 'OTHER' && !body.reason) { var r = prompt('What is the reason?', ''); if (!r || !r.trim()) { sel.value = current(); return; } body.reason = r.trim(); }
       api('PATCH', '/trials/' + encodeURIComponent(x.id) + '/progress', body).then(function (j) {
-        if (v === 'COMPLETED') { alert(j.message + '.\nOpening the trial — fill the trial comparison / savings report (step 4).'); go('/t/' + encodeURIComponent(x.id)); return; }
+        if (v === 'COMPLETED' && x.status === 'APPROVED') { alert(j.message + '.\nOpening the trial — fill the trial comparison / savings report (step 4).'); go('/t/' + encodeURIComponent(x.id)); return; }
+        if (v === 'COMPLETED') alert('Saved. The trial report (savings sheet) opens once the admin approves the trial.');
         reload();
-      }).catch(function (e) { alert(e.message); sel.value = x.progress === 'REPORT_DUE' ? 'COMPLETED' : (x.progress || ''); });
+      }).catch(function (e) { alert(e.message); sel.value = current(); });
     });
     // Once the trial progress is filled in, the engineer can raise the next trial.
     var again = !!x.progress && x.requestedBy && x.requestedBy.id === me.id
@@ -385,10 +396,13 @@
       var q = '/trials?status=' + listState.status + (listState.search ? '&search=' + encodeURIComponent(listState.search) : '') + (listState.scope === 'all' ? '&scope=all' : '');
       api('GET', q).then(function (r) {
         var o = r.data.openTrial;
-        // The next trial opens once the last one's trial progress is filled in.
-        newBtn.disabled = !!o; newBtn.title = o ? 'Finish ' + o.trialNo + ' first' : '';
+        OTHER_REASONS = r.data.otherReasons || [];
+        // The next trial opens once every open trial has its progress filled in (up to maxOpen open trials).
+        newBtn.disabled = !!o; newBtn.title = o ? (o.reason === 'LIMIT' ? o.max + ' open trials — complete one first' : 'Fill in the progress of ' + o.trialNo + ' first') : '';
         openBanner.style.display = o ? '' : 'none';
-        if (o) openBanner.textContent = o.status === 'PENDING_APPROVAL' ? 'You can raise a new trial after ' + o.trialNo + ' is approved — it is waiting for approval.' : 'To raise a new trial, first fill in the trial progress of ' + o.trialNo + ' in the “Trial progress” column below (running / postponed / completed / other reason).';
+        if (o) openBanner.textContent = o.reason === 'LIMIT'
+          ? 'You have ' + o.open + ' open trial requests — the most is ' + o.max + '. Complete one before raising a new trial.'
+          : 'To raise a new trial, first fill in the trial progress of ' + o.trialNo + (o.status === 'PENDING_APPROVAL' ? ' (still waiting for approval)' : '') + ' in the “Trial progress” column below (running / postponed / completed / other reason).';
         render(r.data.trials || [], r.data.counts || {});
       })
         .catch(function (e) { body.innerHTML = ''; body.appendChild(errorCard(e.message, load)); });
