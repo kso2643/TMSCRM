@@ -322,8 +322,8 @@
         reload();
       }).catch(function (e) { alert(e.message); sel.value = x.progress === 'REPORT_DUE' ? 'COMPLETED' : (x.progress || ''); });
     });
-    // A postponed / stopped trial no longer holds up the next one.
-    var again = (x.progress === 'POSTPONED' || x.progress === 'OTHER') && x.requestedBy && x.requestedBy.id === me.id
+    // Once the trial progress is filled in, the engineer can raise the next trial.
+    var again = !!x.progress && x.requestedBy && x.requestedBy.id === me.id
       ? el('button', { class: 'btn-secondary btn-sm', style: 'margin-top:.3rem', 'data-new-from': x.id, text: '+ New trial request', onclick: function (e) { e.stopPropagation(); go('/new'); } }) : null;
     return el('div', {}, [sel, label, again]);
   }
@@ -385,10 +385,10 @@
       var q = '/trials?status=' + listState.status + (listState.search ? '&search=' + encodeURIComponent(listState.search) : '') + (listState.scope === 'all' ? '&scope=all' : '');
       api('GET', q).then(function (r) {
         var o = r.data.openTrial;
-        // One trial at a time: the next one opens after the savings report of the last.
+        // The next trial opens once the last one's trial progress is filled in.
         newBtn.disabled = !!o; newBtn.title = o ? 'Finish ' + o.trialNo + ' first' : '';
         openBanner.style.display = o ? '' : 'none';
-        if (o) openBanner.textContent = 'You can raise a new trial after ' + o.trialNo + ' is completed — ' + (o.status === 'PENDING_APPROVAL' ? 'it is waiting for approval.' : (o.progress === 'REPORT_DUE' ? 'submit its savings report (step 4, Trial comparison).' : 'submit its savings report (step 4), or set its trial progress to Postponed / Other reason.'));
+        if (o) openBanner.textContent = o.status === 'PENDING_APPROVAL' ? 'You can raise a new trial after ' + o.trialNo + ' is approved — it is waiting for approval.' : 'To raise a new trial, first fill in the trial progress of ' + o.trialNo + ' in the “Trial progress” column below (running / postponed / completed / other reason).';
         render(r.data.trials || [], r.data.counts || {});
       })
         .catch(function (e) { body.innerHTML = ''; body.appendChild(errorCard(e.message, load)); });

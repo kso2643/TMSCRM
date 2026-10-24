@@ -134,14 +134,14 @@ $tail",
     private function viewer(): array { return $this->viewerCache ??= authenticate(); }
 
     /**
-     * An engineer's trial that is still open (raised, or approved but no savings report yet).
-     * A trial whose progress is "postponed" or "other reason" is on hold and does not block
-     * a new trial request.
+     * The engineer's trial that holds up a new request: one still waiting for approval, or an
+     * approved one whose trial progress (running / postponed / completed / other reason) has
+     * not been filled in yet. Once the engineer sets the progress, a new trial can be raised.
      */
     private static function openTrialOf(string $userId, string $exceptId = ''): ?array
     {
         $s = db()->prepare("SELECT id, trialNo, status, progress FROM `Trial` WHERE requestedById=? AND status IN ('PENDING_APPROVAL','APPROVED')
-            AND NOT (status='APPROVED' AND COALESCE(progress,'') IN ('POSTPONED','OTHER')) AND id<>? ORDER BY createdAt LIMIT 1");
+            AND NOT (status='APPROVED' AND COALESCE(progress,'') <> '') AND id<>? ORDER BY createdAt LIMIT 1");
         $s->execute([$userId, $exceptId]);
         return $s->fetch() ?: null;
     }
@@ -306,10 +306,10 @@ $tail",
     {
         $auth = authenticate();
         $b = request_body();
-        // One trial at a time: the next trial can be raised only after the last one is
-        // completed with its savings report (admins are not limited).
+        // The next trial can be raised once the last one is approved and its trial progress
+        // has been filled in by the engineer (admins are not limited).
         if (!self::isManager($auth) && ($open = self::openTrialOf($auth['id']))) {
-            sendError('Finish trial ' . $open['trialNo'] . ' first — ' . ($open['status'] === 'PENDING_APPROVAL' ? 'it is waiting for approval' : 'submit its savings report (trial comparison), or set its progress to postponed / other reason') . '. A new trial can be raised after that.', 409);
+            sendError('Finish trial ' . $open['trialNo'] . ' first — ' . ($open['status'] === 'PENDING_APPROVAL' ? 'it is waiting for approval' : 'set its trial progress (running / postponed / completed / other reason) on the Trials page') . '. A new trial can be raised after that.', 409);
         }
         $eda = $b['existingData'] ?? null;
         $json = self::sheetJson($eda, 'eda', 'existing situation data analysis');

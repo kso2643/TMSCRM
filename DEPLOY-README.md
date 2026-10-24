@@ -1,3 +1,17 @@
+# Update — 24 Oct (a): Date filter in CEO Desk → Tasks, new trial after the trial progress is filled
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.
+
+1. **CEO Desk → ✅ Tasks: date filter**
+   - A new **Assigned:** bar offers All dates, Today, Yesterday, Last 7 days, This month, or **Pick dates…** (from / to).
+   - It filters **My tasks**, **Assigned by me** and **All tasks** by the date the task was assigned.
+   - **Completed** keeps its own date filter (by completion date). **Team live** always shows now.
+2. **Trials: new request after the progress is filled**
+   - An engineer can raise a new trial request once their earlier approved trial has its **Trial progress** filled in: running, postponed, completed or other reason.
+   - Until then, **+ New trial request** stays off and a note says which trial needs its progress.
+   - A trial still waiting for approval also holds the next request, as before.
+   - **This replaces the old rule.** Before, a trial marked running or completed blocked a new request until its savings report was submitted. Now any filled progress is enough.
+
 # Update — 22 Oct (a): Petty cash monthly PDF, location required for sales engineers, Tasks inside CEO Desk, CEO Desk date-wise
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

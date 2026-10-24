@@ -234,6 +234,7 @@
     var tabBar = el('div', { class: 'tx-tabs', role: 'tablist' });
     var panel = el('div', { class: 'mt-5' });
     var reload = function () {};
+    var dBar = el('div', { class: 'mt-3' }, [dateBar(function () { reload(); })]);
 
     root.appendChild(el('div', { class: 'space-y-4' }, [
       el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
@@ -241,6 +242,7 @@
         canManage() ? el('button', { class: 'btn-primary', text: '+ Assign task', onclick: function () { openTaskDialog(null, function () { reload(); }); } }) : null
       ]),
       tabBar,
+      dBar,
       panel
     ]));
 
@@ -257,6 +259,7 @@
       tab = t;
       try { localStorage.setItem('crm_tasks_tab', t); } catch (e) {}
       renderTabs();
+      dBar.style.display = t === 'completed' || t === 'team' ? 'none' : '';   // Completed has its own dates; Team live is live
       panel.innerHTML = '';
       reload = t === 'mine' ? myTasksTab(panel)
              : t === 'completed' ? completedTab(panel)
@@ -320,6 +323,46 @@
   }
 
   // ── My tasks ─────────────────────────────────────────────────────────
+  // ── Date filter (by the date the task was assigned) for My / Assigned / All tasks ──
+  var dateF = { range: '', from: '', to: '' };
+  function isoD(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function dateSpan() {
+    var now = new Date(), y = new Date(now.getTime() - 864e5), w = new Date(now.getTime() - 6 * 864e5);
+    if (dateF.range === 'today') return [isoD(now), isoD(now)];
+    if (dateF.range === 'yesterday') return [isoD(y), isoD(y)];
+    if (dateF.range === 'week') return [isoD(w), isoD(now)];
+    if (dateF.range === 'month') return [isoD(new Date(now.getFullYear(), now.getMonth(), 1)), isoD(now)];
+    if (dateF.range === 'custom') return [dateF.from, dateF.to];
+    return ['', ''];
+  }
+  function inRange(t) {
+    var d = dateSpan(), day = String(t.createdAt || '').slice(0, 10);
+    return (!d[0] || day >= d[0]) && (!d[1] || day <= d[1]);
+  }
+  function dateBar(onChange) {
+    var bar = el('div', { class: 'flex items-center gap-2 flex-wrap', id: 'tx-datebar' });
+    function draw() {
+      bar.innerHTML = '';
+      bar.appendChild(el('span', { class: 'text-xs text-muted', text: 'Assigned:' }));
+      [['', 'All dates'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Last 7 days'], ['month', 'This month'], ['custom', 'Pick dates…']].forEach(function (r) {
+        bar.appendChild(el('button', { class: 'tx-pill' + (dateF.range === r[0] ? ' tx-pill-on' : ''), 'data-tx-range': r[0] || 'all', text: r[1], onclick: function () {
+          dateF.range = r[0];
+          if (r[0] === 'custom' && !dateF.from) { dateF.from = isoD(new Date(Date.now() - 6 * 864e5)); dateF.to = isoD(new Date()); }
+          draw(); onChange();
+        } }));
+      });
+      if (dateF.range === 'custom') {
+        var fI = el('input', { type: 'date', class: INPUT, style: 'width:auto', id: 'tx-dfrom' }); fI.value = dateF.from;
+        var tI = el('input', { type: 'date', class: INPUT, style: 'width:auto', id: 'tx-dto' }); tI.value = dateF.to;
+        fI.addEventListener('change', function () { dateF.from = fI.value; onChange(); });
+        tI.addEventListener('change', function () { dateF.to = tI.value; onChange(); });
+        bar.appendChild(fI); bar.appendChild(el('span', { class: 'text-xs text-muted', text: 'to' })); bar.appendChild(tI);
+      }
+    }
+    draw();
+    return bar;
+  }
+
   function myTasksTab(p) {
     var open = [], done = [], err = '', busy = false, completing = null, note = '';
     // Kept across re-renders so its note / state survive.
@@ -329,8 +372,8 @@
       if (!open.length && !done.length) loading(p);
       if (skipGeneral !== true) general.reload(); // a task start / resume stops the general timer
       Promise.all([api('GET', '/tasks?mine=1'), api('GET', '/tasks?mine=1&status=COMPLETED&limit=10')]).then(function (r) {
-        open = r[0].data.tasks || [];
-        done = r[1].data.tasks || [];
+        open = (r[0].data.tasks || []).filter(inRange);
+        done = (r[1].data.tasks || []).filter(inRange);
         render();
       }).catch(function (e) { errorBox(p, e.message, load); });
     }
@@ -554,7 +597,7 @@
     var tasks = [], showDone = false, who = '';
     function load() {
       if (!tasks.length) loading(p);
-      api('GET', '/tasks?assignedByMe=1&status=' + (showDone ? 'ALL' : 'OPEN') + '&limit=300').then(function (r) { tasks = r.data.tasks || []; render(); })
+      api('GET', '/tasks?assignedByMe=1&status=' + (showDone ? 'ALL' : 'OPEN') + '&limit=300').then(function (r) { tasks = (r.data.tasks || []).filter(inRange); render(); })
         .catch(function (e) { errorBox(p, e.message, load); });
     }
     function render() {
@@ -763,7 +806,7 @@
     function load() {
       if (!tasks.length) loading(p);
       var q = '/tasks?status=' + (showDone ? 'ALL' : 'OPEN') + (who ? '&assignedToId=' + encodeURIComponent(who) : '');
-      api('GET', q).then(function (r) { tasks = r.data.tasks || []; err = ''; render(); })
+      api('GET', q).then(function (r) { tasks = (r.data.tasks || []).filter(inRange); err = ''; render(); })
         .catch(function (e) { errorBox(p, e.message, load); });
     }
 
