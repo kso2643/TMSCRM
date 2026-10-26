@@ -68,6 +68,7 @@ require __DIR__ . '/includes/ApjQuotationPdf.php';
 require __DIR__ . '/includes/TMSQuotationPdf.php';
 require __DIR__ . '/includes/PageAccess.php';   // per-user page access (full / edit / view / hidden)
 require __DIR__ . '/includes/LocationGuard.php'; // sales engineers save only with location on
+require __DIR__ . '/includes/ChangeNotice.php';  // "✎ <name> changed your …" alerts to the record's owner
 
 require __DIR__ . '/controllers/AuthController.php';
 require __DIR__ . '/controllers/UserController.php';
@@ -188,6 +189,7 @@ $c4 = $segs[4] ?? '';
 // Page access set by the Super Admin: refuse writes the user's level does not allow.
 PageAccess::guard($method, $segs);
 LocationGuard::guard($method, $segs);
+ChangeNotice::watch($method, $segs);
 
 // Tiny router — match from most-specific to least-specific.
 // Convention: segment variables (IDs) are captured as $c1, $c2, etc.
@@ -317,6 +319,7 @@ try {
             $method === 'POST'  && $c1 === 'ping'                        => $ctrl->ping(),
             $method === 'GET'   && $c1 === 'today'                       => $ctrl->today(),
             $method === 'GET'   && $c1 === 'day'                         => $ctrl->day(),
+            $method === 'GET'   && $c1 === 'summary'                     => $ctrl->summary(),
             $method === 'POST'  && $c1 === 'mark' && $c2 === ''          => $ctrl->mark(),
             $method === 'DELETE'&& $c1 === 'mark' && $c2 !== ''          => $ctrl->unmark($c2),
             $method === 'POST'  && $c1 === 'late-request'                => $ctrl->lateRequest(),

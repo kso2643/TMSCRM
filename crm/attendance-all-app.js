@@ -183,9 +183,11 @@
     var filters = el('div', { class: 'flex flex-wrap gap-2 mb-4 hidden' });
     var body = el('div', { class: 'hidden' });
     var dayBox = el('div', { class: 'card mb-4 hidden', id: 'att-day' });
+    var sumBox = el('div', { class: 'card mb-4 hidden overflow-hidden', id: 'att-sum' });
     var dayDate = todayIso();
 
     wrap.appendChild(tabs);
+    wrap.appendChild(sumBox);
     wrap.appendChild(dayBox);
     wrap.appendChild(filters);
     wrap.appendChild(body);
@@ -262,7 +264,36 @@
       filters.classList.toggle('hidden', !showAll);
       body.classList.toggle('hidden', !showAll);
       dayBox.classList.toggle('hidden', !showAll);
+      sumBox.classList.toggle('hidden', !showAll);
       if (showAll) { load(); loadDay(); }
+    }
+
+    /* Engineer-wise totals for the month: present, half days, absent, leave, not marked, hours. */
+    function loadSummary() {
+      sumBox.innerHTML = '';
+      sumBox.appendChild(el('div', { class: 'px-5 py-3 text-sm text-muted', text: 'Loading engineer-wise totals…' }));
+      api('/attendance/summary?month=' + month + '&year=' + year).then(function (res) {
+        var d = res.data, t = d.totals;
+        sumBox.innerHTML = '';
+        var num = function (v) { return v ? String(Math.round(v * 10) / 10) : '—'; };
+        var cols = [['Employee', null], ['Present', 'present'], ['Half days', 'halfDays'], ['Absent', 'absent'], ['On leave', 'leave'], ['Not marked', 'notMarked'], ['Total hours', 'hours'], ['Avg / day', 'avgHours']];
+        var cell = function (k, x, bold) {
+          var v = k === 'hours' || k === 'avgHours' ? (x[k] ? (Math.round(x[k] * 10) / 10) + 'h' : '—') : num(x[k]);
+          var col = k === 'absent' && x[k] ? 'color:#b91c1c;' : k === 'notMarked' && x[k] ? 'color:#b45309;' : k === 'present' ? 'color:#15803d;' : '';
+          return el('td', { class: 'px-4 py-2 text-right whitespace-nowrap' + (bold ? ' font-bold' : ''), style: col, text: v });
+        };
+        var tb = el('tbody', {}, d.employees.map(function (x) {
+          return el('tr', { class: 'table-row', 'data-att-emp': x.id }, [el('td', { class: 'px-4 py-2 font-medium whitespace-nowrap' }, [x.name, el('span', { class: 'text-xs text-muted ml-2', text: String(x.role || '').replace(/_/g, ' ').toLowerCase() })])]
+            .concat(cols.slice(1).map(function (c) { return cell(c[1], x); })));
+        }).concat([el('tr', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('td', { class: 'px-4 py-2 font-bold', text: 'All employees' })]
+          .concat(cols.slice(1).map(function (c) { return c[1] === 'avgHours' ? el('td', { class: 'px-4 py-2' }) : cell(c[1], t, true); })))]));
+        sumBox.appendChild(el('div', { class: 'px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2' }, [
+          el('span', { class: 'text-sm font-semibold text-slate-900 dark:text-slate-100', text: '👥 Engineer-wise total — ' + MONTHS[month - 1] + ' ' + year }),
+          el('span', { class: 'text-xs text-muted', text: d.workingDays + ' working days so far (Mon–Sat) · not marked = no punch-in, leave or absent' })
+        ]));
+        sumBox.appendChild(el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm', id: 'att-sum-table' }, [
+          el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, cols.map(function (c, i) { return el('th', { class: 'table-head px-4 py-2 whitespace-nowrap ' + (i ? 'text-right' : 'text-left'), text: c[0] }); }))]), tb])]));
+      }).catch(function (e) { sumBox.innerHTML = ''; sumBox.appendChild(el('div', { class: 'px-5 py-3 text-sm text-muted', text: e.message })); });
     }
 
     /* Mark attendance for a day: everyone with today's state; Admin / Super Admin mark
@@ -345,6 +376,7 @@
 
     function load() {
       setMsg('Loading…');
+      loadSummary();
       var q = '?month=' + month + '&year=' + year +
               (status ? '&status=' + encodeURIComponent(status) : '') +
               (dept ? '&department=' + encodeURIComponent(dept) : '');

@@ -8,8 +8,8 @@
    the creator or admin-tier — matches OrderController.php exactly.
 
    List page: price/proforma and delivery are inline dropdowns; clicking a
-   row (or the sales engineer's name) expands it to show the materials on
-   the order, where the supplied ones are ticked off. All ticked = order
+   row opens the order in a pop-up with the materials on the order, where
+   the supplied ones are ticked off, and an ✎ Edit order button. All ticked = order
    complete; some = partially complete; none = not delivered — anything
    short of complete needs a reason (enforced by PATCH /orders/:id/supply).
 
@@ -387,8 +387,7 @@
         } else {
           // Partial / not delivered need the materials + a reason — open the row for that.
           presets[o.id] = v;
-          expanded[o.id] = true;
-          renderTable();
+          openView(o);
         }
       });
       return s2;
@@ -440,11 +439,7 @@
               api('DELETE', '/orders/' + o.id).then(function () { load(); }).catch(function (er) { alert(er.message); });
             } }) : null])
           ]);
-          tr.addEventListener('click', function () {
-            expanded[o.id] = !expanded[o.id];
-            if (!expanded[o.id]) delete presets[o.id];
-            renderTable();
-          });
+          tr.addEventListener('click', function () { openView(o); });
           tbody.appendChild(tr);
           if (open) tbody.appendChild(expandedRow(o, heads.length));
         });
@@ -474,6 +469,49 @@
       var sc = body.querySelector('.ox-scroll');
       if (sc) fitExpanded(sc);
     });
+
+    /** The order in a pop-up: materials supplied + order facts, with ✎ Edit order (opens the edit form). */
+    function openView(o) {
+      document.querySelectorAll('.ox-view').forEach(function (m) { m.remove(); });
+      var overlay = el('div', { class: 'ox-view fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4', 'data-order-view': o.id });
+      var card = el('div', { class: 'card w-full p-5 rounded-b-none sm:rounded-xl max-h-[92vh] overflow-y-auto', style: 'max-width:1100px', role: 'dialog', 'aria-modal': 'true' });
+      overlay.appendChild(card);
+      function close() { delete presets[o.id]; overlay.remove(); }
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+      document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape' && overlay.parentNode) { close(); document.removeEventListener('keydown', esc); } });
+      document.body.appendChild(overlay);
+      function draw(order) {
+        card.innerHTML = '';
+        var me = currentUser() || {};
+        var canEdit = isAdmin() || (order.engineer && order.engineer.id === me.id);
+        card.appendChild(el('div', { class: 'flex items-start justify-between gap-3 mb-4 flex-wrap' }, [
+          el('div', {}, [
+            el('h2', { class: 'section-title mb-0', text: (order.customer && order.customer.companyName) || 'Order' }),
+            el('p', { class: 'text-xs text-muted mt-0.5', text: fmtDate(order.orderDate) + ' · ' + ((order.engineer && order.engineer.name) || '') + (order.poNumber ? ' · PO ' + order.poNumber : '') }),
+            el('div', { class: 'flex items-center gap-2 flex-wrap mt-2' }, [
+              el('span', { class: 'badge ' + TYPE_BADGE[order.orderType], text: labelOf(ORDER_TYPES, order.orderType) }),
+              el('span', { class: 'badge ' + PROCUREMENT_BADGE[order.procurementStatus], text: labelOf(PROCUREMENT_STATUSES, order.procurementStatus) }),
+              el('span', { class: 'badge ' + STATUS_BADGE[order.deliveryStatus], text: labelOf(DELIVERY_STATUSES, order.deliveryStatus) }),
+              el('span', { class: 'badge ' + PROFORMA_BADGE[order.proformaStatus], text: 'Proforma: ' + labelOf(PROFORMA_STATUSES, order.proformaStatus) })
+            ])
+          ]),
+          el('div', { class: 'flex items-center gap-2' }, [
+            canEdit ? el('button', { class: 'btn-primary btn-sm', type: 'button', id: 'ox-view-edit', text: '✎ Edit order', onclick: function () { close(); openOrderDialog(order.id, load, { edit: true }); } }) : null,
+            el('button', { class: 'p-1 rounded text-slate-400 hover:text-slate-600', 'aria-label': 'Close', text: '✕', onclick: close })
+          ])
+        ]));
+        card.appendChild(orderDetailPanel(order, {
+          preset: presets[order.id],
+          onSaved: function (updated) { delete presets[order.id]; applyUpdate(updated); draw(updated); },
+          onCancelPreset: function () { delete presets[order.id]; draw(order); },
+          onOpen: function () { close(); openOrderDialog(order.id, load); }
+        }));
+      }
+      if (fullOrders[o.id]) draw(fullOrders[o.id]);
+      else card.appendChild(el('p', { class: 'p-6 text-center text-muted', text: 'Loading…' }));
+      api('GET', '/orders/' + o.id).then(function (res) { fullOrders[o.id] = res.data.order; if (overlay.parentNode) draw(res.data.order); })
+        .catch(function (e) { if (!fullOrders[o.id]) { card.innerHTML = ''; card.appendChild(el('p', { class: 'p-6 text-center text-red-600', text: e.message })); } });
+    }
 
     function expandedRow(o, span) {
       var inner = el('div', { class: 'ox-expand-inner' });
@@ -1019,7 +1057,7 @@
 
   // ── create / detail-edit dialog ─────────────────────────────────────
   // orderId === null -> create mode. Otherwise loads and shows/edits it.
-  function openOrderDialog(orderId, onChange) {
+  function openOrderDialog(orderId, onChange, opts) {
     injectCss();
     var overlay = el('div', { class: 'fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4' });
     var card = el('div', {
@@ -1035,7 +1073,7 @@
 
     if (orderId) {
       api('GET', '/orders/' + orderId).then(function (res) {
-        buildForm(res.data.order, false);
+        buildForm(res.data.order, !!(opts && opts.edit));
       }).catch(function (e) {
         card.innerHTML = '';
         card.appendChild(el('div', { class: 'p-2 text-center text-muted', text: e.message }));

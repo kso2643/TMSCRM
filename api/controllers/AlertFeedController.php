@@ -23,6 +23,7 @@
  *   LOCATION_OFF           someone punched in has location turned off (Super Admin)
  *   MD_DESK_NEW / _REPLY / _DONE  MD desk items between the Super Admin and Admins
  *   INVOICE_OVERDUE / BILL_DUE     accounts reminders (accounts team + Super Admin)
+ *   CHANGE_NOTICE          someone else changed / deleted my leave, order, trial, task, appointment…
  *   PETTY_CASH_LOW         petty cash dropped to the low-balance alert (people with petty cash access)
  *
  * GET /api/alerts-feed/history?days=30 returns the same events over the
@@ -267,6 +268,10 @@ class AlertFeedController
                     ($r['partyName'] ?: '') . ' — balance ₹' . number_format((float) $r['balance'], 2), $inv ? '/accounts/#/invoices' : '/accounts/#/bills', $at);
             }
         }
+
+        // Someone else changed one of my records (leave, order, trial, task…)
+        if (class_exists('ChangeNotice')) foreach (ChangeNotice::since($me, $since, $per) as $r)
+            $add('chg-' . $r['id'], 'CHANGE_NOTICE', $r['title'], (string) ($r['body'] ?? ''), (string) ($r['link'] ?: '/alerts/'), $r['createdAt']);
 
         // Petty cash low (everyone who can see petty cash)
         try {

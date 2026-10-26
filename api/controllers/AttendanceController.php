@@ -165,6 +165,54 @@ class AttendanceController
 
     // GET /api/attendance/all — admin only. Every user's punch in/out, grouped date-wise
     // (most recent date first), for the attendance register view.
+    // GET /api/attendance/summary?month=&year=   Admin: each employee's month — present, half days,
+    // absent, on leave, not marked (working days Mon–Sat so far), total / average hours.
+    public function summary(): void
+    {
+        $auth = authenticate(); require_admin($auth);
+        $y = (int) (qp('year') ?: date('Y')); $m = (int) (qp('month') ?: date('n'));
+        if ($y < 2000 || $y > 2100 || $m < 1 || $m > 12) sendError('Choose a valid month.', 400);
+        $from = sprintf('%04d-%02d-01', $y, $m);
+        $to = date('Y-m-d', strtotime("$from +1 month"));                 // exclusive
+        $last = min(date('Y-m-d'), date('Y-m-d', strtotime("$to -1 day")));
+        $workDays = 0;
+        for ($d = $from; $d <= $last; $d = date('Y-m-d', strtotime("$d +1 day"))) if (date('N', strtotime($d)) !== '7') $workDays++;
+        try { $users = db()->query("SELECT id, name, role, department FROM `User` WHERE isActive=1 AND deletedAt IS NULL AND role<>'SUPER_ADMIN' ORDER BY name")->fetchAll(); }
+        catch (Throwable $e) { $users = db()->query("SELECT id, name, role, department FROM `User` WHERE isActive=1 AND role<>'SUPER_ADMIN' ORDER BY name")->fetchAll(); }
+        $s = db()->prepare("SELECT userId, SUM(status='PRESENT') p, SUM(status='HALF_DAY') h, SUM(status='ABSENT') a, SUM(COALESCE(workingHours,0)) hrs,
+                                   SUM(workingHours IS NOT NULL AND workingHours>0) wd
+                            FROM `Attendance` WHERE date>=? AND date<? GROUP BY userId");
+        $s->execute([$from . ' 00:00:00', $to . ' 00:00:00']);
+        $att = []; foreach ($s->fetchAll() as $r) $att[$r['userId']] = $r;
+        $lv = [];
+        try {
+            // approved leave days inside the month (absent marked from this page counts as absent)
+            $q = db()->prepare("SELECT userId, fromDate, toDate, leaveType, totalDays, originalType FROM `Leave` WHERE status='APPROVED' AND leaveType<>'PERMISSION' AND fromDate<? AND toDate>=?");
+            $q->execute([$to, $from]);
+            foreach ($q->fetchAll() as $r) {
+                $k = ($r['originalType'] ?? '') === 'ABSENT' ? 'absent' : 'leave';
+                if ($r['leaveType'] === 'HALF_DAY') { $lv[$r['userId']][$k] = ($lv[$r['userId']][$k] ?? 0) + 0.5; continue; }
+                $a = max(substr($r['fromDate'], 0, 10), $from); $b = min(substr($r['toDate'], 0, 10), $last);
+                for ($d = $a; $d <= $b; $d = date('Y-m-d', strtotime("$d +1 day"))) if (date('N', strtotime($d)) !== '7') $lv[$r['userId']][$k] = ($lv[$r['userId']][$k] ?? 0) + 1;
+            }
+        } catch (Throwable $e) {}
+        $rows = []; $tot = ['present' => 0, 'halfDays' => 0, 'absent' => 0, 'leave' => 0, 'notMarked' => 0, 'hours' => 0.0];
+        foreach ($users as $u) {
+            $a = $att[$u['id']] ?? null; $l = $lv[$u['id']] ?? [];
+            $present = (int) ($a['p'] ?? 0); $half = (int) ($a['h'] ?? 0);
+            $absent = (int) ($a['a'] ?? 0) + (float) ($l['absent'] ?? 0); $leave = (float) ($l['leave'] ?? 0);
+            $hours = round((float) ($a['hrs'] ?? 0), 2); $wd = (int) ($a['wd'] ?? 0);
+            $notMarked = max(0, $workDays - $present - $half - $absent - $leave);
+            $r = ['id' => $u['id'], 'name' => $u['name'], 'role' => $u['role'], 'department' => $u['department'], 'present' => $present, 'halfDays' => $half,
+                  'absent' => $absent, 'leave' => $leave, 'notMarked' => $notMarked, 'hours' => $hours, 'avgHours' => $wd ? round($hours / $wd, 2) : 0];
+            foreach ($tot as $k => $_) $tot[$k] += $r[$k];
+            $rows[] = $r;
+        }
+        $tot['hours'] = round($tot['hours'], 2);
+        usort($rows, fn($x, $y2) => [$y2['present'] + $y2['halfDays'] / 2, $x['name']] <=> [$x['present'] + $x['halfDays'] / 2, $y2['name']]);
+        sendSuccess(['employees' => $rows, 'totals' => $tot, 'workingDays' => $workDays, 'from' => $from, 'to' => $last]);
+    }
+
     public function all(): void
     {
         $auth = authenticate(); require_admin($auth);

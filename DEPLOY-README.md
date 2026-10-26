@@ -1,3 +1,32 @@
+# Update — 26 Oct (a): Attendance engineer-wise totals, order pop-up with Edit, "your request was changed" alerts
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New file:** `api/includes/ChangeNotice.php`.
+- **Database:** table `ChangeNotice` is created automatically.
+
+1. **Attendance → All employees: Engineer-wise total** (Admin / Super Admin)
+   - Each person's month: **present**, half days, **absent**, **on leave**, **not marked**, total hours and average hours a day, with an *All employees* total.
+   - *Not marked* = working days so far (Mon–Sat) with no punch-in, leave or absent entry.
+   - It follows the month / year chosen below.
+2. **Orders: open an order in a pop-up**
+   - Clicking an order row now opens it in a pop-up with the materials (tick what was supplied, partial / not delivered with a reason), the order facts, the PO / PDF, and an **✎ Edit order** button that opens the edit form directly.
+   - Choosing *Partially complete* / *Not delivered* in the Delivery column opens the same pop-up.
+3. **Alerts when someone changes your request**
+   - When the CEO, an admin or a manager changes or deletes something that belongs to another person, that person gets an alert, for example **"✎ MD Super changed your leave"** or **"✎ Admin User changed the delivery status of your order"**.
+   - The alert shows as a toast with sound, a phone notification in the app, and an entry on the Alerts page. It links to the right page.
+   - Covered:
+     - leave (changed / deleted / marked for you)
+     - attendance marked absent or leave
+     - orders (edit, delivery, procurement, price / proforma, expected date, supplied materials)
+     - trials (progress, request data, savings report, DC)
+     - appointments, meetings / follow-ups, tasks
+     - price requests (revised / deleted), quotations
+     - CEO Desk items (when the sender edits the items)
+     - fuel expense and its bills, petty cash entries, MOM, meeting reports
+     - sales report (order value / entries)
+   - Changes you make yourself don't alert you.
+   - Approvals that already have their own alert (leave / trial approve or reject, price request answers, CEO Desk replies) are not repeated.
+
 # Update — 24 Oct (b): Trial progress while waiting for approval (up to 10 open trials), engineer-wise totals on Fuel expense and Leave
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database changes.

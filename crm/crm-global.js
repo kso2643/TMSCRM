@@ -516,7 +516,9 @@
     LEAVE_DECIDED:          { color: '#db2777', icon: '🌴' },
     BREAK_STARTED:          { color: '#a16207', icon: '☕' },
     STATIONARY:             { color: '#d97706', icon: '⏸' },
-    LOCATION_OFF:           { color: '#dc2626', icon: '📵' }
+    LOCATION_OFF:           { color: '#dc2626', icon: '📵' },
+    CHANGE_NOTICE:          { color: '#7c3aed', icon: '✎' },
+    PETTY_CASH_LOW:         { color: '#dc2626', icon: '💵' }
   };
 
   // Sound: every alert chimes (WebAudio, no audio file needed). Urgent ones
