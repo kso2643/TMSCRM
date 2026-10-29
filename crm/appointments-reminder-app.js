@@ -226,7 +226,8 @@
         }
         playedSound = true;
       });
-      if (playedSound) { if (window.CRMAlerts && window.CRMAlerts.chime) window.CRMAlerts.chime(); else playChime(); }
+      // The shared stack plays the sound set for the alert type (Admin → Notifications & branding).
+      if (playedSound && !(window.CRMAlerts && window.CRMAlerts.show)) playChime();
     }).catch(function () { /* quiet — this is a background ticker */ });
   }
 

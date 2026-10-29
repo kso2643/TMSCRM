@@ -31,6 +31,15 @@
   var API = 'https://api.apjtech.in';
   var POLL_MS = 30000;
   var path = location.pathname;
+  // CRM name + logo (Admin → Notifications & branding) — on every page, the login page too.
+  (function loadBrand() {
+    if (window.__crmBrand || /^\/trial-sheet(\/|$)/.test(path)) return;
+    var me = document.currentScript || document.querySelector('script[src*="crm-global.js"]');
+    var v = me && /[?&]v=([^&]+)/.exec(me.getAttribute('src') || '');
+    var sc = document.createElement('script');
+    sc.src = '/crm-brand.js' + (v ? '?v=' + v[1] : '');
+    (document.head || document.documentElement).appendChild(sc);
+  })();
   if (/^\/(login|trial-sheet)(\/|$)/.test(path) || /^\/404/.test(path)) return;
 
   function token() { try { return localStorage.getItem('crm_token'); } catch (e) { return null; } }
@@ -413,7 +422,7 @@
     m.appendChild(row);
     bk.appendChild(m); r.appendChild(bk);
     trk.promptEl = bk;
-    chime();
+    chime(typeSound('STATIONARY'));
     try {
       if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
         new Notification('Are you on a break?', { body: 'Same place for ' + mins + ' min — tap to choose tea or lunch break.', tag: 'crm-break', icon: '/icons/icon-192x192.png' });
@@ -521,6 +530,51 @@
     PETTY_CASH_LOW:         { color: '#dc2626', icon: '💵' }
   };
 
+  // ── Notification settings (Admin → Notifications & branding) ─────────
+  // Per alert type: off, its own sound, no phone / desktop notification, or the
+  // title / text rewritten ({title} {body} {name} are filled in). Kept on this
+  // device and refreshed every few minutes, so a change applies on every page.
+  var NSET_KEY = 'crm_notify_settings';
+  var nset = {};
+  try { nset = JSON.parse(lsGet(NSET_KEY) || '{}') || {}; } catch (e) {}
+  function loadNotifySettings() {
+    if (!token()) return;
+    fetch(API + '/api/app-settings', { headers: { Authorization: 'Bearer ' + token() } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.data && j.data.notifications) { nset = j.data.notifications || {}; lsSet(NSET_KEY, JSON.stringify(nset)); } })
+      .catch(function () {});
+  }
+  function brandName() { try { return (window.CRMBrand && window.CRMBrand.get().name) || 'APJ CRM'; } catch (e) { return 'APJ CRM'; } }
+  function fillTpl(tpl, ev) {
+    return String(tpl).replace(/\{title\}/g, ev.title || '').replace(/\{body\}/g, ev.body || '').replace(/\{name\}/g, brandName());
+  }
+  // The alert as the settings say it should look — or null when that type is turned off.
+  function applyRule(ev) {
+    var r = ev && nset[ev.type];
+    if (!r) return ev;
+    if (r.on === false) return null;
+    var out = {};
+    for (var k in ev) if (Object.prototype.hasOwnProperty.call(ev, k)) out[k] = ev[k];
+    if (r.title) out.title = fillTpl(r.title, ev);
+    if (r.body) out.body = fillTpl(r.body, ev);
+    if (r.sound) out.sound = r.sound;
+    if (r.push === false) out.noPush = true;
+    return out;
+  }
+  function typeSound(type) { var r = nset[type]; return r && r.on === false ? 'none' : (r && r.sound) || 'chime'; }
+  var SOUND_RANK = ['alarm', 'urgent', 'bell', 'ding', 'chime', 'pop', 'soft'];
+  function soundOf(ev) { return ev.sound || (isUrgent(ev) ? 'urgent' : 'chime'); }
+  // Several alerts at once play one sound: the strongest of them.
+  function soundFor(evs) {
+    var best = null;
+    evs.forEach(function (ev) {
+      var s = soundOf(ev);
+      if (s === 'none') return;
+      if (best === null || SOUND_RANK.indexOf(s) < SOUND_RANK.indexOf(best)) best = s;
+    });
+    return best || 'none';
+  }
+
   // Sound: every alert chimes (WebAudio, no audio file needed). Urgent ones
   // (urgent tasks / price requests, punch-in, location off, out of stock…)
   // play a louder three-note chime. Browsers only allow sound after the first
@@ -550,30 +604,47 @@
   } catch (e) {}
   // In the Android app the phone plays its own notification sound (web audio is often blocked there).
   function nativeApp() { try { return !!(window.CRMNative && window.CRMNative.playSound); } catch (e) { return false; } }
-  function chime(level) {
-    if (lsGet(SOUND_KEY) === 'off') return;
-    level = level === 'urgent' ? 'urgent' : 'normal';
-    if (nativeApp()) { try { window.CRMNative.playSound(level); } catch (e) {} return; }
+  // The alert sounds: [frequency, start s, volume, fade s] per note, and the wave shape.
+  // The Android app plays the same sounds (apps/android res/raw/snd_*.wav).
+  var SOUNDS = {
+    chime:  { wave: 'sine',     notes: [[880, 0, 0.25, 0.45], [1318.5, 0.16, 0.25, 0.45]] },
+    urgent: { wave: 'triangle', notes: [[988, 0, 0.32, 0.45], [1319, 0.18, 0.32, 0.45], [1568, 0.36, 0.34, 0.45], [1319, 0.7, 0.3, 0.45], [1568, 0.88, 0.32, 0.45]] },
+    bell:   { wave: 'sine',     notes: [[1046.5, 0, 0.3, 1.4], [2093, 0, 0.08, 0.8], [523.25, 0, 0.1, 1.4]] },
+    ding:   { wave: 'sine',     notes: [[1568, 0, 0.3, 0.8]] },
+    pop:    { wave: 'sine',     notes: [[520, 0, 0.35, 0.12], [780, 0.09, 0.25, 0.14]] },
+    alarm:  { wave: 'square',   notes: [[880, 0, 0.12, 0.2], [660, 0.22, 0.12, 0.2], [880, 0.44, 0.12, 0.2], [660, 0.66, 0.12, 0.2], [880, 0.88, 0.12, 0.2], [660, 1.1, 0.12, 0.2]] },
+    soft:   { wave: 'sine',     notes: [[523.25, 0, 0.12, 0.6], [659.25, 0.22, 0.12, 0.6]] }
+  };
+  var STRONG = { urgent: 1, alarm: 1 };
+  function normSound(s) { return s === 'normal' || s === 'default' || !s ? 'chime' : s; }
+  function chime(level, force) {
+    if (!force && lsGet(SOUND_KEY) === 'off') return;
+    level = normSound(level);
+    if (level === 'none') return;
+    if (!SOUNDS[level]) level = 'chime';
+    if (nativeApp()) {
+      try { if (window.CRMNative.playSoundType) window.CRMNative.playSoundType(level); else window.CRMNative.playSound(STRONG[level] ? 'urgent' : 'normal'); } catch (e) {}
+      return;
+    }
     if (!audioCtx || !audioUnlocked || audioCtx.state !== 'running') {
       if (audioCtx && audioCtx.state === 'suspended') { try { audioCtx.resume(); } catch (e) {} }
-      if (!audioCtx || audioCtx.state !== 'running') { if (pendingChime !== 'urgent') pendingChime = level; return; }
+      if (!audioCtx || audioCtx.state !== 'running') { if (!pendingChime || SOUND_RANK.indexOf(level) < SOUND_RANK.indexOf(pendingChime)) pendingChime = level; return; }
     }
     var now = Date.now();
-    if (now - lastChimeAt < 1500) return; // two alerts at once = one sound
+    if (!force && now - lastChimeAt < 1500) return; // two alerts at once = one sound
     lastChimeAt = now;
     try {
-      var t0 = audioCtx.currentTime;
-      var notes = level === 'urgent' ? [[988, 0, 0.32], [1319, 0.18, 0.32], [1568, 0.36, 0.34], [1319, 0.7, 0.3], [1568, 0.88, 0.32]] : [[880, 0, 0.25], [1318.5, 0.16, 0.25]];
-      notes.forEach(function (n) {
+      var t0 = audioCtx.currentTime, snd = SOUNDS[level];
+      snd.notes.forEach(function (n) {
         var o = audioCtx.createOscillator(), g = audioCtx.createGain();
-        o.type = level === 'urgent' ? 'triangle' : 'sine'; o.frequency.value = n[0];
+        o.type = snd.wave; o.frequency.value = n[0];
         g.gain.setValueAtTime(0.0001, t0 + n[1]);
         g.gain.exponentialRampToValueAtTime(n[2], t0 + n[1] + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + n[1] + 0.45);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + n[1] + n[3]);
         o.connect(g); g.connect(audioCtx.destination);
-        o.start(t0 + n[1]); o.stop(t0 + n[1] + 0.5);
+        o.start(t0 + n[1]); o.stop(t0 + n[1] + n[3] + 0.05);
       });
-      try { if (navigator.vibrate) navigator.vibrate(level === 'urgent' ? [180, 80, 180] : 120); } catch (e) {}
+      try { if (navigator.vibrate) navigator.vibrate(STRONG[level] ? [180, 80, 180] : 120); } catch (e) {}
     } catch (e) {}
   }
 
@@ -730,11 +801,20 @@
     return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   }
   function desktop(ev) {
-    // Android app: a real phone notification (with sound) when the app is in the background
-    if (nativeApp() && window.CRMNative.showNotification) { try { window.CRMNative.showNotification(String(ev.title || 'APJ CRM'), String(ev.body || ''), String(ev.link || '')); } catch (e) {} return; }
+    if (ev.noPush) return;   // this alert type is set to "no phone / desktop notification"
+    // Android app: a real phone notification (top bar, with its sound) when the app is in the background
+    if (nativeApp() && window.CRMNative.showNotification) {
+      try {
+        var snd = soundOf(ev);
+        if (window.CRMNative.showNotification2) window.CRMNative.showNotification2(String(ev.title || brandName()), String(ev.body || ''), String(ev.link || ''), snd === 'chime' && !ev.sound ? 'default' : snd);
+        else window.CRMNative.showNotification(String(ev.title || brandName()), String(ev.body || ''), String(ev.link || ''));
+      } catch (e) {}
+      return;
+    }
     try {
       if (!('Notification' in window) || Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
-      var n = new Notification(ev.title, { body: ev.body, tag: ev.id, icon: '/icons/icon-192x192.png' });
+      var lg = window.CRMBrand && window.CRMBrand.get().logo;
+      var n = new Notification(ev.title, { body: ev.body, tag: ev.id, icon: lg ? API + lg : '/icons/icon-192x192.png', silent: soundOf(ev) === 'none' });
       n.onclick = function () { window.focus(); if (ev.link) location.href = ev.link; n.close(); };
     } catch (e) {}
   }
@@ -769,9 +849,11 @@
       var fresh = (j.data.events || []).filter(function (ev) { return seen.indexOf(ev.id) === -1; });
       if (!fresh.length) return;
       lsSet(SEEN_KEY, JSON.stringify(seen.concat(fresh.map(function (ev) { return ev.id; })).slice(-300)));
+      fresh = fresh.map(applyRule).filter(Boolean);   // types turned off are dropped, templates applied
+      if (!fresh.length) return;
       fresh.slice().reverse().forEach(function (ev) { toast(ev); desktop(ev); });
       refreshSoundHint();
-      chime(fresh.some(isUrgent) ? 'urgent' : 'normal');
+      chime(soundFor(fresh));
       try { window.dispatchEvent(new CustomEvent('crm-alert', { detail: { events: fresh } })); } catch (e) {}
     }).catch(function () { polling = false; });
   }
@@ -876,6 +958,8 @@
     startTracking();
     setTimeout(ensureMenu, 1500); // React pages render their sidebar a moment after load
     setTimeout(dropExtraMenu, 3000);
+    loadNotifySettings();
+    setInterval(loadNotifySettings, 5 * 60000);
     poll(true);
     setInterval(function () { poll(false); }, POLL_MS);
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') poll(true); });
@@ -1015,10 +1099,18 @@
       if (!ev || !document.body) return false;
       ensureBox();
       if (ev.id && box.querySelector('.t[data-id="' + String(ev.id).replace(/"/g, '') + '"]')) return true;
+      ev = applyRule(ev);
+      if (!ev) return true;   // turned off in the notification settings
       toast(ev); desktop(ev); refreshSoundHint();
-      if (!ev.silent) chime(isUrgent(ev) ? 'urgent' : 'normal');
+      if (!ev.silent) chime(soundOf(ev));
       return true;
-    }
+    },
+    // For the Notifications & branding page: play a sound now / pick up saved settings.
+    preview: function (sound) { unlockAudio(); chime(sound, true); },
+    sounds: function () { return Object.keys(SOUNDS); },
+    settings: function () { return nset; },
+    typeSound: typeSound,
+    reloadSettings: function (n) { if (n) { nset = n; lsSet(NSET_KEY, JSON.stringify(n)); } else loadNotifySettings(); }
   };
 
   // ── Location gate for sales engineers ──────────────────────────────

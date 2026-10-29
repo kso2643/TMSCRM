@@ -290,4 +290,34 @@ class CustomerController
         unset($row['cb_id'], $row['cb_name'], $row['meetings_count']);
         return $row;
     }
+
+    // GET /api/customers/by-engineer?month=&year=   admin-tier: per engineer — customers they added (all time / this month),
+    // customers visited, meetings, quotations and orders in the month (count + value).
+    public function byEngineer(): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('Only admins can see everyone\'s totals.', 403);
+        $y = (int) (qp('year') ?: date('Y')); $m = (int) (qp('month') ?: date('n'));
+        if ($y < 2000 || $y > 2100 || $m < 1 || $m > 12) sendError('Choose a valid month.', 400);
+        $from = sprintf('%04d-%02d-01', $y, $m); $to = date('Y-m-d', strtotime("$from +1 month"));
+        $q = function (string $sql, array $p) { try { $s = db()->prepare($sql); $s->execute($p); return $s->fetchAll(); } catch (Throwable $e) { return []; } };
+        $by = [];
+        $put = function (array $rows, array $map) use (&$by) { foreach ($rows as $r) { if (!$r['u']) continue; foreach ($map as $k => $col) $by[$r['u']][$k] = ($by[$r['u']][$k] ?? 0) + (float) $r[$col]; } };
+        $put($q("SELECT createdById u, COUNT(*) n, SUM(createdAt>=? AND createdAt<?) nm FROM `Customer` WHERE isActive=1 GROUP BY createdById", [$from, $to]), ['customers' => 'n', 'newCustomers' => 'nm']);
+        $put($q("SELECT COALESCE(assignedToId,userId) u, COUNT(*) n, COUNT(DISTINCT customerId) c FROM `Meeting` WHERE meetingDate>=? AND meetingDate<? GROUP BY COALESCE(assignedToId,userId)", [$from, $to]), ['meetings' => 'n', 'visitedCustomers' => 'c']);
+        $put($q("SELECT userId u, COUNT(*) n, COALESCE(SUM(totalAmount),0) v FROM `Quotation` WHERE COALESCE(quotationDate, DATE(createdAt))>=? AND COALESCE(quotationDate, DATE(createdAt))<? GROUP BY userId", [$from, $to]), ['quotations' => 'n', 'quotationValue' => 'v']);
+        $put($q("SELECT engineerId u, COUNT(*) n, COALESCE(SUM(orderValue),0) v FROM `CustomerOrder` WHERE orderDate>=? AND orderDate<? GROUP BY engineerId", [$from, $to]), ['orders' => 'n', 'orderValue' => 'v']);
+        $names = [];
+        foreach ($q('SELECT id, name, role FROM `User`', []) as $u) $names[$u['id']] = $u;
+        $keys = ['customers', 'newCustomers', 'visitedCustomers', 'meetings', 'quotations', 'quotationValue', 'orders', 'orderValue'];
+        $rows = []; $tot = array_fill_keys($keys, 0);
+        foreach ($by as $uid => $v) {
+            if (!isset($names[$uid])) continue;
+            $r = ['id' => $uid, 'name' => $names[$uid]['name'], 'role' => $names[$uid]['role']];
+            foreach ($keys as $k) { $r[$k] = round((float) ($v[$k] ?? 0), 2); $tot[$k] += $r[$k]; }
+            $rows[] = $r;
+        }
+        usort($rows, fn($a, $b) => [$b['customers'], $a['name']] <=> [$a['customers'], $b['name']]);
+        sendSuccess(['engineers' => $rows, 'totals' => $tot, 'from' => $from, 'to' => date('Y-m-d', strtotime("$to -1 day"))]);
+    }
 }

@@ -407,7 +407,7 @@
     }
 
     function renderTable() {
-      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Brand', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Materials', 'PDF'];
+      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Brand', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Invoice', 'Materials', 'PDF'];
       var tbody = el('tbody');
       if (!all.length) {
         tbody.appendChild(el('tr', {}, [el('td', {
@@ -432,6 +432,7 @@
             el('td', { class: 'px-3 py-3' }, [proformaCell(o)]),
             procCell,
             el('td', { class: 'px-3 py-3' }, [deliveryCell(o)]),
+            el('td', { class: 'px-3 py-3 ox-nowrap', 'data-order-inv': o.id }, (o.invoiceNos || []).length ? o.invoiceNos.map(function (n) { return el('div', { class: 'text-xs font-semibold', text: '🧾 ' + n }); }) : [el('span', { class: 'text-muted', text: '—' })]),
             el('td', { class: 'px-3 py-3 ox-nowrap text-muted', title: o.productSummary || '', text: supplied }),
             el('td', { class: 'px-3 py-3 ox-nowrap' }, [pdfButton(o), isSuperAdminUser() ? el('button', { class: 'btn-secondary btn-sm', type: 'button', 'data-order-del': o.id, title: 'Delete this order (Super Admin)', style: 'margin-left:.35rem;color:#b91c1c', text: '🗑', onclick: function (e) {
               e.stopPropagation();
@@ -504,7 +505,12 @@
           preset: presets[order.id],
           onSaved: function (updated) { delete presets[order.id]; applyUpdate(updated); draw(updated); },
           onCancelPreset: function () { delete presets[order.id]; draw(order); },
-          onOpen: function () { close(); openOrderDialog(order.id, load); }
+          onOpen: function () { close(); openOrderDialog(order.id, load); },
+          onInvoices: function (invs) {
+            order.invoices = invs; fullOrders[order.id] = order;
+            all = all.map(function (x) { if (x.id === order.id) x.invoiceNos = invs.map(function (i) { return i.invoiceNo; }); return x; });
+            renderTable();
+          }
         }));
       }
       if (fullOrders[o.id]) draw(fullOrders[o.id]);
@@ -797,6 +803,65 @@
     return wrap;
   }
 
+  /** Invoices supplied against the order: number, date, amount and the invoice PDF / photo. */
+  function invoicesPanel(o, onChange) {
+    var me = currentUser() || {};
+    var can = isAdmin() || me.role === 'ACCOUNTS' || (o.engineer && o.engineer.id === me.id);
+    var box = el('div', { class: 'space-y-2', 'data-invoices': o.id });
+    function money(v) { return v == null ? '' : '₹' + Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
+    function fileUrl(i) { return API + '/api/orders/' + o.id + '/invoices/' + i.id; }
+    function open(i, dl) {
+      if (!dl && /\.pdf$/i.test(i.fileName || '') && window.PdfView) { PdfView.show(fileUrl(i), { title: 'Invoice ' + i.invoiceNo, fileName: i.fileName }); return; }
+      fetch(fileUrl(i) + (dl ? '?download=1' : ''), { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
+        if (!r.ok) throw new Error('Could not open the invoice'); return r.blob();
+      }).then(function (b) {
+        var u = URL.createObjectURL(b);
+        if (dl) { var a = document.createElement('a'); a.href = u; a.download = i.fileName || ('invoice-' + i.invoiceNo); document.body.appendChild(a); a.click(); a.remove(); }
+        else window.open(u, '_blank');
+        setTimeout(function () { URL.revokeObjectURL(u); }, 60000);
+      }).catch(function (e) { alert(e.message); });
+    }
+    function draw(list) {
+      box.innerHTML = '';
+      box.appendChild(el('span', { class: 'text-xs text-muted block', text: 'Invoices supplied' }));
+      if (!list.length) box.appendChild(el('p', { class: 'text-xs text-muted', text: 'No invoice added yet.' }));
+      list.forEach(function (i) {
+        box.appendChild(el('div', { class: 'flex items-center gap-2 flex-wrap text-sm', 'data-invoice': i.invoiceNo }, [
+          el('span', { class: 'font-semibold', text: '🧾 ' + i.invoiceNo }),
+          el('span', { class: 'text-xs text-muted', text: [i.invoiceDate ? fmtDate(i.invoiceDate) : '', money(i.amount), i.note || ''].filter(Boolean).join(' · ') }),
+          i.hasFile ? el('button', { class: 'btn-secondary btn-sm', type: 'button', 'data-inv-view': i.id, text: 'View', onclick: function (e) { e.stopPropagation(); open(i, false); } }) : el('span', { class: 'text-xs text-muted', text: 'no file' }),
+          i.hasFile ? el('button', { class: 'btn-secondary btn-sm', type: 'button', title: 'Download invoice', text: '⬇', onclick: function (e) { e.stopPropagation(); open(i, true); } }) : null,
+          can ? el('button', { class: 'text-xs', type: 'button', style: 'color:#b91c1c', title: 'Remove invoice', text: '✕', onclick: function (e) {
+            e.stopPropagation();
+            if (!confirm('Remove invoice ' + i.invoiceNo + '?')) return;
+            api('DELETE', '/orders/' + o.id + '/invoices/' + i.id).then(function (j) { draw(j.data.invoices); if (onChange) onChange(j.data.invoices); }).catch(function (er) { alert(er.message); });
+          } }) : null
+        ]));
+      });
+      if (!can) return;
+      var no = el('input', { class: 'ox-sel', id: 'ox-inv-no', placeholder: 'Invoice no.', style: 'width:9rem' });
+      var dt = el('input', { class: 'ox-sel', id: 'ox-inv-date', type: 'date', value: todayIso() });
+      var amt = el('input', { class: 'ox-sel', id: 'ox-inv-amt', type: 'number', min: '0', step: '0.01', placeholder: 'Amount ₹', style: 'width:8rem' });
+      var file = el('input', { type: 'file', id: 'ox-inv-file', accept: '.pdf,image/*', class: 'text-xs' });
+      var err = el('p', { class: 'text-xs', style: 'color:#b91c1c' });
+      var add = el('button', { class: 'btn-primary btn-sm', type: 'button', id: 'ox-inv-add', text: '+ Add invoice' });
+      add.addEventListener('click', function (e) {
+        e.stopPropagation(); err.textContent = '';
+        if (!no.value.trim()) { err.textContent = 'Enter the invoice number.'; return; }
+        var fd = new FormData();
+        fd.append('invoiceNo', no.value.trim()); fd.append('invoiceDate', dt.value); fd.append('amount', amt.value);
+        if (file.files[0]) fd.append('file', file.files[0]);
+        add.disabled = true;
+        api('POST', '/orders/' + o.id + '/invoices', fd).then(function (j) { draw(j.data.invoices); if (onChange) onChange(j.data.invoices); })
+          .catch(function (er) { err.textContent = er.message; add.disabled = false; });
+      });
+      box.appendChild(el('div', { class: 'flex items-center gap-2 flex-wrap pt-1', onclick: function (e) { e.stopPropagation(); } }, [no, dt, amt, file, add]));
+      box.appendChild(err);
+    }
+    draw(o.invoices || []);
+    return box;
+  }
+
   /** The expanded-row content: materials checklist on the left, order facts on the right. */
   function orderDetailPanel(o, opts) {
     var facts = el('div', { class: 'space-y-3 text-sm' });
@@ -825,6 +890,7 @@
       facts.appendChild(el('p', { class: 'text-xs text-muted', text: 'Last supplied ' + fmtDate(o.deliveredDate) }));
     }
     facts.appendChild(el('div', { class: 'flex gap-2 flex-wrap' }, [el('button', { class: 'btn-secondary btn-sm', text: 'Open full order', onclick: opts.onOpen }), pdfButton(o)]));
+    facts.appendChild(invoicesPanel(o, opts.onInvoices));
 
     return el('div', { class: 'ox-expand-grid' }, [
       supplyPanel(o, { preset: opts.preset, onSaved: opts.onSaved, onCancelPreset: opts.onCancelPreset }),

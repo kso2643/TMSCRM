@@ -41,6 +41,13 @@ class OrderController
         // Safety net for "Internal server error" on /api/orders when one of the
         // orders migrations hasn't been run on the live DB — see SchemaGuard.php.
         ensure_schema(self::schema(), 'migration_orders_all.sql');
+        // Invoices raised against the order (one or more — part supplies get their own invoice)
+        ensure_schema(['OrderInvoice' => ['create' => "CREATE TABLE IF NOT EXISTS `OrderInvoice` (
+  `id` VARCHAR(30) NOT NULL, `orderId` VARCHAR(30) NOT NULL, `invoiceNo` VARCHAR(80) NOT NULL, `invoiceDate` DATE NULL,
+  `amount` DECIMAL(14,2) NULL, `note` VARCHAR(500) NULL, `fileName` VARCHAR(255) NULL, `storedName` VARCHAR(80) NULL, `size` INT NULL,
+  `createdById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`), KEY `OrderInvoice_order` (`orderId`), KEY `OrderInvoice_no` (`invoiceNo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"]], 'Order invoices');
 
         // One-time catch-up for orders that reached Delivered/Partially
         // delivered before autoMarkProcured() existed, so they don't keep
@@ -294,9 +301,91 @@ class OrderController
                 'stock' => $i['_stock'] ?? null,
                 'procurementStatus' => $i['procurementStatus'], 'expectedDeliveryDate' => $i['expectedDeliveryDate'],
             ], $items) : null,
+            'invoices'           => $items !== null ? $this->invoicesOf($row['id']) : null,
             'createdAt'          => $row['createdAt'],
             'updatedAt'          => $row['updatedAt'],
         ];
+    }
+
+    // ── invoices ─────────────────────────────────────────────────────────
+    private function invoicesOf(string $orderId): array
+    {
+        $s = db()->prepare('SELECT i.*, u.name AS byName FROM `OrderInvoice` i LEFT JOIN `User` u ON u.id=i.createdById WHERE i.orderId=? ORDER BY COALESCE(i.invoiceDate, DATE(i.createdAt)), i.createdAt');
+        $s->execute([$orderId]);
+        return array_map(fn($r) => ['id' => $r['id'], 'invoiceNo' => $r['invoiceNo'], 'invoiceDate' => $r['invoiceDate'],
+            'amount' => $r['amount'] !== null ? (float) $r['amount'] : null, 'note' => $r['note'], 'fileName' => $r['fileName'],
+            'hasFile' => (bool) $r['storedName'], 'size' => (int) $r['size'], 'by' => $r['byName'], 'createdAt' => $r['createdAt']], $s->fetchAll());
+    }
+
+    private function canInvoice(array $auth, array $row): bool
+    {
+        return $this->canEdit($auth, $row) || $auth['role'] === 'ACCOUNTS';
+    }
+
+    // POST /api/orders/:id/invoices   multipart: invoiceNo*, invoiceDate, amount, note, file (PDF / photo)
+    public function addInvoice(string $id): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Order not found.', 404);
+        if (!$this->canInvoice($auth, $row)) sendError('Only the engineer, an admin or accounts can add invoices to this order.', 403);
+        $b = request_body();
+        $no = mb_substr(trim((string) ($b['invoiceNo'] ?? '')), 0, 80);
+        if ($no === '') sendError('Enter the invoice number.', 400);
+        $date = to_date_only((string) ($b['invoiceDate'] ?? '')) ?: null;
+        $amt = str_replace([',', '₹', ' '], '', (string) ($b['amount'] ?? ''));
+        if ($amt !== '' && (!is_numeric($amt) || (float) $amt < 0)) sendError('Enter the invoice amount as a number.', 400);
+        $dup = db()->prepare('SELECT COUNT(*) FROM `OrderInvoice` WHERE orderId=? AND invoiceNo=?'); $dup->execute([$id, $no]);
+        if ((int) $dup->fetchColumn()) sendError("Invoice $no is already on this order.", 409);
+        $fileName = $stored = null; $size = null;
+        $f = $_FILES['file'] ?? null;
+        if ($f && $f['error'] === UPLOAD_ERR_OK) {
+            if ($f['size'] <= 0 || $f['size'] > 15 * 1024 * 1024) sendError('The invoice file must be under 15 MB.', 400);
+            $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
+            if (!in_array($ext, ['pdf', 'jpg', 'jpeg', 'png', 'webp'], true)) sendError('Upload the invoice as a PDF or photo.', 400);
+            $dir = $this->storageDir() . '/invoices';
+            if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the invoice on the server.', 500);
+            $stored = gen_id() . '.' . $ext;
+            if (!move_uploaded_file($f['tmp_name'], "$dir/$stored") && !rename($f['tmp_name'], "$dir/$stored")) sendError('Could not save the invoice on the server.', 500);
+            $fileName = mb_substr(preg_replace('/[^\w.\- ()]+/u', '_', (string) $f['name']), 0, 255); $size = (int) $f['size'];
+        }
+        db()->prepare('INSERT INTO `OrderInvoice` (id,orderId,invoiceNo,invoiceDate,amount,note,fileName,storedName,size,createdById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+            ->execute([gen_id(), $id, $no, $date, $amt === '' ? null : round((float) $amt, 2), mb_substr(trim((string) ($b['note'] ?? '')), 0, 500) ?: null, $fileName, $stored, $size, $auth['id'], now_sql()]);
+        log_activity($auth['id'], 'ORDER_INVOICE_ADDED', 'CustomerOrder', $id, ['invoiceNo' => $no]);
+        sendSuccess(['invoices' => $this->invoicesOf($id)], "Invoice $no added", 201);
+    }
+
+    // GET /api/orders/:id/invoices/:iid[?download=1]
+    public function invoiceFile(string $id, string $iid): void
+    {
+        authenticate();
+        $s = db()->prepare('SELECT * FROM `OrderInvoice` WHERE id=? AND orderId=?'); $s->execute([$iid, $id]);
+        $r = $s->fetch();
+        $path = $r && $r['storedName'] ? $this->storageDir() . '/invoices/' . basename($r['storedName']) : '';
+        if (!$r || !is_file($path)) sendError('No invoice file.', 404);
+        $ext = strtolower(pathinfo($r['storedName'], PATHINFO_EXTENSION));
+        $types = ['pdf' => 'application/pdf', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'webp' => 'image/webp'];
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+        header('Content-Disposition: ' . (qp('download') ? 'attachment' : 'inline') . '; filename="' . str_replace('"', '', $r['fileName']) . '"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path); exit;
+    }
+
+    // DELETE /api/orders/:id/invoices/:iid
+    public function deleteInvoice(string $id, string $iid): void
+    {
+        $auth = authenticate();
+        $row = $this->fetchRow($id);
+        if (!$row) sendError('Order not found.', 404);
+        if (!$this->canInvoice($auth, $row)) sendError('Only the engineer, an admin or accounts can remove invoices.', 403);
+        $s = db()->prepare('SELECT * FROM `OrderInvoice` WHERE id=? AND orderId=?'); $s->execute([$iid, $id]);
+        $r = $s->fetch();
+        if (!$r) sendError('Invoice not found.', 404);
+        if ($r['storedName']) @unlink($this->storageDir() . '/invoices/' . basename($r['storedName']));
+        db()->prepare('DELETE FROM `OrderInvoice` WHERE id=?')->execute([$iid]);
+        log_activity($auth['id'], 'ORDER_INVOICE_REMOVED', 'CustomerOrder', $id, ['invoiceNo' => $r['invoiceNo']]);
+        sendSuccess(['invoices' => $this->invoicesOf($id)], 'Invoice ' . $r['invoiceNo'] . ' removed');
     }
 
     /** Quantity supplied on a line (old lines only have the supplied tick). */
@@ -580,14 +669,23 @@ class OrderController
              $w ORDER BY o.orderDate DESC, o.createdAt DESC LIMIT ? OFFSET ?"
         );
         $s2->execute(array_merge($params, [$limit, $offset]));
-        $items = array_map(function ($r) {
+        $rows2 = $s2->fetchAll();
+        $invNos = [];
+        if ($rows2) {
+            $ids = array_column($rows2, 'id');
+            $iq = db()->prepare('SELECT orderId, invoiceNo FROM `OrderInvoice` WHERE orderId IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY createdAt');
+            $iq->execute($ids);
+            foreach ($iq->fetchAll() as $x) $invNos[$x['orderId']][] = $x['invoiceNo'];
+        }
+        $items = array_map(function ($r) use ($invNos) {
             $shaped = $this->shape($r);
             $shaped['productSummary'] = $r['productNames'];
             $shaped['brands'] = $r['brandNames'] ? explode('||', $r['brandNames']) : [];
             $shaped['itemCount'] = (int) $r['itemCount'];
             $shaped['suppliedCount'] = (int) $r['suppliedCount'];
+            $shaped['invoiceNos'] = $invNos[$r['id']] ?? [];
             return $shaped;
-        }, $s2->fetchAll());
+        }, $rows2);
 
         sendPaginated($items, $total, $page, $limit, 'Orders fetched');
     }

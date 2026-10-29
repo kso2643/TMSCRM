@@ -243,6 +243,38 @@ public class MainActivity extends AppCompatActivity {
                 new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.createNotificationChannel(ch);
+        // One channel per alert sound chosen in Admin → Notifications & branding (Android fixes a channel's sound).
+        AudioAttributes aa = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build();
+        for (String snd : SOUND_NAMES) {
+            NotificationChannel c = new NotificationChannel(channelFor(snd), "CRM alerts — " + snd + " sound", NotificationManager.IMPORTANCE_HIGH);
+            c.setDescription("CRM alerts set to the " + snd + " sound");
+            c.enableVibration(true);
+            c.setVibrationPattern(STRONG(snd) ? new long[]{0, 180, 80, 180, 80, 180} : new long[]{0, 180, 80, 180});
+            if ("none".equals(snd)) c.setSound(null, null); else c.setSound(soundUri(snd), aa);
+            if (nm != null) nm.createNotificationChannel(c);
+        }
+    }
+
+    /** Sounds the CRM can ask for (res/raw/snd_*.wav — the same notes the website plays). */
+    private static final String[] SOUND_NAMES = {"chime", "urgent", "bell", "ding", "pop", "alarm", "soft", "none"};
+    private static boolean STRONG(String snd) { return "urgent".equals(snd) || "alarm".equals(snd); }
+    private static String channelFor(String snd) {
+        for (String s : SOUND_NAMES) if (s.equals(snd)) return "crm_snd_" + s + "_v1";
+        return CHANNEL_ID;   // "default" → the phone's own notification sound
+    }
+    private Uri soundUri(String snd) {
+        int id;
+        switch (snd == null ? "" : snd) {
+            case "chime": id = R.raw.snd_chime; break;
+            case "urgent": id = R.raw.snd_urgent; break;
+            case "bell": id = R.raw.snd_bell; break;
+            case "ding": id = R.raw.snd_ding; break;
+            case "pop": id = R.raw.snd_pop; break;
+            case "alarm": id = R.raw.snd_alarm; break;
+            case "soft": id = R.raw.snd_soft; break;
+            default: return RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        }
+        return Uri.parse("android.resource://" + getPackageName() + "/" + id);
     }
 
     private boolean notifyAsked = false;
@@ -254,12 +286,14 @@ public class MainActivity extends AppCompatActivity {
 
     private long lastSoundAt = 0;
     /** Plays the phone's notification sound + vibration (when the app is open). */
-    void playAlertSound(boolean urgent) {
+    void playAlertSound(String sound) {
+        if ("none".equals(sound)) return;
+        boolean urgent = STRONG(sound);
         long now = SystemClock.elapsedRealtime();
         if (now - lastSoundAt < 1500) return;
         lastSoundAt = now;
         try {
-            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
+            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), soundUri(sound));
             if (r != null) r.play();
         } catch (Exception ignored) { }
         try {
@@ -272,23 +306,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** A real Android notification (with sound) — used when the app is in the background. */
-    void postNotification(String title, String body, String link) {
+    void postNotification(String title, String body, String link, String sound) {
         Intent open = new Intent(this, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         if (link != null && !link.isEmpty()) open.putExtra("link", link.startsWith("http") ? link : APP_URL + (link.startsWith("/") ? link : "/" + link));
         int id = ++notifyId;
         PendingIntent pi = PendingIntent.getActivity(this, id, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, channelFor(sound))
                 .setSmallIcon(R.drawable.ic_stat_notify)
                 .setContentTitle(title == null || title.isEmpty() ? "APJ CRM" : title)
                 .setContentText(body == null ? "" : body)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(body == null ? "" : body))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setDefaults(channelFor(sound).equals(CHANNEL_ID) ? NotificationCompat.DEFAULT_ALL : NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS)
                 .setAutoCancel(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .setContentIntent(pi);
+        if (!channelFor(sound).equals(CHANNEL_ID)) {   // Android 7 and older: no channels, so the sound goes on the notification
+            if ("none".equals(sound)) b.setSilent(true); else b.setSound(soundUri(sound));
+        }
         try { NotificationManagerCompat.from(this).notify(id, b.build()); } catch (SecurityException ignored) { /* notifications not allowed */ }
     }
 
@@ -474,14 +511,28 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void playSound(String level) {
             if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || !inForeground) return;
-            runOnUiThread(() -> playAlertSound("urgent".equals(level)));
+            runOnUiThread(() -> playAlertSound("urgent".equals(level) ? "urgent" : "default"));
+        }
+
+        /** The alert sound chosen for this alert type (chime, urgent, bell, ding, pop, alarm, soft, none, default). */
+        @JavascriptInterface
+        public void playSoundType(String sound) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || !inForeground) return;
+            runOnUiThread(() -> playAlertSound(sound == null ? "default" : sound));
         }
 
         /** An alert while the app is in the background → Android notification with sound. */
         @JavascriptInterface
         public void showNotification(String title, String body, String link) {
             if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || inForeground) return;
-            runOnUiThread(() -> postNotification(title, body, link));
+            runOnUiThread(() -> postNotification(title, body, link, "default"));
+        }
+
+        /** Same, with the sound chosen for this alert type (its own notification channel). */
+        @JavascriptInterface
+        public void showNotification2(String title, String body, String link, String sound) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || inForeground) return;
+            runOnUiThread(() -> postNotification(title, body, link, sound == null ? "default" : sound));
         }
 
         @JavascriptInterface

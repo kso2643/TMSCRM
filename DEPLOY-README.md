@@ -1,3 +1,36 @@
+# Update — 29 Oct (a): Customers engineer-wise totals, order invoices with upload, notification sounds / templates, CRM name and logo
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New files:** `api/controllers/AppSettingsController.php`, `crm/crm-brand.js`, `crm/customers-summary-app.js`, `crm/notify-settings-app.js`, `crm/admin/notifications/index.html`.
+- **Database:** tables `OrderInvoice` and `AppSetting` are created automatically.
+- **Server folders:** invoices are saved in `api/uploads/orders/invoices/` and the logo in `api/uploads/branding/`. Both folders are created automatically.
+- **Android app:** a new APK is built automatically (GitHub → Releases → `crm-apps`). Install it to get the per-alert sounds on the phone.
+
+1. **Customers → Engineer-wise total** (Admin / Super Admin / Manager)
+   - One row per engineer:
+     - customers they added (all time) and new this month
+     - customers visited and meetings in the month
+     - quotations and quote value
+     - orders and order value
+   - An *All engineers* total row; ‹ › changes the month.
+2. **Orders: invoices supplied to the customer**
+   - In the order pop-up, under **Invoices supplied**, add the invoice number, date, amount and the invoice file (PDF or photo, up to 15 MB).
+   - **View** opens the invoice; ⬇ downloads it; ✕ removes it.
+   - The orders list has a new **Invoice** column showing the invoice numbers.
+   - The same invoice number can't be added twice to one order.
+   - Who can add: the order's engineer, admins and Accounts.
+   - The engineer gets a "changed your order" alert when someone else adds or removes an invoice.
+3. **Admin → Notifications & branding** (Super Admin / Admin)
+   - **Every alert, page by page** (Attendance, Appointments, CEO Desk & Tasks, Price requests, Stock, Trials, Leave, Chat, Accounts, Petty cash, Changes):
+     - **On / off**
+     - **Sound:** Default, Chime, Urgent, Bell, Ding, Pop, Alarm, Soft or No sound. ▶ plays it.
+     - **Phone / desktop:** off = only shown inside the CRM, nothing in the phone's top bar.
+     - **Title / text template:** `{title}` and `{body}` keep the normal wording, `{name}` is the CRM name. For example `⚠ {title}`.
+   - Applies on every page within a few minutes.
+   - In the Android app the chosen sound plays while the app is open and in the top-bar notification. This needs the new APK.
+   - **CRM name and logo:** shown in the sidebar, on the login page, in page titles and in notifications.
+   - The phone home-screen app name and icon are set when the app is built. Send the logo and name to have the APK rebuilt with them.
+
 # Update — 26 Oct (a): Attendance engineer-wise totals, order pop-up with Edit, "your request was changed" alerts
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

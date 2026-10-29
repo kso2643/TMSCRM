@@ -98,6 +98,7 @@ require __DIR__ . '/controllers/SalesReportController.php';
 require __DIR__ . '/controllers/MeetingReportController.php';   // internal meeting reports + MOM   // sales report by engineer
 require __DIR__ . '/controllers/PettyCashController.php';   // petty cash (tab on the Fuel expense page)
 require __DIR__ . '/controllers/SearchController.php';   // quick search across the CRM
+require __DIR__ . '/controllers/AppSettingsController.php'; // notification sounds / templates, CRM name and logo
 require __DIR__ . '/controllers/ToolingController.php';   // projects / tooled-up / machine accessories
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
@@ -240,6 +241,7 @@ try {
         match (true) {
             $method === 'GET'   && $c1 === 'meta'  && $c2 === 'filters' => $ctrl->filterMeta(),
             $method === 'GET'   && $c1 === 'with-location'              => $ctrl->withLocation(),
+            $method === 'GET'   && $c1 === 'by-engineer'                => $ctrl->byEngineer(),
             $method === 'GET'   && $c1 === 'export'                     => $exp->exportCustomers(),
             $method === 'GET'   && $c1 === ''                           => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                           => $ctrl->create(),
@@ -396,6 +398,9 @@ try {
             $method === 'GET'   && $c1 !== '' && $c2 === 'pdf'             => $ctrl->pdf($c1),
             $method === 'GET'   && $c1 !== '' && $c2 === 'document'        => $ctrl->downloadDocument($c1),
             $method === 'POST'  && $c1 !== '' && $c2 === 'document'        => $ctrl->uploadDocument($c1),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'invoices' && $c3 === '' => $ctrl->addInvoice($c1),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'invoices' && $c3 !== '' => $ctrl->invoiceFile($c1, $c3),
+            $method === 'DELETE'&& $c1 !== '' && $c2 === 'invoices' && $c3 !== '' => $ctrl->deleteInvoice($c1, $c3),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'delivery'        => $ctrl->updateDelivery($c1),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'eta'             => $ctrl->updateEta($c1),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'procurement'     => $ctrl->updateProcurement($c1),
@@ -592,6 +597,19 @@ try {
     elseif ($c0 === 'search') {
         match (true) {
             $method === 'GET' && $c1 === '' => (new SearchController())->search(),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'app-settings') {
+        $ctrl = new AppSettingsController();
+        match (true) {
+            $method === 'GET'    && $c1 === ''              => $ctrl->index(),
+            $method === 'GET'    && $c1 === 'public'        => $ctrl->publicInfo(),
+            $method === 'GET'    && $c1 === 'logo'          => $ctrl->logo(),
+            $method === 'PUT'    && $c1 === 'notifications' => $ctrl->saveNotifications(),
+            $method === 'PUT'    && $c1 === 'branding'      => $ctrl->saveBranding(),
+            $method === 'POST'   && $c1 === 'logo'          => $ctrl->uploadLogo(),
+            $method === 'DELETE' && $c1 === 'logo'          => $ctrl->deleteLogo(),
             default => sendError('Route not found', 404),
         };
     }

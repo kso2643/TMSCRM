@@ -77,7 +77,7 @@
   }
 
   var lastUnread = null;
-  function ding() { if (window.CRMAlerts && window.CRMAlerts.chime) window.CRMAlerts.chime(); }
+  function ding() { var A = window.CRMAlerts; if (A && A.chime) A.chime(A.typeSound ? A.typeSound('CHAT_MESSAGE') : undefined); }
   function loadUsers() {
     return api('GET', '/chat/users').then(function (j) {
       users = j.data.users || []; canStart = j.data.canStart; renderList();
