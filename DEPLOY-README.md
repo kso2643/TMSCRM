@@ -1,3 +1,22 @@
+# Update — 29 Oct (c): WhatsApp-style phone notifications (Android app 1.0.6)
+
+**Upload:** `crm/` (only `crm-global.js` changed, plus the version stamps), then press **Ctrl+Shift+R** once. **Install the new APK** on each phone (GitHub → Releases → `crm-apps`).
+
+- **Alerts arrive when the app is closed.** The app checks for new alerts every 30 seconds in the background, and starts again by itself after the phone restarts.
+  - Android requires a small "APJ CRM — alerts are on" notification while this runs. It is silent and collapsed; long-press it → turn off *Alerts running in the background* to hide it.
+- **Looks like WhatsApp:**
+  - one notification per chat sender and one per CRM page (Tasks, Leave, Trials…)
+  - new alerts are added inside it like chat messages
+  - all of them bundled under "APJ CRM · 5 new alerts"
+- **Banner and lock screen:** a pop-up banner with the sound chosen for that alert. On the lock screen it shows as "New alert" until the phone is unlocked. The app icon shows a badge count.
+- **Buttons:**
+  - **Reply** on chat messages: type the reply in the notification and it is sent.
+  - **Mark as read**.
+  - Tapping opens the right page. Swiping away clears it.
+- **Settings apply:** your notification settings (alert off, no phone notification, templates) and each person's own sound apply on the phone too.
+- **Battery:** the first time, the app asks to run in the background. Choose **Allow**, otherwise the phone may delay alerts while it sleeps.
+- **Signing out** stops background alerts on that phone.
+
 # Update — 29 Oct (b): Notifications page in every sidebar, engineers choose their own alert sounds
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

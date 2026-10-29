@@ -79,8 +79,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String[] ALLOWED_HOSTS = {"crm.apjtech.in", "api.apjtech.in"};
     private static final long LOCK_AFTER_MS = 2 * 60 * 1000L;
     private static final int REQ_FILE = 11, REQ_PERM_GEO = 21, REQ_PERM_MEDIA = 22, REQ_PERM_CAMERA_FILE = 23, REQ_PERM_NOTIFY = 24;
-    private static final String CHANNEL_ID = "crm_alerts_v1";
     private volatile boolean inForeground = false;
+    /** Read by AlertService: while the app is on screen the page shows alerts itself. */
+    static volatile boolean appVisible = false;
     private int notifyId = 1000;
 
     private WebView web;
@@ -146,7 +147,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        createChannel();
+        AlertNotifier.createChannels(this);
+        clearThreadFrom(getIntent());
         web.setVisibility(View.INVISIBLE);
         String link = getIntent() != null ? getIntent().getStringExtra("link") : null;
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
@@ -160,11 +162,19 @@ public class MainActivity extends AppCompatActivity {
         super.onNewIntent(intent);
         String link = intent.getStringExtra("link");
         if (link != null && isAllowed(Uri.parse(link))) web.loadUrl(link);
+        clearThreadFrom(intent);
+    }
+
+    /** Opened from an alert notification: that conversation has been read. */
+    private void clearThreadFrom(Intent i) {
+        String thread = i == null ? null : i.getStringExtra("thread");
+        if (thread != null) AlertNotifier.clearThread(this, thread, true);
     }
 
     @Override protected void onPause() {
         super.onPause();
         inForeground = false;
+        appVisible = false;
         backgroundAt = SystemClock.elapsedRealtime();
         CookieManager.getInstance().flush();
     }
@@ -172,6 +182,7 @@ public class MainActivity extends AppCompatActivity {
     @Override protected void onResume() {
         super.onResume();
         inForeground = true;
+        appVisible = true;
         if (unlocked && backgroundAt > 0 && SystemClock.elapsedRealtime() - backgroundAt > LOCK_AFTER_MS) {
             unlocked = false;
             web.setVisibility(View.INVISIBLE);
@@ -226,57 +237,14 @@ public class MainActivity extends AppCompatActivity {
 
     private void onUnlocked() {
         askNotifyPermission();
+        askBatteryExemption();
         unlocked = true;
         backgroundAt = 0;
         if (lockView != null) { root.removeView(lockView); lockView = null; }
         web.setVisibility(View.VISIBLE);
     }
 
-    // ── alert sound + notifications ─────────────────────────────────────
-    private void createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "CRM alerts", NotificationManager.IMPORTANCE_HIGH);
-        ch.setDescription("Tasks, CEO Desk messages, reminders and other CRM alerts");
-        ch.enableVibration(true);
-        ch.setVibrationPattern(new long[]{0, 180, 80, 180});
-        ch.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
-                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm != null) nm.createNotificationChannel(ch);
-        // One channel per alert sound chosen in Admin → Notifications & branding (Android fixes a channel's sound).
-        AudioAttributes aa = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build();
-        for (String snd : SOUND_NAMES) {
-            NotificationChannel c = new NotificationChannel(channelFor(snd), "CRM alerts — " + snd + " sound", NotificationManager.IMPORTANCE_HIGH);
-            c.setDescription("CRM alerts set to the " + snd + " sound");
-            c.enableVibration(true);
-            c.setVibrationPattern(STRONG(snd) ? new long[]{0, 180, 80, 180, 80, 180} : new long[]{0, 180, 80, 180});
-            if ("none".equals(snd)) c.setSound(null, null); else c.setSound(soundUri(snd), aa);
-            if (nm != null) nm.createNotificationChannel(c);
-        }
-    }
-
-    /** Sounds the CRM can ask for (res/raw/snd_*.wav — the same notes the website plays). */
-    private static final String[] SOUND_NAMES = {"chime", "urgent", "bell", "ding", "pop", "alarm", "soft", "none"};
-    private static boolean STRONG(String snd) { return "urgent".equals(snd) || "alarm".equals(snd); }
-    private static String channelFor(String snd) {
-        for (String s : SOUND_NAMES) if (s.equals(snd)) return "crm_snd_" + s + "_v1";
-        return CHANNEL_ID;   // "default" → the phone's own notification sound
-    }
-    private Uri soundUri(String snd) {
-        int id;
-        switch (snd == null ? "" : snd) {
-            case "chime": id = R.raw.snd_chime; break;
-            case "urgent": id = R.raw.snd_urgent; break;
-            case "bell": id = R.raw.snd_bell; break;
-            case "ding": id = R.raw.snd_ding; break;
-            case "pop": id = R.raw.snd_pop; break;
-            case "alarm": id = R.raw.snd_alarm; break;
-            case "soft": id = R.raw.snd_soft; break;
-            default: return RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-        }
-        return Uri.parse("android.resource://" + getPackageName() + "/" + id);
-    }
-
+    // ── alert sound + notifications (channels, sounds and the WhatsApp-style notifications: AlertNotifier) ──
     private boolean notifyAsked = false;
     private void askNotifyPermission() {
         if (notifyAsked || Build.VERSION.SDK_INT < 33) return;
@@ -284,16 +252,35 @@ public class MainActivity extends AppCompatActivity {
         if (!has(Manifest.permission.POST_NOTIFICATIONS)) requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_PERM_NOTIFY);
     }
 
+    /** Once: ask to let the app run in the background, so alerts arrive like WhatsApp messages. */
+    private void askBatteryExemption() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        android.content.SharedPreferences p = AlertNotifier.prefs(this);
+        if (p.getBoolean("batteryAsked", false)) return;
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) return;
+        p.edit().putBoolean("batteryAsked", true).apply();
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Get alerts instantly")
+                .setMessage("To get CRM alerts on time even when the app is closed (like WhatsApp), allow APJ CRM to run in the background. On the next screen choose Allow.")
+                .setPositiveButton("Continue", (d, w) -> {
+                    try { startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))); }
+                    catch (ActivityNotFoundException ignored) { }
+                })
+                .setNegativeButton("Not now", null)
+                .show();
+    }
+
     private long lastSoundAt = 0;
     /** Plays the phone's notification sound + vibration (when the app is open). */
     void playAlertSound(String sound) {
         if ("none".equals(sound)) return;
-        boolean urgent = STRONG(sound);
+        boolean urgent = AlertNotifier.strong(sound);
         long now = SystemClock.elapsedRealtime();
         if (now - lastSoundAt < 1500) return;
         lastSoundAt = now;
         try {
-            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), soundUri(sound));
+            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), AlertNotifier.soundUri(this, sound));
             if (r != null) r.play();
         } catch (Exception ignored) { }
         try {
@@ -312,19 +299,19 @@ public class MainActivity extends AppCompatActivity {
         if (link != null && !link.isEmpty()) open.putExtra("link", link.startsWith("http") ? link : APP_URL + (link.startsWith("/") ? link : "/" + link));
         int id = ++notifyId;
         PendingIntent pi = PendingIntent.getActivity(this, id, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        NotificationCompat.Builder b = new NotificationCompat.Builder(this, channelFor(sound))
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, AlertNotifier.channelFor(sound))
                 .setSmallIcon(R.drawable.ic_stat_notify)
                 .setContentTitle(title == null || title.isEmpty() ? "APJ CRM" : title)
                 .setContentText(body == null ? "" : body)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(body == null ? "" : body))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .setDefaults(channelFor(sound).equals(CHANNEL_ID) ? NotificationCompat.DEFAULT_ALL : NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS)
+                .setDefaults(AlertNotifier.channelFor(sound).equals(AlertNotifier.CHANNEL_DEFAULT) ? NotificationCompat.DEFAULT_ALL : NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS)
                 .setAutoCancel(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .setContentIntent(pi);
-        if (!channelFor(sound).equals(CHANNEL_ID)) {   // Android 7 and older: no channels, so the sound goes on the notification
-            if ("none".equals(sound)) b.setSilent(true); else b.setSound(soundUri(sound));
+        if (!AlertNotifier.channelFor(sound).equals(AlertNotifier.CHANNEL_DEFAULT)) {   // Android 7 and older: no channels, so the sound goes on the notification
+            if ("none".equals(sound)) b.setSilent(true); else b.setSound(AlertNotifier.soundUri(this, sound));
         }
         try { NotificationManagerCompat.from(this).notify(id, b.build()); } catch (SecurityException ignored) { /* notifications not allowed */ }
     }
@@ -524,19 +511,47 @@ public class MainActivity extends AppCompatActivity {
         /** An alert while the app is in the background → Android notification with sound. */
         @JavascriptInterface
         public void showNotification(String title, String body, String link) {
-            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || inForeground) return;
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || inForeground || AlertService.running) return;
             runOnUiThread(() -> postNotification(title, body, link, "default"));
         }
 
         /** Same, with the sound chosen for this alert type (its own notification channel). */
         @JavascriptInterface
         public void showNotification2(String title, String body, String link, String sound) {
-            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || inForeground) return;
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || inForeground || AlertService.running) return;
             runOnUiThread(() -> postNotification(title, body, link, sound == null ? "default" : sound));
         }
 
         @JavascriptInterface
         public boolean isNative() { return true; }
+
+        /**
+         * The signed-in user (from the CRM page): lets AlertService keep alerts coming when the app
+         * is closed. settings = {"n": company notification settings, "m": this person's own sounds}.
+         */
+        @JavascriptInterface
+        public void setSession(String token, String userId, String brand, String settings) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl)) || token == null || token.isEmpty()) return;
+            android.content.SharedPreferences p = AlertNotifier.prefs(MainActivity.this);
+            android.content.SharedPreferences.Editor e = p.edit();
+            if (!String.valueOf(userId).equals(p.getString("userId", ""))) {   // another person signed in: start fresh
+                e.remove("since").remove("seen");
+                AlertNotifier.clearAll(MainActivity.this);
+            }
+            e.putString("token", token).putString("userId", String.valueOf(userId))
+             .putString("brand", brand == null || brand.isEmpty() ? "APJ CRM" : brand)
+             .putString("settings", settings == null ? "{}" : settings).apply();
+            if (!AlertService.running) runOnUiThread(() -> AlertService.start(MainActivity.this));
+        }
+
+        /** Signed out: stop background alerts and remove this person's notifications. */
+        @JavascriptInterface
+        public void clearSession() {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl))) return;
+            AlertNotifier.prefs(MainActivity.this).edit().remove("token").remove("userId").remove("since").remove("seen").apply();
+            AlertNotifier.clearAll(MainActivity.this);
+            runOnUiThread(() -> AlertService.stop(MainActivity.this));
+        }
 
         @JavascriptInterface
         public void saveFile(String dataUrl, String name, String mime) {

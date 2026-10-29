@@ -40,6 +40,8 @@
     sc.src = '/crm-brand.js' + (v ? '?v=' + v[1] : '');
     (document.head || document.documentElement).appendChild(sc);
   })();
+  // Android app: signed out → stop the background alerts on the phone.
+  try { if (window.CRMNative && window.CRMNative.clearSession && !localStorage.getItem('crm_token')) window.CRMNative.clearSession(); } catch (e) {}
   if (/^\/(login|trial-sheet)(\/|$)/.test(path) || /^\/404/.test(path)) return;
 
   function token() { try { return localStorage.getItem('crm_token'); } catch (e) { return null; } }
@@ -547,8 +549,18 @@
         if (!j || !j.data || !j.data.notifications) return;
         nset = j.data.notifications || {}; lsSet(NSET_KEY, JSON.stringify(nset));
         nmine = j.data.mine || {}; lsSet(NMINE_KEY, JSON.stringify(nmine));
+        nativeSession();
       })
       .catch(function () {});
+  }
+  // Android app: the phone keeps showing alerts (WhatsApp-style) when the app is closed —
+  // it needs the login and the notification settings (AlertService in the app).
+  function nativeSession() {
+    try {
+      var N = window.CRMNative;
+      if (!N || !N.setSession || !token()) return;
+      N.setSession(token(), String((user() || {}).id || ''), brandName(), JSON.stringify({ n: nset, m: nmine }));
+    } catch (e) {}
   }
   function brandName() { try { return (window.CRMBrand && window.CRMBrand.get().name) || 'APJ CRM'; } catch (e) { return 'APJ CRM'; } }
   function fillTpl(tpl, ev) {
@@ -966,6 +978,7 @@
     startTracking();
     setTimeout(ensureMenu, 1500); // React pages render their sidebar a moment after load
     setTimeout(dropExtraMenu, 3000);
+    nativeSession();
     loadNotifySettings();
     setInterval(loadNotifySettings, 5 * 60000);
     poll(true);
@@ -1122,6 +1135,7 @@
     reloadSettings: function (n, mine) {
       if (n) { nset = n; lsSet(NSET_KEY, JSON.stringify(n)); }
       if (mine) { nmine = mine; lsSet(NMINE_KEY, JSON.stringify(mine)); }
+      if (n || mine) nativeSession();
       if (!n && !mine) loadNotifySettings();
     }
   };
