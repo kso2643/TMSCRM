@@ -1,5 +1,8 @@
 /* ══════════════════════════════════════════════════════════════════════
-   Admin → Notifications & branding (Super Admin / Admin).
+   Notifications & branding page (sidebar → Operations).
+   Everyone: "My alert sounds" — their own sound per alert type (Page access
+   "Notifications & sounds" lets the Super Admin hide it or make it view-only per person).
+   Super Admin / Admin also get the company settings and the CRM name / logo below.
 
    Notifications, page by page: for each kind of alert choose
      - on / off
@@ -51,23 +54,70 @@
     if (window.CRMAlerts && window.CRMAlerts.preview) window.CRMAlerts.preview(s === 'default' ? 'chime' : s);
   }
 
-  var st = { n: {}, b: {} };
+  var st = { n: {}, b: {}, mine: {} };
 
   function mountPage(root) {
     var u = user();
-    if (!u || ['SUPER_ADMIN', 'ADMIN'].indexOf(u.role) === -1) {
-      root.appendChild(el('div', { class: 'card p-6 text-sm text-muted', text: 'Only the Super Admin or an Admin can open this page.' }));
-      return;
-    }
-    root.appendChild(el('p', { class: 'text-sm text-muted mb-4', text: 'Choose how every alert looks and sounds — on the website and in the Android app — and set the CRM name and logo.' }));
-    var brandBox = el('div', { class: 'card p-5 mb-5', id: 'ns-brand' });
-    var notifyBox = el('div', { class: 'card overflow-hidden mb-5', id: 'ns-notify' });
-    root.appendChild(brandBox); root.appendChild(notifyBox);
-    brandBox.appendChild(el('p', { class: 'text-sm text-muted', text: 'Loading…' }));
+    if (!u) return;
+    var admin = ['SUPER_ADMIN', 'ADMIN'].indexOf(u.role) !== -1;
+    root.appendChild(el('p', { class: 'text-sm text-muted mb-4', text: admin
+      ? 'Choose how every alert looks and sounds — on the website and in the Android app — and set the CRM name and logo. Everyone can also pick their own sounds under “My alert sounds”.'
+      : 'Pick the sound for each kind of alert. It plays on this website and in the Android app wherever you are signed in.' }));
+    var brandBox = admin ? el('div', { class: 'card p-5 mb-5', id: 'ns-brand' }) : null;
+    var notifyBox = admin ? el('div', { class: 'card overflow-hidden mb-5', id: 'ns-notify' }) : null;
+    var mineBox = el('div', { class: 'card overflow-hidden mb-5', id: 'ns-mine' });
+    [brandBox, notifyBox, mineBox].forEach(function (b) { if (b) root.appendChild(b); });
+    mineBox.appendChild(el('p', { class: 'px-5 py-4 text-sm text-muted', text: 'Loading…' }));
     api('GET', '/app-settings').then(function (j) {
-      st.n = j.data.notifications || {}; st.b = j.data.branding || {};
-      drawBrand(brandBox); drawNotify(notifyBox);
-    }).catch(function (e) { brandBox.innerHTML = ''; brandBox.appendChild(el('p', { class: 'text-sm text-red-600', text: e.message })); });
+      st.n = j.data.notifications || {}; st.b = j.data.branding || {}; st.mine = j.data.mine || {};
+      if (admin) { drawBrand(brandBox); drawNotify(notifyBox); }
+      drawMine(mineBox);
+    }).catch(function (e) { mineBox.innerHTML = ''; mineBox.appendChild(el('p', { class: 'px-5 py-4 text-sm text-red-600', text: e.message })); });
+  }
+
+  // ── my own sounds (everyone) ──────────────────────────────────────────
+  function drawMine(box) {
+    box.innerHTML = '';
+    var msg = el('span', { class: 'text-sm', id: 'ns-mine-msg' });
+    var save = el('button', { class: 'btn-primary', type: 'button', id: 'ns-mine-save', text: 'Save my sounds' });
+    box.appendChild(el('div', { class: 'px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2' }, [
+      el('div', {}, [
+        el('h2', { class: 'text-base font-semibold', text: '🎵 My alert sounds' }),
+        el('p', { class: 'text-xs text-muted', text: '“Company sound” keeps what the admin chose. Your choice only changes the sound on your own phone / computer.' })
+      ]),
+      el('div', { class: 'flex items-center gap-2' }, [msg, save])
+    ]));
+    var body = el('tbody', {});
+    GROUPS.forEach(function (g) {
+      body.appendChild(el('tr', { class: 'bg-slate-100/70 dark:bg-slate-800' }, [el('td', { class: 'px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300', colspan: '3', text: g[0] })]));
+      g[1].forEach(function (t) {
+        var c = st.n[t[0]] || {}, off = c.on === false;
+        var company = SOUND_LABEL[c.sound || 'default'];
+        var sel = el('select', { class: 'input py-1 text-sm', 'data-mine': t[0], 'aria-label': 'My sound for ' + t[1] },
+          [el('option', { value: 'default', text: 'Company sound (' + company + ')' })].concat(SOUNDS.filter(function (x) { return x !== 'default'; }).map(function (x) { return el('option', { value: x, text: SOUND_LABEL[x] }); })));
+        sel.value = st.mine[t[0]] || 'default';
+        if (off) sel.disabled = true;
+        body.appendChild(el('tr', { class: 'table-row', 'data-mine-type': t[0], style: off ? 'opacity:.55' : '' }, [
+          el('td', { class: 'px-4 py-2 font-medium', text: t[1] }),
+          el('td', { class: 'px-3 py-2' }, [el('div', { class: 'flex items-center gap-1' }, [sel,
+            el('button', { class: 'btn-secondary btn-sm', type: 'button', 'aria-label': 'Play sound', text: '▶', onclick: function () { play(sel.value === 'default' ? (c.sound || 'default') : sel.value); } })])]),
+          el('td', { class: 'px-3 py-2 text-xs text-muted', text: off ? 'Turned off by the admin' : '' })
+        ]));
+      });
+    });
+    box.appendChild(el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm', id: 'ns-mine-table' }, [
+      el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, ['Alert', 'My sound', ''].map(function (h) { return el('th', { class: 'table-head px-3 py-2 text-left', text: h }); }))]),
+      body])]));
+    save.addEventListener('click', function () {
+      var out = {};
+      Array.prototype.forEach.call(box.querySelectorAll('select[data-mine]'), function (x) { if (!x.disabled) out[x.getAttribute('data-mine')] = x.value; });
+      save.disabled = true;
+      api('PUT', '/app-settings/my-notifications', { sounds: out }).then(function (j) {
+        st.mine = j.data.mine || {};
+        if (window.CRMAlerts && window.CRMAlerts.reloadSettings) window.CRMAlerts.reloadSettings(null, st.mine);
+        flash(msg, '✓ Saved');
+      }).catch(function (e) { flash(msg, e.message, true); }).then(function () { save.disabled = false; });
+    });
   }
 
   // ── branding ──────────────────────────────────────────────────────────

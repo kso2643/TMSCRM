@@ -8,11 +8,14 @@
  *                  push  false = no phone top-bar / desktop notification (toast only)
  *                  title / body  replace the alert text; {title} and {body} put the original text in
  *   branding       { name, short } shown in the sidebar, page titles and login; logo image
+ *   nu:<userId>    one person's own sound per alert type (overrides the company sound on their devices;
+ *                  an alert the admin turned off stays off)
  *
  *   GET    /api/app-settings              signed-in users: notifications + branding
  *   GET    /api/app-settings/public       anyone: branding (login page)
  *   GET    /api/app-settings/logo         anyone: the logo image
  *   PUT    /api/app-settings/notifications { types: { TYPE: {...} } }
+ *   PUT    /api/app-settings/my-notifications { sounds: { TYPE: sound } }   anyone: their own alert sounds
  *   PUT    /api/app-settings/branding      { name, short }
  *   POST   /api/app-settings/logo          multipart "file" (PNG / JPG / WebP, ≤ 2 MB)
  *   DELETE /api/app-settings/logo
@@ -62,8 +65,26 @@ class AppSettingsController
     // GET /api/app-settings
     public function index(): void
     {
-        authenticate();
-        sendSuccess(['notifications' => (object) self::get('notifications'), 'branding' => self::branding(), 'sounds' => self::SOUNDS]);
+        $auth = authenticate();
+        sendSuccess(['notifications' => (object) self::get('notifications'), 'mine' => (object) self::get('nu:' . $auth['id']),
+            'branding' => self::branding(), 'sounds' => self::SOUNDS]);
+    }
+
+    // PUT /api/app-settings/my-notifications   (Page access "Notifications & sounds" decides who may save)
+    public function saveMine(): void
+    {
+        $auth = authenticate();
+        $in = (array) (request_body()['sounds'] ?? []);
+        if (count($in) > 100) sendError('Too many alert types.', 400);
+        $out = [];
+        foreach ($in as $type => $snd) {
+            if (!preg_match('/^[A-Z][A-Z_]{2,40}$/', (string) $type)) continue;
+            $snd = (string) $snd;
+            if (!in_array($snd, self::SOUNDS, true)) sendError("Unknown sound “{$snd}”.", 400);
+            if ($snd !== 'default') $out[$type] = $snd;   // "default" = use the company's sound
+        }
+        self::put('nu:' . $auth['id'], $out, $auth['id']);
+        sendSuccess(['mine' => (object) $out], 'Your alert sounds are saved');
     }
 
     // GET /api/app-settings/public

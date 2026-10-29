@@ -45,6 +45,8 @@ class PageAccess
         'sales-report'   => ['Sales report', ['/sales-report'], ['sales-report']],
         'internal-meetings' => ['Internal meetings', ['/internal-meetings'], ['internal-meetings']],
         'mom'            => ['MOM (minutes of meeting)', ['/mom'], ['mom']],
+        // everyone's own alert sounds (the company settings and branding stay Super Admin / Admin only)
+        'notifications'  => ['Notifications & sounds', ['/admin/notifications'], ['app-settings/my-notifications']],
         // a tab on the Fuel expense page, so no page path of its own
         'petty-cash'     => ['Petty cash (Fuel expense page)', [], ['petty-cash']],
     ];

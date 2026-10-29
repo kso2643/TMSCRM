@@ -87,7 +87,7 @@
   // app and as the newer hand-coded page. A React link would open the old one
   // (and a refresh the new one), so on React pages any click on such a link is
   // turned into a normal page load.
-  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/users|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue|projects|tooled-up|machine-accessories|documents|sales-report|internal-meetings|mom|admin\/categories)\/?$/;
+  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/users|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue|projects|tooled-up|machine-accessories|documents|sales-report|internal-meetings|mom|admin\/categories|admin\/notifications)\/?$/;
   function hardLinks() {
     if (!window.__next_f) return; // only the compiled React pages need this
     document.addEventListener('click', function (e) {
@@ -535,13 +535,19 @@
   // title / text rewritten ({title} {body} {name} are filled in). Kept on this
   // device and refreshed every few minutes, so a change applies on every page.
   var NSET_KEY = 'crm_notify_settings';
-  var nset = {};
+  var NMINE_KEY = 'crm_notify_mine_' + ((user() || {}).id || 'me');
+  var nset = {}, nmine = {};   // company settings, and this person's own sounds (override the company sound)
   try { nset = JSON.parse(lsGet(NSET_KEY) || '{}') || {}; } catch (e) {}
+  try { nmine = JSON.parse(lsGet(NMINE_KEY) || '{}') || {}; } catch (e) {}
   function loadNotifySettings() {
     if (!token()) return;
     fetch(API + '/api/app-settings', { headers: { Authorization: 'Bearer ' + token() } })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { if (j && j.data && j.data.notifications) { nset = j.data.notifications || {}; lsSet(NSET_KEY, JSON.stringify(nset)); } })
+      .then(function (j) {
+        if (!j || !j.data || !j.data.notifications) return;
+        nset = j.data.notifications || {}; lsSet(NSET_KEY, JSON.stringify(nset));
+        nmine = j.data.mine || {}; lsSet(NMINE_KEY, JSON.stringify(nmine));
+      })
       .catch(function () {});
   }
   function brandName() { try { return (window.CRMBrand && window.CRMBrand.get().name) || 'APJ CRM'; } catch (e) { return 'APJ CRM'; } }
@@ -550,18 +556,20 @@
   }
   // The alert as the settings say it should look — or null when that type is turned off.
   function applyRule(ev) {
-    var r = ev && nset[ev.type];
-    if (!r) return ev;
+    var r = ev && nset[ev.type], mine = ev && nmine[ev.type];
+    if (!r && !mine) return ev;
+    r = r || {};
     if (r.on === false) return null;
     var out = {};
     for (var k in ev) if (Object.prototype.hasOwnProperty.call(ev, k)) out[k] = ev[k];
     if (r.title) out.title = fillTpl(r.title, ev);
     if (r.body) out.body = fillTpl(r.body, ev);
     if (r.sound) out.sound = r.sound;
+    if (mine && mine !== 'default') out.sound = mine;   // the person's own choice wins
     if (r.push === false) out.noPush = true;
     return out;
   }
-  function typeSound(type) { var r = nset[type]; return r && r.on === false ? 'none' : (r && r.sound) || 'chime'; }
+  function typeSound(type) { var r = nset[type]; return r && r.on === false ? 'none' : nmine[type] || (r && r.sound) || 'chime'; }
   var SOUND_RANK = ['alarm', 'urgent', 'bell', 'ding', 'chime', 'pop', 'soft'];
   function soundOf(ev) { return ev.sound || (isUrgent(ev) ? 'urgent' : 'chime'); }
   // Several alerts at once play one sound: the strongest of them.
@@ -1110,7 +1118,12 @@
     sounds: function () { return Object.keys(SOUNDS); },
     settings: function () { return nset; },
     typeSound: typeSound,
-    reloadSettings: function (n) { if (n) { nset = n; lsSet(NSET_KEY, JSON.stringify(n)); } else loadNotifySettings(); }
+    mine: function () { return nmine; },
+    reloadSettings: function (n, mine) {
+      if (n) { nset = n; lsSet(NSET_KEY, JSON.stringify(n)); }
+      if (mine) { nmine = mine; lsSet(NMINE_KEY, JSON.stringify(mine)); }
+      if (!n && !mine) loadNotifySettings();
+    }
   };
 
   // ── Location gate for sales engineers ──────────────────────────────

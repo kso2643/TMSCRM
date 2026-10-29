@@ -607,6 +607,7 @@ try {
             $method === 'GET'    && $c1 === 'public'        => $ctrl->publicInfo(),
             $method === 'GET'    && $c1 === 'logo'          => $ctrl->logo(),
             $method === 'PUT'    && $c1 === 'notifications' => $ctrl->saveNotifications(),
+            $method === 'PUT'    && $c1 === 'my-notifications' => $ctrl->saveMine(),
             $method === 'PUT'    && $c1 === 'branding'      => $ctrl->saveBranding(),
             $method === 'POST'   && $c1 === 'logo'          => $ctrl->uploadLogo(),
             $method === 'DELETE' && $c1 === 'logo'          => $ctrl->deleteLogo(),

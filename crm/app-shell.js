@@ -106,7 +106,8 @@
     { label: 'Chat',                  href: '/chat/',           icon: 'chat',      section: 'Operations' },
     { label: 'Internal meetings',     href: '/internal-meetings/', icon: 'clipboard', section: 'Operations' },
     { label: 'MOM',                   href: '/mom/',            icon: 'file',      section: 'Operations' },
-    { label: 'CEO Desk & Tasks',      href: '/md-desk/',        icon: 'brief',     section: 'Operations' }
+    { label: 'CEO Desk & Tasks',      href: '/md-desk/',        icon: 'brief',     section: 'Operations' },
+    { label: 'Notifications & branding', href: '/admin/notifications/', icon: 'bell', section: 'Operations' }
   ];
   var ADMIN_NAV = [
     { label: 'Live tracking', href: '/admin/live-tracking/', icon: 'nav',      roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
@@ -117,8 +118,7 @@
     { label: 'Accounts',      href: '/accounts/',            icon: 'calc',     roles: ['SUPER_ADMIN','ADMIN','ACCOUNTS'] },
     { label: 'Vendors',       href: '/vendors/',             icon: 'truck',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
     { label: 'Reports',       href: '/admin/reports/',       icon: 'chart',    roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
-    { label: 'Activity logs', href: '/admin/activity/',      icon: 'activity', roles: ['SUPER_ADMIN','ADMIN','MANAGER'] },
-    { label: 'Notifications & branding', href: '/admin/notifications/', icon: 'bell', roles: ADMIN_ROLES }
+    { label: 'Activity logs', href: '/admin/activity/',      icon: 'activity', roles: ['SUPER_ADMIN','ADMIN','MANAGER'] }
   ];
 
   function e(tag, attrs, kids) {

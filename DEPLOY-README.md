@@ -1,3 +1,19 @@
+# Update — 29 Oct (b): Notifications page in every sidebar, engineers choose their own alert sounds
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New file:** `crm/_next/static/chunks/app/(dashboard)/layout-58fea6bc71211e50.js` (the sidebar under a new name, so phones and browsers load it fresh). Keep the old layout files.
+
+1. **Notifications & branding in every sidebar**
+   - The link is now under **Operations** for everyone, on every page.
+   - The sidebar used to be served from the app's saved copy, so the new link did not appear. It is now a newly named file, so it shows straight away.
+2. **Engineers: My alert sounds**
+   - Everyone sees **🎵 My alert sounds** on that page and picks their own sound for each alert, with ▶ to listen.
+   - Their choice only changes the sound on their own phone or computer.
+   - "Company sound" keeps the admin's choice.
+   - An alert the admin turned off stays off and can't be changed.
+   - The **CRM name and logo** and the **company notification settings** (on/off, phone notification, templates) stay Super Admin / Admin only.
+   - **Access:** Users → Page access has a new line, **Notifications & sounds**. The Super Admin can set it per person: Hidden, View only, or Full (the default).
+
 # Update — 29 Oct (a): Customers engineer-wise totals, order invoices with upload, notification sounds / templates, CRM name and logo
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
