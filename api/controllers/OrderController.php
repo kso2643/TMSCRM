@@ -1031,9 +1031,12 @@ class OrderController
         if ($status === 'NOT_ORDERED') {
             db()->prepare('UPDATE `CustomerOrder` SET procurementStatus=?,expectedDeliveryDate=NULL,updatedAt=? WHERE id=?')
                 ->execute([$status, now_sql(), $id]);
+            db()->prepare('UPDATE `CustomerOrderItem` SET procurementStatus=?,expectedDeliveryDate=NULL WHERE orderId=?')->execute([$status, $id]);
         } else {
             db()->prepare('UPDATE `CustomerOrder` SET procurementStatus=?,updatedAt=? WHERE id=?')
                 ->execute([$status, now_sql(), $id]);
+            // the whole order was placed with the supplier → every line is ordered too
+            db()->prepare('UPDATE `CustomerOrderItem` SET procurementStatus=? WHERE orderId=?')->execute([$status, $id]);
         }
 
         log_activity($auth['id'], 'ORDER_PROCUREMENT_UPDATED', 'CustomerOrder', $id, ['status' => $status]);
@@ -1073,8 +1076,21 @@ class OrderController
             db()->prepare('UPDATE `CustomerOrderItem` SET procurementStatus=? WHERE id=?')->execute([$status, $itemId]);
         }
 
+        $this->rollUpProcurement($orderId);
         log_activity($auth['id'], 'ORDER_ITEM_PROCUREMENT_UPDATED', 'CustomerOrder', $orderId, ['itemId' => $itemId, 'status' => $status]);
         $this->show($orderId);
+    }
+
+    /** The order shows "Ordered" once every line is ordered, and "Not ordered" again if any line is taken back. */
+    private function rollUpProcurement(string $orderId): void
+    {
+        $s = db()->prepare("SELECT COUNT(*) AS n, SUM(procurementStatus='ORDERED') AS ordered FROM `CustomerOrderItem` WHERE orderId=?");
+        $s->execute([$orderId]);
+        $c = $s->fetch();
+        if (!$c || (int) $c['n'] === 0) return;
+        $status = (int) $c['ordered'] === (int) $c['n'] ? 'ORDERED' : 'NOT_ORDERED';
+        db()->prepare('UPDATE `CustomerOrder` SET procurementStatus=?,updatedAt=? WHERE id=? AND procurementStatus<>?')
+            ->execute([$status, now_sql(), $orderId, $status]);
     }
 
     // PATCH /api/orders/:id/items/:itemId/eta — admin-tier only, per line.

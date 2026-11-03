@@ -389,4 +389,301 @@ class ReportsController extends ExportController
             ['label' => 'Break time',       'value' => fn($r) => self::hms($r['breakSec'])],
         ], 'tracking-' . $this->stamp(), 'Daily Tracking Report');
     }
+
+    // ── Reports for the pages added later (Petty cash, meetings, MOM, CEO Desk, CPR, Projects,
+    //    Vendor POs, Accounts, Payroll, HR, Sales report, Order invoices) ─────────────────────
+    private static function money($v): string { return $v === null || $v === '' ? '' : number_format((float) $v, 2, '.', ''); }
+    /** Only these roles may download the report (sensitive pages: money, salaries, staff details). */
+    private static function only(array $auth, array $roles, string $what): void
+    {
+        if (!in_array($auth['role'], $roles, true)) sendError("Only " . implode(' / ', array_map(fn($r) => ucwords(strtolower(str_replace('_', ' ', $r))), $roles)) . " can download the $what report.", 403);
+    }
+    /** "id1,id2" / JSON list of user ids → "Name 1, Name 2". */
+    private function names($ids): string
+    {
+        static $all = null;
+        if ($all === null) { $all = []; foreach ($this->rows('SELECT id, name FROM `User`', []) as $u) $all[$u['id']] = $u['name']; }
+        $list = is_array($ids) ? $ids : (json_decode((string) $ids, true) ?: preg_split('/\s*,\s*/', (string) $ids, -1, PREG_SPLIT_NO_EMPTY));
+        return implode(', ', array_map(fn($i) => $all[$i] ?? (string) $i, (array) $list));
+    }
+    /** JSON list of points / actions → "1. … 2. …" (or the plain text). */
+    private static function listText($v): string
+    {
+        $a = json_decode((string) $v, true);
+        if (!is_array($a)) return (string) $v;
+        $out = [];
+        foreach ($a as $i => $x) {
+            if (is_array($x)) $x = implode(' — ', array_filter(array_map(fn($y) => is_scalar($y) ? (string) $y : '', $x), fn($y) => $y !== ''));
+            if ((string) $x !== '') $out[] = ($i + 1) . '. ' . $x;
+        }
+        return implode('  ', $out);
+    }
+
+    // GET /api/reports/petty-cash
+    public function pettyCash(): void
+    {
+        $auth = authenticate(); self::only($auth, ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTS'], 'petty cash');
+        [$w, $p] = $this->where('e.entryDate');
+        $rows = $this->rows("SELECT e.*, u.name AS byName, (SELECT COUNT(*) FROM `PettyCashBill` b WHERE b.entryId=e.id) AS bills
+                             FROM `PettyCash` e LEFT JOIN `User` u ON u.id=e.createdById $w ORDER BY e.entryDate, e.createdAt", $p);
+        $bal = 0.0;
+        foreach ($rows as &$r) { $bal += (strtoupper((string) $r['type']) === 'IN' ? 1 : -1) * (float) $r['amount']; $r['balance'] = $bal; }
+        unset($r);
+        $this->sendExport($rows, [
+            ['label' => 'Date',        'value' => fn($r) => self::d($r['entryDate'])],
+            ['label' => 'Type',        'value' => fn($r) => strtoupper((string) $r['type']) === 'IN' ? 'Cash in' : 'Spent'],
+            ['label' => 'Amount',      'value' => fn($r) => self::money($r['amount'])],
+            ['label' => 'Category',    'value' => fn($r) => $r['category'] ?? ''],
+            ['label' => 'Description', 'value' => fn($r) => $r['description'] ?? ''],
+            ['label' => 'Paid to',     'value' => fn($r) => $r['paidTo'] ?? ''],
+            ['label' => 'Bill no',     'value' => fn($r) => $r['billNo'] ?? ''],
+            ['label' => 'Mode',        'value' => fn($r) => $r['mode'] ?? ''],
+            ['label' => 'Bills',       'value' => fn($r) => (string) (int) ($r['bills'] ?? 0)],
+            ['label' => 'Balance',     'value' => fn($r) => self::money($r['balance'])],
+            ['label' => 'Entered by',  'value' => fn($r) => $r['byName'] ?? ''],
+        ], 'petty-cash-' . $this->stamp(), 'Petty Cash Report');
+    }
+
+    // GET /api/reports/internal-meetings
+    public function internalMeetings(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('m.meetingDate');
+        $rows = $this->rows("SELECT m.*, u.name AS byName FROM `InternalMeeting` m LEFT JOIN `User` u ON u.id=m.createdById $w ORDER BY m.meetingDate DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Meeting no',  'value' => fn($r) => $r['meetingNo'] ?? ''],
+            ['label' => 'Date',        'value' => fn($r) => self::d($r['meetingDate'])],
+            ['label' => 'Time',        'value' => fn($r) => $r['meetingTime'] ?? ''],
+            ['label' => 'Title',       'value' => fn($r) => $r['title'] ?? ''],
+            ['label' => 'Attendees',   'value' => fn($r) => trim($this->names($r['attendeeIds']) . ($r['otherAttendees'] ? ', ' . $r['otherAttendees'] : ''), ', ')],
+            ['label' => 'Discussed',   'value' => fn($r) => self::listText($r['points'])],
+            ['label' => 'Next action', 'value' => fn($r) => self::listText($r['actions'])],
+            ['label' => 'Notes',       'value' => fn($r) => $r['notes'] ?? ''],
+            ['label' => 'Written by',  'value' => fn($r) => $r['byName'] ?? ''],
+        ], 'internal-meetings-' . $this->stamp(), 'Internal Meeting Report');
+    }
+
+    // GET /api/reports/mom
+    public function mom(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('m.meetingDate');
+        $rows = $this->rows("SELECT m.*, u.name AS byName FROM `Mom` m LEFT JOIN `User` u ON u.id=m.createdById $w ORDER BY m.meetingDate DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'MOM no',          'value' => fn($r) => $r['momNo'] ?? ''],
+            ['label' => 'Company',         'value' => fn($r) => $r['company'] ?? ''],
+            ['label' => 'Customer',        'value' => fn($r) => $r['customerName'] ?? ''],
+            ['label' => 'Date',            'value' => fn($r) => self::d($r['meetingDate'])],
+            ['label' => 'Venue',           'value' => fn($r) => $r['venue'] ?? ''],
+            ['label' => 'Subject',         'value' => fn($r) => $r['subject'] ?? ''],
+            ['label' => 'Client side',     'value' => fn($r) => self::listText($r['clientAttendees'])],
+            ['label' => 'Our side',        'value' => fn($r) => self::listText($r['ourAttendees'])],
+            ['label' => 'Points',          'value' => fn($r) => self::listText($r['points'])],
+            ['label' => 'Actions',         'value' => fn($r) => self::listText($r['actions'])],
+            ['label' => 'Next meeting',    'value' => fn($r) => self::d($r['nextMeetingDate'] ?? null)],
+            ['label' => 'Written by',      'value' => fn($r) => $r['byName'] ?? ''],
+        ], 'mom-' . $this->stamp(), 'Minutes of Meeting Report');
+    }
+
+    // GET /api/reports/md-desk
+    public function mdDesk(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('d.createdAt');
+        $rows = $this->rows("SELECT d.*, f.name AS fromName, t.name AS toName, x.name AS doneName FROM `MdDeskItem` d
+                             LEFT JOIN `User` f ON f.id=d.fromId LEFT JOIN `User` t ON t.id=d.toId LEFT JOIN `User` x ON x.id=d.doneById
+                             $w ORDER BY d.createdAt DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Desk no',   'value' => fn($r) => $r['deskNo'] ?? ''],
+            ['label' => 'Date',      'value' => fn($r) => self::dt($r['createdAt'])],
+            ['label' => 'Type',      'value' => fn($r) => $r['type'] ?? ''],
+            ['label' => 'Title',     'value' => fn($r) => $r['title'] ?? ''],
+            ['label' => 'Details',   'value' => fn($r) => $r['details'] ?? ''],
+            ['label' => 'From',      'value' => fn($r) => $r['fromName'] ?? ''],
+            ['label' => 'To',        'value' => fn($r) => $r['assignees'] ? $this->names($r['assignees']) : ($r['toName'] ?? ($r['toGroup'] ?? ''))],
+            ['label' => 'Priority',  'value' => fn($r) => $r['priority'] ?? ''],
+            ['label' => 'Due',       'value' => fn($r) => self::d($r['dueDate'] ?? null)],
+            ['label' => 'Customer',  'value' => fn($r) => $r['customerName'] ?? ''],
+            ['label' => 'Amount',    'value' => fn($r) => self::money($r['amount'] ?? ($r['price'] ?? null))],
+            ['label' => 'Status',    'value' => fn($r) => $r['status'] ?? ''],
+            ['label' => 'Done',      'value' => fn($r) => trim(self::dt($r['doneAt'] ?? null) . ' ' . ($r['doneName'] ?? ''))],
+        ], 'ceo-desk-' . $this->stamp(), 'CEO Desk Report');
+    }
+
+    // GET /api/reports/cpr
+    public function cpr(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('c.capturedDate', ['c.isActive=1']);
+        $rows = $this->rows("SELECT c.* FROM `CprOpportunity` c $w ORDER BY c.slNo + 0, c.createdAt", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Sl no',          'value' => fn($r) => $r['slNo'] ?? ''],
+            ['label' => 'Region',         'value' => fn($r) => $r['region'] ?? ''],
+            ['label' => 'Engineer',       'value' => fn($r) => $r['seName'] ?? ''],
+            ['label' => 'Customer',       'value' => fn($r) => $r['customerName'] ?? ''],
+            ['label' => 'Captured',       'value' => fn($r) => self::d($r['capturedDate'] ?? null)],
+            ['label' => 'Component',      'value' => fn($r) => $r['component'] ?? ''],
+            ['label' => 'Opportunity',    'value' => fn($r) => $r['opportunity'] ?? ''],
+            ['label' => 'Product group',  'value' => fn($r) => $r['productGroup'] ?? ''],
+            ['label' => 'Focus brand',    'value' => fn($r) => $r['focusBrand'] ?? ''],
+            ['label' => 'Annual potential','value' => fn($r) => self::money($r['annualPotential'] ?? null)],
+            ['label' => 'Expected sale',  'value' => fn($r) => self::money($r['expectedSale'] ?? null)],
+            ['label' => 'Order value',    'value' => fn($r) => self::money($r['orderValue'] ?? null)],
+            ['label' => 'Status',         'value' => fn($r) => $r['status'] ?? ''],
+            ['label' => 'Last review',    'value' => fn($r) => self::d($r['lastReviewDate'] ?? null)],
+            ['label' => 'Latest remark',  'value' => fn($r) => $r['latestRemark'] ?? ''],
+        ], 'cpr-' . $this->stamp(), 'CPR Opportunity Report');
+    }
+
+    // GET /api/reports/projects  (Projects + Tooled-up requests)
+    public function projects(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('r.createdAt');
+        $rows = $this->rows("SELECT r.*, u.name AS byName, a.name AS approvedName,
+                                    (SELECT COUNT(*) FROM `ToolingItem` i WHERE i.requestId=r.id) AS items,
+                                    (SELECT SUM(COALESCE(i.price,0)*COALESCE(i.quantity,1)) FROM `ToolingItem` i WHERE i.requestId=r.id) AS value
+                             FROM `ToolingRequest` r LEFT JOIN `User` u ON u.id=r.createdById LEFT JOIN `User` a ON a.id=r.approvedById
+                             $w ORDER BY r.createdAt DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Request no',  'value' => fn($r) => $r['requestNo'] ?? ''],
+            ['label' => 'Page',        'value' => fn($r) => ToolingController::TYPES[strtoupper((string) $r['type'])][0] ?? (string) $r['type']],
+            ['label' => 'Customer',    'value' => fn($r) => $r['customerName'] ?? ''],
+            ['label' => 'Title',       'value' => fn($r) => $r['title'] ?? ''],
+            ['label' => 'Items',       'value' => fn($r) => (string) (int) $r['items']],
+            ['label' => 'Value',       'value' => fn($r) => self::money($r['value'])],
+            ['label' => 'Status',      'value' => fn($r) => $r['status'] ?? ''],
+            ['label' => 'Created by',  'value' => fn($r) => $r['byName'] ?? ''],
+            ['label' => 'Submitted',   'value' => fn($r) => self::d($r['submittedAt'] ?? null)],
+            ['label' => 'Approved',    'value' => fn($r) => trim(self::d($r['approvedAt'] ?? null) . ' ' . ($r['approvedName'] ?? ''))],
+        ], 'projects-' . $this->stamp(), 'Projects & Tooled-up Report');
+    }
+
+    // GET /api/reports/purchase-orders
+    public function purchaseOrders(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('o.poDate');
+        $rows = $this->rows("SELECT o.*, (SELECT COUNT(*) FROM `PurchaseOrderItem` i WHERE i.poId=o.id) AS items FROM `PurchaseOrder` o $w ORDER BY o.poDate DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'PO number', 'value' => fn($r) => $r['poNumber'] ?? ''],
+            ['label' => 'Company',   'value' => fn($r) => $r['company'] ?? ''],
+            ['label' => 'PO date',   'value' => fn($r) => self::d($r['poDate'] ?? null)],
+            ['label' => 'Vendor',    'value' => fn($r) => $r['vendorName'] ?? ''],
+            ['label' => 'Brand',     'value' => fn($r) => $r['brand'] ?? ''],
+            ['label' => 'Subject',   'value' => fn($r) => $r['subject'] ?? ''],
+            ['label' => 'Items',     'value' => fn($r) => (string) (int) $r['items']],
+            ['label' => 'Sub total', 'value' => fn($r) => self::money($r['subTotal'] ?? null)],
+            ['label' => 'Tax',       'value' => fn($r) => self::money($r['taxAmount'] ?? null)],
+            ['label' => 'Total',     'value' => fn($r) => self::money($r['totalAmount'] ?? null)],
+            ['label' => 'Status',    'value' => fn($r) => $r['status'] ?? ''],
+        ], 'purchase-orders-' . $this->stamp(), 'Vendor Purchase Order Report');
+    }
+
+    // GET /api/reports/accounts
+    public function accounts(): void
+    {
+        $auth = authenticate(); self::only($auth, ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTS'], 'accounts');
+        [$w, $p] = $this->where('a.docDate');
+        $rows = $this->rows("SELECT a.* FROM `AccEntry` a $w ORDER BY a.docDate DESC, a.createdAt DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Kind',       'value' => fn($r) => AccountsController::KINDS[(string) $r['kind']] ?? (string) $r['kind']],
+            ['label' => 'Company',    'value' => fn($r) => $r['company'] ?? ''],
+            ['label' => 'Doc no',     'value' => fn($r) => $r['docNo'] ?? ''],
+            ['label' => 'Date',       'value' => fn($r) => self::d($r['docDate'] ?? null)],
+            ['label' => 'Party',      'value' => fn($r) => $r['partyName'] ?? ''],
+            ['label' => 'GSTIN',      'value' => fn($r) => $r['partyGstin'] ?? ''],
+            ['label' => 'Order / PO', 'value' => fn($r) => trim(($r['orderRef'] ?? '') . ' ' . ($r['poRef'] ?? ''))],
+            ['label' => 'Taxable',    'value' => fn($r) => self::money($r['taxable'] ?? null)],
+            ['label' => 'GST',        'value' => fn($r) => self::money($r['gstAmount'] ?? null)],
+            ['label' => 'Amount',     'value' => fn($r) => self::money($r['amount'] ?? null)],
+            ['label' => 'Due',        'value' => fn($r) => self::d($r['dueDate'] ?? null)],
+            ['label' => 'Mode',       'value' => fn($r) => $r['mode'] ?? ''],
+            ['label' => 'Tally',      'value' => fn($r) => trim(($r['tallyStatus'] ?? '') . ' ' . ($r['tallyVoucherNo'] ?? ''))],
+        ], 'accounts-' . $this->stamp(), 'Accounts Report');
+    }
+
+    // GET /api/reports/payroll  (?from/to pick the months by the 1st of the month)
+    public function payroll(): void
+    {
+        $auth = authenticate(); self::only($auth, ['SUPER_ADMIN', 'ADMIN'], 'payroll');
+        [$w, $p] = $this->where("STR_TO_DATE(CONCAT(py.year,'-',py.month,'-01'),'%Y-%m-%d')");
+        $rows = $this->rows("SELECT py.*, u.name, u.employeeCode FROM `Payroll` py LEFT JOIN `User` u ON u.id=py.userId $w ORDER BY py.year DESC, py.month DESC, u.name", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Month',        'value' => fn($r) => date('M Y', mktime(0, 0, 0, (int) $r['month'], 1, (int) $r['year']))],
+            ['label' => 'Emp code',     'value' => fn($r) => $r['employeeCode'] ?? ''],
+            ['label' => 'Employee',     'value' => fn($r) => $r['name'] ?? ''],
+            ['label' => 'Working days', 'value' => fn($r) => (string) ($r['workingDays'] ?? '')],
+            ['label' => 'Present',      'value' => fn($r) => (string) ($r['presentDays'] ?? '')],
+            ['label' => 'LOP days',     'value' => fn($r) => (string) ($r['lopDays'] ?? '')],
+            ['label' => 'Gross',        'value' => fn($r) => self::money($r['grossSalary'] ?? null)],
+            ['label' => 'Deductions',   'value' => fn($r) => self::money($r['totalDeductions'] ?? null)],
+            ['label' => 'Net salary',   'value' => fn($r) => self::money($r['netSalary'] ?? null)],
+            ['label' => 'Status',       'value' => fn($r) => $r['status'] ?? ''],
+            ['label' => 'Paid on',      'value' => fn($r) => self::d($r['paidOn'] ?? null)],
+        ], 'payroll-' . $this->stamp(), 'Payroll Report');
+    }
+
+    // GET /api/reports/hr  (every employee's details; the date range is ignored)
+    public function hr(): void
+    {
+        $auth = authenticate(); self::only($auth, ['SUPER_ADMIN', 'ADMIN'], 'HR');
+        $rows = $this->rows("SELECT * FROM `User` ORDER BY isActive DESC, name", []);
+        $this->sendExport($rows, [
+            ['label' => 'Emp code',      'value' => fn($r) => $r['employeeCode'] ?? ''],
+            ['label' => 'Name',          'value' => fn($r) => $r['name'] ?? ''],
+            ['label' => 'Role',          'value' => fn($r) => $r['role'] ?? ''],
+            ['label' => 'Designation',   'value' => fn($r) => $r['designation'] ?? ''],
+            ['label' => 'Department',    'value' => fn($r) => $r['department'] ?? ''],
+            ['label' => 'Phone',         'value' => fn($r) => $r['phone'] ?? ''],
+            ['label' => 'Email',         'value' => fn($r) => $r['email'] ?? ''],
+            ['label' => 'Joined',        'value' => fn($r) => self::d($r['dateOfJoining'] ?? null)],
+            ['label' => 'Birth date',    'value' => fn($r) => self::d($r['dateOfBirth'] ?? null)],
+            ['label' => 'Blood group',   'value' => fn($r) => $r['bloodGroup'] ?? ''],
+            ['label' => 'Emergency',     'value' => fn($r) => trim(($r['emergencyContactName'] ?? '') . ' ' . ($r['emergencyContactPhone'] ?? ''))],
+            ['label' => 'Father phone',  'value' => fn($r) => $r['fatherPhone'] ?? ''],
+            ['label' => 'Spouse phone',  'value' => fn($r) => $r['spousePhone'] ?? ''],
+            ['label' => 'Status',        'value' => fn($r) => !empty($r['isActive']) ? 'Active' : 'Inactive'],
+        ], 'hr-employees-' . $this->stamp(), 'HR Employee Report');
+    }
+
+    // GET /api/reports/sales-entries  (manual entries on the Sales report page)
+    public function salesEntries(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('s.entryDate');
+        $rows = $this->rows("SELECT s.*, u.name AS engineerName FROM `SalesEntry` s LEFT JOIN `User` u ON u.id=s.engineerId $w ORDER BY s.entryDate DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Date',         'value' => fn($r) => self::d($r['entryDate'] ?? null)],
+            ['label' => 'Engineer',     'value' => fn($r) => $r['engineerName'] ?? ''],
+            ['label' => 'Customer',     'value' => fn($r) => $r['customerName'] ?? ''],
+            ['label' => 'Reference',    'value' => fn($r) => $r['reference'] ?? ''],
+            ['label' => 'Order value',  'value' => fn($r) => self::money($r['orderValue'] ?? null)],
+            ['label' => 'Billed value', 'value' => fn($r) => self::money($r['billedValue'] ?? null)],
+            ['label' => 'Quantity',     'value' => fn($r) => (string) ($r['quantity'] ?? '')],
+            ['label' => 'Note',         'value' => fn($r) => $r['note'] ?? ''],
+        ], 'sales-entries-' . $this->stamp(), 'Sales Report (manual entries)');
+    }
+
+    // GET /api/reports/order-invoices
+    public function orderInvoices(): void
+    {
+        $auth = authenticate(); require_manager($auth);
+        [$w, $p] = $this->where('i.invoiceDate');
+        $rows = $this->rows("SELECT i.*, o.orderDate, c.companyName, e.name AS engineerName, u.name AS byName FROM `OrderInvoice` i
+                             JOIN `CustomerOrder` o ON o.id=i.orderId LEFT JOIN `Customer` c ON c.id=o.customerId
+                             LEFT JOIN `User` e ON e.id=o.engineerId LEFT JOIN `User` u ON u.id=i.createdById
+                             $w ORDER BY i.invoiceDate DESC, i.createdAt DESC", $p);
+        $this->sendExport($rows, [
+            ['label' => 'Invoice no',  'value' => fn($r) => $r['invoiceNo']],
+            ['label' => 'Date',        'value' => fn($r) => self::d($r['invoiceDate'] ?? null)],
+            ['label' => 'Amount',      'value' => fn($r) => self::money($r['amount'] ?? null)],
+            ['label' => 'Order ref',   'value' => fn($r) => OrderController::orderRef(['orderDate' => $r['orderDate'], 'id' => $r['orderId']])],
+            ['label' => 'Customer',    'value' => fn($r) => $r['companyName'] ?? ''],
+            ['label' => 'Engineer',    'value' => fn($r) => $r['engineerName'] ?? ''],
+            ['label' => 'File',        'value' => fn($r) => $r['fileName'] ?? ''],
+            ['label' => 'Note',        'value' => fn($r) => $r['note'] ?? ''],
+            ['label' => 'Added by',    'value' => fn($r) => $r['byName'] ?? ''],
+        ], 'order-invoices-' . $this->stamp(), 'Order Invoices Report');
+    }
 }

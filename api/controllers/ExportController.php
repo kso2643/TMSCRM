@@ -140,11 +140,33 @@ class ExportController
         }
         $margin = 36;
         $contentW = $pageW - 2 * $margin;
-        $colW = $contentW / count($columns);
         $rowH = 18;
 
         $pdf = new SimplePdf();
         $pdf->addPage($pageW, $pageH);
+
+        // Column widths follow the content (short codes narrow, names / items wide), so less is cut off.
+        $cells = [];
+        foreach ($rows as $k => $r) { $line = []; foreach ($columns as $c) $line[] = trim(preg_replace('/\s+/', ' ', (string) (($c['value'])($r) ?? ''))); $cells[$k] = $line; }
+        $need = [];
+        foreach ($columns as $i => $c) {
+            $pdf->setFont('Helvetica-Bold', 7.5); $w = $pdf->textWidth((string) $c['label']);
+            $pdf->setFont('Helvetica', 7.5);
+            foreach (array_slice($cells, 0, 400) as $line) $w = max($w, $pdf->textWidth(mb_substr($line[$i], 0, 60)));
+            $need[$i] = max($w + 9, 30);
+        }
+        if (array_sum($need) <= $contentW) {                 // room for everything: share the spare width out
+            $scale = $contentW / max(1, array_sum($need));
+            $width = array_map(fn($w) => $w * $scale, $need);
+        } else {                                             // too wide: cut only the widest columns, to one common cap
+            $lo = 30; $hi = max($need);
+            for ($k = 0; $k < 40; $k++) { $cap = ($lo + $hi) / 2; $sum = array_sum(array_map(fn($w) => min($w, $cap), $need)); if ($sum > $contentW) $hi = $cap; else $lo = $cap; }
+            $width = array_map(fn($w) => min($w, $lo), $need);
+            $scale = $contentW / max(1, array_sum($width));
+            $width = array_map(fn($w) => $w * $scale, $width);
+        }
+        $colX = []; $colWs = []; $x = $margin;
+        foreach ($width as $i => $w) { $colX[$i] = $x; $colWs[$i] = $w; $x += $w; }
 
         $pdf->setFont('Helvetica-Bold', 15); $pdf->setFillColor('#1E3A5F');
         $pdf->text($title, $margin, 36);
@@ -154,11 +176,11 @@ class ExportController
         $y = 80;
         $maxY = $pageH - $margin - $rowH;
 
-        $drawHeader = function() use ($pdf, $margin, $pageW, $rowH, $colW, $columns, &$y) {
+        $drawHeader = function() use ($pdf, $margin, $pageW, $rowH, $colX, $colWs, $columns, &$y) {
             $pdf->rect($margin, $y, $pageW - 2*$margin, $rowH, '#1E3A5F');
             $pdf->setFont('Helvetica-Bold', 7.5); $pdf->setFillColor('#FFFFFF');
             foreach ($columns as $i => $c) {
-                $pdf->text($c['label'], $margin + $i * $colW + 4, $y + 5, ['width' => $colW - 8]);
+                $pdf->text(self::fitCell($pdf, (string) $c['label'], $colWs[$i] - 8), $colX[$i] + 4, $y + 5);
             }
             $y += $rowH;
         };
@@ -175,8 +197,8 @@ class ExportController
             if ($idx % 2 === 0) $pdf->rect($margin, $y - 2, $pageW - 2*$margin, $rowH, '#F8FAFC');
             $pdf->setFillColor('#374151');
             foreach ($columns as $i => $c) {
-                $val = substr((string)(($c['value'])($r) ?? ''), 0, 40);
-                $pdf->text($val, $margin + $i * $colW + 4, $y + 2, ['width' => $colW - 8]);
+                $val = self::fitCell($pdf, $cells[$idx][$i], $colWs[$i] - 8);
+                $pdf->text($val, $colX[$i] + 4, $y + 2);
             }
             $y += $rowH;
         }
@@ -185,6 +207,16 @@ class ExportController
         header('Content-Disposition: attachment; filename="' . $filenameBase . '.pdf"');
         echo $pdf->output();
         exit;
+    }
+
+    /** One line per cell: long text is cut with "..." so it never runs into the next row. */
+    protected static function fitCell(SimplePdf $pdf, string $v, float $w): string
+    {
+        $v = trim(preg_replace('/\s+/', ' ', $v));
+        if ($v === '' || $pdf->textWidth($v) <= $w) return $v;
+        $lo = 0; $hi = mb_strlen($v);
+        while ($lo < $hi) { $mid = intdiv($lo + $hi + 1, 2); if ($pdf->textWidth(mb_substr($v, 0, $mid) . '...') <= $w) $lo = $mid; else $hi = $mid - 1; }
+        return rtrim(mb_substr($v, 0, $lo)) . '...';
     }
 
     protected function sendExport(array $rows, array $columns, string $filenameBase, string $title): void

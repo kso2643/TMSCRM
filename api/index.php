@@ -515,6 +515,18 @@ try {
             $method === 'GET' && $c1 === 'appointments'   => $ctrl->appointments(),
             $method === 'GET' && $c1 === 'breaks'         => $ctrl->breaks(),
             $method === 'GET' && in_array($c1, ['tracking', 'daily-movement'], true)     => $ctrl->tracking(),
+            $method === 'GET' && $c1 === 'petty-cash'        => $ctrl->pettyCash(),
+            $method === 'GET' && $c1 === 'internal-meetings' => $ctrl->internalMeetings(),
+            $method === 'GET' && $c1 === 'mom'               => $ctrl->mom(),
+            $method === 'GET' && $c1 === 'md-desk'           => $ctrl->mdDesk(),
+            $method === 'GET' && $c1 === 'cpr'               => $ctrl->cpr(),
+            $method === 'GET' && $c1 === 'projects'          => $ctrl->projects(),
+            $method === 'GET' && $c1 === 'purchase-orders'   => $ctrl->purchaseOrders(),
+            $method === 'GET' && $c1 === 'accounts'          => $ctrl->accounts(),
+            $method === 'GET' && $c1 === 'payroll'           => $ctrl->payroll(),
+            $method === 'GET' && $c1 === 'hr'                => $ctrl->hr(),
+            $method === 'GET' && $c1 === 'sales-entries'     => $ctrl->salesEntries(),
+            $method === 'GET' && $c1 === 'order-invoices'    => $ctrl->orderInvoices(),
             default => sendError("Route /api/reports/$c1 not found", 404),
         };
     }

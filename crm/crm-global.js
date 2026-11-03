@@ -562,6 +562,30 @@
       N.setSession(token(), String((user() || {}).id || ''), brandName(), JSON.stringify({ n: nset, m: nmine }));
     } catch (e) {}
   }
+  // Android app: if notifications or background running are not allowed, alerts can't reach the
+  // phone while the app is closed — say so once a day, with a link to fix it.
+  function phoneAlertNudge() {
+    try {
+      var N = window.CRMNative;
+      if (!N || !N.alertStatus || /^\/admin\/notifications/.test(location.pathname)) return;
+      var st = JSON.parse(N.alertStatus() || '{}');
+      if (st.notifications !== false && st.background !== false) return;
+      var key = 'crm_phone_nudge', today = new Date().toDateString();
+      if (lsGet(key) === today) return;
+      lsSet(key, today);
+      var bar = document.createElement('div');
+      bar.id = 'crm-phone-nudge';
+      bar.style.cssText = 'position:fixed;left:12px;right:12px;top:12px;z-index:2147483645;background:#7c2d12;color:#fff;border-radius:12px;padding:12px 14px;font:500 14px system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.25);display:flex;gap:10px;align-items:center;justify-content:space-between';
+      var t = document.createElement('span');
+      t.textContent = '📵 Alerts can’t reach this phone when the app is closed. ' + (st.notifications === false ? 'Notifications are off.' : 'Allow the app to run in the background.');
+      var go = document.createElement('a'); go.href = '/admin/notifications/'; go.textContent = 'Fix now';
+      go.style.cssText = 'background:#fff;color:#7c2d12;border-radius:8px;padding:6px 10px;font-weight:700;white-space:nowrap';
+      var x = document.createElement('button'); x.textContent = '✕'; x.setAttribute('aria-label', 'Close'); x.style.cssText = 'background:none;border:0;color:#fff;font-size:16px';
+      x.onclick = function () { bar.remove(); };
+      bar.appendChild(t); bar.appendChild(go); bar.appendChild(x);
+      document.body.appendChild(bar);
+    } catch (e) {}
+  }
   function brandName() { try { return (window.CRMBrand && window.CRMBrand.get().name) || 'APJ CRM'; } catch (e) { return 'APJ CRM'; } }
   function fillTpl(tpl, ev) {
     return String(tpl).replace(/\{title\}/g, ev.title || '').replace(/\{body\}/g, ev.body || '').replace(/\{name\}/g, brandName());
@@ -979,6 +1003,7 @@
     setTimeout(ensureMenu, 1500); // React pages render their sidebar a moment after load
     setTimeout(dropExtraMenu, 3000);
     nativeSession();
+    setTimeout(phoneAlertNudge, 6000);
     loadNotifySettings();
     setInterval(loadNotifySettings, 5 * 60000);
     poll(true);
@@ -1139,6 +1164,94 @@
       if (!n && !mine) loadNotifySettings();
     }
   };
+
+  // ── Paste a screenshot (Ctrl+V) into the page's file box ──────────────
+  // Copy a screenshot (Print Screen, Win+Shift+S, Snipping tool…) and press Ctrl+V on any page:
+  // the image goes into the upload box you were working near (the one in the open pop-up, or the
+  // one closest to where you last clicked), exactly as if you had chosen the file. Boxes that only
+  // take Excel / PDF, and camera-only boxes (attendance selfie) are left alone.
+  var pasteNear = null;
+  document.addEventListener('pointerdown', function (e) { pasteNear = e.target; }, true);
+  document.addEventListener('focusin', function (e) { pasteNear = e.target; }, true);
+  function takesImages(inp) {
+    if (inp.disabled || inp.hasAttribute('capture') || inp.hasAttribute('data-no-paste')) return false;
+    var acc = (inp.getAttribute('accept') || '').toLowerCase().trim();
+    if (!acc) return true;
+    return acc.split(',').some(function (x) { x = x.trim(); return x === '*/*' || x === 'image/*' || x.indexOf('image/') === 0 || /^\.(png|jpe?g|webp|gif)$/.test(x); });
+  }
+  function onScreen(el) {
+    for (var n = el; n && n !== document.documentElement; n = n.parentElement) {
+      var cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    }
+    return true;
+  }
+  function depthShared(a, b) {
+    if (!a || !b) return 0;
+    var pa = []; for (var n = a; n; n = n.parentElement) pa.unshift(n);
+    var pb = []; for (var m = b; m; m = m.parentElement) pb.unshift(m);
+    var d = 0; while (d < pa.length && d < pb.length && pa[d] === pb[d]) d++;
+    return d;
+  }
+  function pasteTarget() {
+    var list = Array.prototype.filter.call(document.querySelectorAll('input[type=file]'), function (inp) {
+      return takesImages(inp) && onScreen(inp.parentElement || inp);   // the input itself is often hidden behind a button
+    });
+    if (!list.length) return null;
+    // an open pop-up / drawer wins over the page behind it
+    var dlg = list.filter(function (inp) { return inp.closest('[role=dialog], [data-order-view], .drawer-backdrop, .modal, [aria-modal=true]'); });
+    if (dlg.length) list = dlg;
+    var near = pasteNear && pasteNear.isConnected ? pasteNear : document.activeElement;
+    list.sort(function (x, y) { return depthShared(y, near) - depthShared(x, near); });
+    return list[0];
+  }
+  function boxLabel(inp) {
+    var t = (inp.labels && inp.labels[0] && inp.labels[0].textContent) || inp.getAttribute('aria-label') || inp.getAttribute('title') || '';
+    if (!t) { var lab = inp.closest('label'); if (lab) t = lab.textContent; }
+    if (!t) { var box = inp.parentElement; for (var k = 0; k < 3 && box && !t; k++, box = box.parentElement) { var h = box.querySelector('label, .label, span.text-xs, h3, h2'); if (h) t = h.textContent; } }
+    t = String(t || '').replace(/\s+/g, ' ').trim();
+    return t.length > 40 ? t.slice(0, 40) + '…' : t;
+  }
+  function pasteNote(msg, bad) {
+    var n = document.getElementById('crm-paste-note');
+    if (!n) {
+      n = document.createElement('div'); n.id = 'crm-paste-note';
+      n.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483646;padding:10px 16px;border-radius:10px;font:500 14px system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18);transition:opacity .3s';
+      document.body.appendChild(n);
+    }
+    n.textContent = msg; n.style.background = bad ? '#7f1d1d' : '#0f172a'; n.style.color = '#fff'; n.style.opacity = '1';
+    clearTimeout(n._t); n._t = setTimeout(function () { n.style.opacity = '0'; }, 3500);
+  }
+  document.addEventListener('paste', function (e) {
+    var cd = e.clipboardData;
+    if (!cd) return;
+    var img = null;
+    Array.prototype.some.call(cd.items || [], function (it) { if (it.kind === 'file' && /^image\//.test(it.type)) { img = it.getAsFile(); return true; } return false; });
+    if (!img) return;   // ordinary text paste
+    var inp = pasteTarget();
+    if (!inp) {
+      var tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag !== 'TEXTAREA' && tag !== 'INPUT' && !(document.activeElement && document.activeElement.isContentEditable)) pasteNote('No place to attach a picture on this page.', true);
+      return;
+    }
+    e.preventDefault();
+    var d = new Date(), pad = function (v) { return ('0' + v).slice(-2); };
+    var ext = (img.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    var name = 'screenshot-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.' + ext;
+    var file;
+    try { file = new File([img], name, { type: img.type, lastModified: Date.now() }); } catch (x) { file = img; }
+    var dt = new DataTransfer();
+    if (inp.multiple) Array.prototype.forEach.call(inp.files || [], function (f) { dt.items.add(f); });
+    dt.items.add(file);
+    inp.files = dt.files;
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+    var lbl = boxLabel(inp);
+    pasteNote('📋 Screenshot attached' + (lbl ? ' — ' + lbl : '') + (inp.multiple && dt.files.length > 1 ? ' (' + dt.files.length + ' files)' : ''));
+    var vis = onScreen(inp) ? inp : inp.parentElement;
+    if (vis && vis.animate) try { vis.animate([{ boxShadow: '0 0 0 3px #22c55e' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1200 }); } catch (x) {}
+  });
+  window.CRMPaste = { target: pasteTarget };
 
   // ── Location gate for sales engineers ──────────────────────────────
   // SALES / SALES_ENGINEER users must keep location on to use the CRM: a live
@@ -1338,6 +1451,98 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', qsMobileBtn); else qsMobileBtn();
   setTimeout(qsMobileBtn, 1500); setTimeout(qsMobileBtn, 4000);
+
+  // ── "⬇ Report" in the top bar: this page's report as Excel or PDF ─────
+  // The same downloads as the Reports page, one click from the page itself
+  // (managers and above; money / salary / staff pages only for the roles allowed to see them).
+  var MGR = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'];
+  var PAGE_REPORTS = [
+    [/^\/customers\/?$/, '/customers/export', 'customers'], [/^\/meetings\/?$/, '/meetings/export', 'follow-ups'],
+    [/^\/quotations\/?$/, '/quotations/export', 'quotations'], [/^\/products\/?$/, '/products/export', 'products'],
+    [/^\/orders\/?$/, '/reports/orders', 'orders'], [/^\/trials\/?$/, '/reports/trials', 'trials'],
+    [/^\/price-requests\/?$/, '/reports/price-requests', 'price-requests'], [/^\/stock\/?$/, '/reports/stock', 'stock'],
+    [/^\/vendors\/?$/, '/reports/purchase-orders', 'purchase-orders'], [/^\/attendance\/?$/, '/attendance/export', 'attendance'],
+    [/^\/fuel-expense\/?$/, '/fuel-expense/export', 'fuel'], [/^\/leaves\/?$/, '/leaves/export', 'leave'],
+    [/^\/appointments\/?$/, '/reports/appointments', 'appointments'], [/^\/md-desk\/?$/, '/reports/md-desk', 'ceo-desk'],
+    [/^\/tasks\/?$/, '/reports/tasks', 'tasks'], [/^\/(admin\/)?users\/?$/, '/users/export', 'team'],
+    [/^\/admin\/activity\/?$/, '/activity/export', 'activity-log'], [/^\/cpr\/?$/, '/reports/cpr', 'cpr'],
+    [/^\/(projects|tooled-up|machine-accessories)\/?$/, '/reports/projects', 'projects'],
+    [/^\/accounts\/?$/, '/reports/accounts', 'accounts', ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTS']],
+    [/^\/payroll(\/[a-z-]+)?\/?$/, '/reports/payroll', 'payroll', ['SUPER_ADMIN', 'ADMIN']],
+    [/^\/hr\/?$/, '/reports/hr', 'hr-employees', ['SUPER_ADMIN', 'ADMIN']],
+    [/^\/sales-report\/?$/, '/reports/sales-entries', 'sales-entries'], [/^\/internal-meetings\/?$/, '/reports/internal-meetings', 'internal-meetings'],
+    [/^\/mom\/?$/, '/reports/mom', 'mom'], [/^\/admin\/location-history\/?$/, '/reports/daily-movement', 'tracking']
+  ];
+  function pageReport() {
+    var r = (user() || {}).role, p = location.pathname;
+    for (var i = 0; i < PAGE_REPORTS.length; i++) if (PAGE_REPORTS[i][0].test(p)) return (PAGE_REPORTS[i][3] || MGR).indexOf(r) !== -1 ? PAGE_REPORTS[i] : null;
+    return null;
+  }
+  function reportGet(rep, fmt, range) {
+    var d = new Date(), pad = function (v) { return ('0' + v).slice(-2); };
+    var iso = function (x) { return x.getFullYear() + '-' + pad(x.getMonth() + 1) + '-' + pad(x.getDate()); };
+    var q = ['format=' + fmt];
+    if (range === 'month') { q.push('from=' + iso(new Date(d.getFullYear(), d.getMonth(), 1))); q.push('to=' + iso(d)); }
+    var name = rep[2] + (range === 'month' ? '-' + d.getFullYear() + '-' + pad(d.getMonth() + 1) : '-all') + '.' + (fmt === 'excel' ? 'xlsx' : 'pdf');
+    pasteNote('Preparing ' + name + '…');
+    return fetch(API + '/api' + rep[1] + '?' + q.join('&'), { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (res) {
+      if (!res.ok) return res.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Could not make the report'); });
+      return res.blob();
+    }).then(function (b) {
+      return b.slice(0, 4).arrayBuffer().then(function (h) {
+        var u8 = new Uint8Array(h);
+        var ok = fmt === 'excel' ? (u8[0] === 80 && u8[1] === 75) : (u8[0] === 37 && u8[1] === 80 && u8[2] === 68 && u8[3] === 70);
+        if (!ok) throw new Error('The server sent an error instead of the file.');
+        var u = URL.createObjectURL(b), a = document.createElement('a');
+        a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+        pasteNote('⬇ Downloaded ' + name);
+      });
+    }).catch(function (e) { pasteNote(e.message, true); });
+  }
+  function reportButton() {
+    var rep = pageReport();
+    if (!rep || document.querySelector('[data-page-report]')) return;
+    var qs = Array.prototype.find.call(document.querySelectorAll('header button'), function (b) { return /Quick search/.test(b.textContent || '') && !b.hasAttribute('data-qs-mobile'); });
+    // pages with their own top bar (Payroll…): next to the page title instead
+    var title = qs ? null : Array.prototype.find.call(document.querySelectorAll('h1.page-title, main h1'), function (h) { return h.offsetParent && !/Checking access/.test(h.textContent || ''); });
+    if (!qs && !title) return;
+    var wrap = document.createElement('div');
+    wrap.setAttribute('data-page-report', rep[2]);
+    wrap.style.cssText = 'position:relative;display:inline-block;margin-right:.5rem';
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = '⬇ Report'; b.setAttribute('aria-haspopup', 'menu'); b.title = 'Download this page’s report (Excel / PDF)';
+    b.className = 'btn-secondary btn-sm';
+    var menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    menu.style.cssText = 'display:none;position:absolute;right:0;top:110%;z-index:60;min-width:220px;background:#fff;color:#0f172a;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.15);padding:6px;font-size:13px';
+    [['This month — Excel', 'excel', 'month'], ['This month — PDF', 'pdf', 'month'], ['All time — Excel', 'excel', 'all'], ['All time — PDF', 'pdf', 'all']].forEach(function (o) {
+      var it = document.createElement('button');
+      it.type = 'button'; it.textContent = o[0]; it.setAttribute('role', 'menuitem'); it.setAttribute('data-report-fmt', o[1] + '-' + o[2]);
+      it.style.cssText = 'display:block;width:100%;text-align:left;padding:7px 10px;border-radius:6px;background:none;border:0;cursor:pointer;color:inherit';
+      it.onmouseenter = function () { it.style.background = '#f1f5f9'; }; it.onmouseleave = function () { it.style.background = 'none'; };
+      it.addEventListener('click', function () { menu.style.display = 'none'; reportGet(rep, o[1], o[2]); });
+      menu.appendChild(it);
+    });
+    if (MGR.indexOf((user() || {}).role) !== -1) {
+      var more = document.createElement('a');
+      more.href = '/admin/reports/'; more.textContent = 'Other dates & all reports →';
+      more.style.cssText = 'display:block;padding:7px 10px;border-top:1px solid #e2e8f0;margin-top:4px;color:#1e3a5f;font-weight:600';
+      menu.appendChild(more);
+    }
+    b.addEventListener('click', function (e) { e.stopPropagation(); menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; });
+    document.addEventListener('click', function () { menu.style.display = 'none'; });
+    wrap.appendChild(b); wrap.appendChild(menu);
+    if (qs) qs.parentNode.insertBefore(wrap, qs);
+    else { wrap.style.margin = '0 0 0 .75rem'; wrap.style.verticalAlign = 'middle'; title.appendChild(wrap); }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reportButton); else reportButton();
+  // React pages change page without reloading (and may redraw the top bar): keep the button right
+  var repPath = location.pathname;
+  setInterval(function () {
+    if (location.pathname !== repPath) { repPath = location.pathname; var w = document.querySelector('[data-page-report]'); if (w) w.remove(); }
+    reportButton();
+  }, 1500);
 
   // ?q=… from a quick-search result: type it into the page's own search box.
   (function qsPrefill() {

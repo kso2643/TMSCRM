@@ -256,10 +256,12 @@ public class MainActivity extends AppCompatActivity {
     private void askBatteryExemption() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         android.content.SharedPreferences p = AlertNotifier.prefs(this);
-        if (p.getBoolean("batteryAsked", false)) return;
+        if (!AlertService.hasSession(this)) return;   // only once someone is signed in
+        long last = p.getLong("batteryAskedAt", 0);
+        if (System.currentTimeMillis() - last < 24L * 3600 * 1000) return;   // at most once a day until allowed
         android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) return;
-        p.edit().putBoolean("batteryAsked", true).apply();
+        p.edit().putLong("batteryAskedAt", System.currentTimeMillis()).apply();
         new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Get alerts instantly")
                 .setMessage("To get CRM alerts on time even when the app is closed (like WhatsApp), allow APJ CRM to run in the background. On the next screen choose Allow.")
@@ -541,7 +543,62 @@ public class MainActivity extends AppCompatActivity {
             e.putString("token", token).putString("userId", String.valueOf(userId))
              .putString("brand", brand == null || brand.isEmpty() ? "APJ CRM" : brand)
              .putString("settings", settings == null ? "{}" : settings).apply();
-            if (!AlertService.running) runOnUiThread(() -> AlertService.start(MainActivity.this));
+            runOnUiThread(() -> {
+                if (!AlertService.running) AlertService.start(MainActivity.this);
+                AlertService.schedule(MainActivity.this, AlertService.POLL_MS);
+                askBatteryExemption();
+            });
+        }
+
+        /** For the "Phone alerts" card on the Notifications page. */
+        @JavascriptInterface
+        public String alertStatus() {
+            try {
+                android.content.SharedPreferences p = AlertNotifier.prefs(MainActivity.this);
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+                boolean battery = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName()));
+                return new org.json.JSONObject()
+                        .put("signedIn", AlertService.hasSession(MainActivity.this))
+                        .put("service", AlertService.running)
+                        .put("notifications", NotificationManagerCompat.from(MainActivity.this).areNotificationsEnabled())
+                        .put("background", battery)
+                        .put("exactAlarms", AlertService.exactAllowed(MainActivity.this))
+                        .put("lastCheck", p.getLong("lastPollAt", 0))
+                        .put("lastResult", p.getString("lastResult", ""))
+                        .put("lastError", p.getString("lastError", ""))
+                        .put("maker", Build.MANUFACTURER)
+                        .put("android", Build.VERSION.RELEASE)
+                        .put("app", BuildConfig.VERSION_NAME).toString();
+            } catch (Exception e) { return "{}"; }
+        }
+
+        /** "Send test alert": a sample notification in a few seconds (lock the phone to see it arrive). */
+        @JavascriptInterface
+        public void testAlert(int seconds) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl))) return;
+            AlertService.scheduleTest(MainActivity.this, Math.max(3, Math.min(120, seconds)) * 1000L);
+        }
+
+        /** Opens the phone setting that lets the app run in the background / its notification / app settings. */
+        @JavascriptInterface
+        public void openSettings(String which) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl))) return;
+            runOnUiThread(() -> {
+                Intent i;
+                if ("background".equals(which) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    i = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()));
+                } else if ("notifications".equals(which) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    i = new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName());
+                } else if ("alarms".equals(which) && Build.VERSION.SDK_INT >= 31) {
+                    i = new Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName()));
+                } else {
+                    i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()));
+                }
+                try { startActivity(i); }
+                catch (Exception e) {
+                    try { startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) { }
+                }
+            });
         }
 
         /** Signed out: stop background alerts and remove this person's notifications. */

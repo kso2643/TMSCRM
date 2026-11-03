@@ -358,6 +358,8 @@ class UserController
     public function export(): void
     {
         $auth = authenticate(); require_admin($auth);
+        // PDF / CSV / the styled Excel come from the shared report writer (Reports page, "⬇ Report")
+        if (in_array(strtolower((string) qp('format', '')), ['pdf', 'csv', 'excel'], true)) { (new ExportController())->exportUsers(); return; }
         $s = db()->query('SELECT name,email,role,department,phone,isActive,createdAt FROM `User` ORDER BY name');
         $rows = $s->fetchAll();
         $w = new XlsxWriter('Users');

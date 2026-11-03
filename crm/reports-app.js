@@ -26,12 +26,17 @@
       ['Product report', 'Product master list with prices and HSN codes', '/products/export', 'Package', '#0d9488', 'products'],
       ['Orders report', 'Orders with items supplied, proforma, procurement and delivery status', '/reports/orders', 'ClipboardList', '#0891b2', 'orders'],
       ['Trials report', 'Trial requests, recommendations, best tool and savings per year', '/reports/trials', 'FlaskConical', '#7c3aed', 'trials'],
-      ['Price requests report', 'Price asked vs list vs approved, who decided and when', '/reports/price-requests', 'Wallet', '#b45309', 'price-requests']
+      ['Price requests report', 'Price asked vs list vs approved, who decided and when', '/reports/price-requests', 'Wallet', '#b45309', 'price-requests'],
+      ['Order invoices report', 'Invoices supplied against each order — number, date, amount, customer, file', '/reports/order-invoices', 'FileText', '#0e7490', 'order-invoices'],
+      ['CPR report', 'Opportunity register: customer, potential, expected sale, status, last review', '/reports/cpr', 'Target', '#be123c', 'cpr'],
+      ['Projects & Tooled-up report', 'Project, tooled-up and accessories requests with items, value and approval', '/reports/projects', 'Briefcase', '#4d7c0f', 'projects'],
+      ['Sales report (entries)', 'Manual sales entries by engineer: order and billed value', '/reports/sales-entries', 'TrendingUp', '#15803d', 'sales-entries']
     ]],
     ['Stock & vendors', [
       ['Stock report', 'Every item: in hand, local, state, total, on open orders, free; movements and brand-wise value', '/reports/stock', 'Boxes', '#0d9488', 'stock'],
       ['Stock inward report', 'Goods received from suppliers — invoice, place, item, qty, rate', '/reports/inwards', 'Truck', '#7c2d12', 'stock-inward'],
-      ['Vendor price lists', 'All vendors’ products with price, discount, net price and stock', '/reports/vendors', 'Truck', '#9a3412', 'vendor-price-lists']
+      ['Vendor price lists', 'All vendors’ products with price, discount, net price and stock', '/reports/vendors', 'Truck', '#9a3412', 'vendor-price-lists'],
+      ['Vendor purchase orders', 'POs to suppliers: vendor, brand, items, totals and status', '/reports/purchase-orders', 'ClipboardList', '#7c2d12', 'purchase-orders']
     ]],
     ['Operations', [
       ['Attendance report', 'Employee attendance and working hours summary', '/attendance/export', 'Clock', '#16a34a', 'attendance'],
@@ -40,7 +45,16 @@
       ['Fuel expense report', 'Meter readings, kilometres and fuel claims', '/fuel-expense/export', 'Fuel', '#ea580c', 'fuel'],
       ['Leave report', 'Leave requests history and approval status', '/leaves/export', 'CalendarOff', '#db2777', 'leave'],
       ['Appointments report', 'Scheduled customer visits by engineer and status', '/reports/appointments', 'CalendarCheck', '#4338ca', 'appointments'],
-      ['Tasks report', 'Assigned tasks with time worked, due dates and completion notes', '/reports/tasks', 'ListChecks', '#1d4ed8', 'tasks']
+      ['Tasks report', 'Assigned tasks with time worked, due dates and completion notes', '/reports/tasks', 'ListChecks', '#1d4ed8', 'tasks'],
+      ['CEO Desk report', 'Messages, tasks, prices and quotations sent on the CEO Desk, with status', '/reports/md-desk', 'Briefcase', '#1e3a5f', 'ceo-desk'],
+      ['Internal meeting report', 'Internal meetings: attendees, what was discussed and next actions', '/reports/internal-meetings', 'ClipboardList', '#0369a1', 'internal-meetings'],
+      ['MOM report', 'Minutes of customer meetings: attendees, points, actions, next meeting', '/reports/mom', 'FileText', '#6d28d9', 'mom'],
+      ['Petty cash report', 'Cash in and spent with category, bills and running balance', '/reports/petty-cash', 'BadgeIndianRupee', '#b91c1c', 'petty-cash', ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTS']]
+    ]],
+    ['Accounts & HR', [
+      ['Accounts report', 'Invoices, receipts and vendor bills with GST, due dates and Tally status', '/reports/accounts', 'Calculator', '#0f766e', 'accounts', ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTS']],
+      ['Payroll report', 'Monthly salary per employee: days, gross, deductions, net, paid on', '/reports/payroll', 'Wallet', '#9333ea', 'payroll', ['SUPER_ADMIN', 'ADMIN']],
+      ['HR employee report', 'Every employee: code, role, contacts, joining date, emergency / family numbers', '/reports/hr', 'Contact', '#c2410c', 'hr-employees', ['SUPER_ADMIN', 'ADMIN']]
     ]],
     ['Team & audit', [
       ['Team report', 'All team members with roles and status', '/users/export', 'Users', '#9333ea', 'team'],
@@ -110,7 +124,7 @@
       '.rp-msg{font-size:.75rem}.rp-ok{color:#15803d}.rp-err{color:#dc2626}',
       '.rp-sec{font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b;margin:1.2rem 0 .6rem}',
       '.rp-filters{display:grid;gap:.75rem;grid-template-columns:repeat(2,minmax(0,1fr));align-items:end}',
-      '@media(min-width:900px){.rp-filters{grid-template-columns:200px 200px 180px 1fr}}',
+      '@media(min-width:900px){.rp-filters{grid-template-columns:200px 200px 1fr}}',
       '.rp-in{width:100%;border:1px solid #cbd5e1;border-radius:.5rem;padding:.5rem .7rem;font-size:.875rem;background:#fff;color:#0f172a}',
       '.dark .rp-in{background:#0f172a;border-color:#334155;color:#f1f5f9}',
       '.rp-lab{display:block;font-size:.78rem;font-weight:500;color:#475569;margin-bottom:.3rem}',
@@ -129,7 +143,6 @@
     injectCss();
     var from = el('input', { type: 'date', class: 'rp-in', 'aria-label': 'From date' });
     var to = el('input', { type: 'date', class: 'rp-in', 'aria-label': 'To date' });
-    var fmt = el('select', { class: 'rp-in', 'aria-label': 'Format' }, [['excel', 'Excel — detailed (.xlsx)'], ['csv', 'CSV'], ['pdf', 'PDF']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
     function preset(label, f) {
       return el('button', { class: 'rp-chip', type: 'button', text: label, onclick: function () { var r = f(new Date()); from.value = r[0]; to.value = r[1]; } });
     }
@@ -143,7 +156,6 @@
         el('div', { class: 'rp-filters' }, [
           el('label', {}, [el('span', { class: 'rp-lab', text: 'From date' }), from]),
           el('label', {}, [el('span', { class: 'rp-lab', text: 'To date' }), to]),
-          el('label', {}, [el('span', { class: 'rp-lab', text: 'Format' }), fmt]),
           el('div', { class: 'flex gap-2 flex-wrap' }, [
             preset('Today', function (d) { return [iso(d), iso(d)]; }),
             preset('This month', function (d) { return [iso(new Date(d.getFullYear(), d.getMonth(), 1)), iso(d)]; }),
@@ -158,25 +170,33 @@
     SECTIONS.forEach(function (sec) {
       root.appendChild(el('p', { class: 'rp-sec', text: sec[0] }));
       var grid = el('div', { class: 'rp-grid' });
-      sec[1].forEach(function (r) {
+      var shown = sec[1].filter(function (r) { return !r[6] || r[6].indexOf(role()) !== -1; });
+      if (!shown.length) { root.removeChild(root.lastChild); return; }
+      shown.forEach(function (r) {
         var msg = el('p', { class: 'rp-msg' });
-        var btn = el('button', { class: 'rp-btn', type: 'button' }, [icon('Download', 'w-4 h-4'), 'Download']);
-        btn.addEventListener('click', function () {
-          var q = ['format=' + fmt.value];
+        function get(fmtv, btn) {
+          var q = ['format=' + fmtv];
           if (from.value) q.push('from=' + from.value);
           if (to.value) q.push('to=' + to.value);
           btn.setAttribute('disabled', ''); msg.className = 'rp-msg'; msg.textContent = 'Preparing…';
-          download(r[2] + '?' + q.join('&'), r[5] + '-' + iso(new Date()) + '.' + (fmt.value === 'excel' ? 'xlsx' : fmt.value)).then(function (name) {
+          download(r[2] + '?' + q.join('&'), r[5] + '-' + iso(new Date()) + '.' + (fmtv === 'excel' ? 'xlsx' : fmtv)).then(function (name) {
             msg.className = 'rp-msg rp-ok'; msg.textContent = 'Downloaded ' + name;
           }).catch(function (e) {
             msg.className = 'rp-msg rp-err'; msg.textContent = e.message;
           }).then(function () { btn.removeAttribute('disabled'); });
-        });
+        }
+        var xl = el('button', { class: 'rp-btn', type: 'button', 'data-fmt': 'excel' }, [icon('Download', 'w-4 h-4'), 'Excel']);
+        var pdf = el('button', { class: 'rp-btn', type: 'button', 'data-fmt': 'pdf' }, [icon('Download', 'w-4 h-4'), 'PDF']);
+        var csv = el('button', { class: 'text-xs text-muted underline', type: 'button', 'data-fmt': 'csv', text: 'CSV' });
+        xl.addEventListener('click', function () { get('excel', xl); });
+        pdf.addEventListener('click', function () { get('pdf', pdf); });
+        csv.addEventListener('click', function () { get('csv', csv); });
         grid.appendChild(el('div', { class: 'card rp-card', 'data-report': r[5] }, [
           el('div', { class: 'rp-ic', style: '--c:' + r[4] }, [icon(r[3])]),
           el('p', { class: 'rp-t', text: r[0] }),
           el('p', { class: 'rp-d', text: r[1] }),
-          btn, msg
+          el('div', { style: 'display:flex;gap:.4rem' }, [xl, pdf]),
+          el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:.4rem' }, [msg, csv])
         ]));
       });
       root.appendChild(grid);

@@ -66,13 +66,56 @@
     var brandBox = admin ? el('div', { class: 'card p-5 mb-5', id: 'ns-brand' }) : null;
     var notifyBox = admin ? el('div', { class: 'card overflow-hidden mb-5', id: 'ns-notify' }) : null;
     var mineBox = el('div', { class: 'card overflow-hidden mb-5', id: 'ns-mine' });
-    [brandBox, notifyBox, mineBox].forEach(function (b) { if (b) root.appendChild(b); });
+    var phoneBox = nativeApp() ? el('div', { class: 'card p-5 mb-5', id: 'ns-phone' }) : null;
+    [phoneBox, brandBox, notifyBox, mineBox].forEach(function (b) { if (b) root.appendChild(b); });
+    if (phoneBox) drawPhone(phoneBox);
     mineBox.appendChild(el('p', { class: 'px-5 py-4 text-sm text-muted', text: 'Loading…' }));
     api('GET', '/app-settings').then(function (j) {
       st.n = j.data.notifications || {}; st.b = j.data.branding || {}; st.mine = j.data.mine || {};
       if (admin) { drawBrand(brandBox); drawNotify(notifyBox); }
       drawMine(mineBox);
     }).catch(function (e) { mineBox.innerHTML = ''; mineBox.appendChild(el('p', { class: 'px-5 py-4 text-sm text-red-600', text: e.message })); });
+  }
+
+  // ── Phone alerts (Android app only): is everything set for alerts while the app is closed? ──
+  function nativeApp() { try { return !!(window.CRMNative && window.CRMNative.alertStatus); } catch (e) { return false; } }
+  function drawPhone(box) {
+    var st0 = {};
+    try { st0 = JSON.parse(window.CRMNative.alertStatus() || '{}'); } catch (e) {}
+    box.innerHTML = '';
+    function ago(ms) {
+      if (!ms) return 'not yet';
+      var s = Math.round((Date.now() - ms) / 1000);
+      return s < 90 ? s + ' seconds ago' : s < 5400 ? Math.round(s / 60) + ' minutes ago' : new Date(ms).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+    }
+    function row(ok, label, fixText, fix) {
+      return el('div', { class: 'flex items-center justify-between gap-3 py-2 border-b border-slate-100 dark:border-slate-800', 'data-ns-check': label }, [
+        el('span', { class: 'text-sm' }, [el('span', { text: ok ? '✅ ' : '⚠️ ' }), label]),
+        ok || !fix ? el('span', { class: 'text-xs text-muted', text: ok ? 'OK' : '' }) : el('button', { class: 'btn-primary btn-sm', type: 'button', text: fixText, onclick: fix })
+      ]);
+    }
+    function open(which) { return function () { try { window.CRMNative.openSettings(which); } catch (e) {} setTimeout(function () { drawPhone(box); }, 4000); }; }
+    var maker = String(st0.maker || '').toLowerCase();
+    var oem = /xiaomi|redmi|poco|vivo|oppo|realme|oneplus|huawei|honor|iqoo|tecno|infinix/.test(maker);
+    box.appendChild(el('h2', { class: 'text-base font-semibold mb-1', text: '📱 Phone alerts' }));
+    box.appendChild(el('p', { class: 'text-xs text-muted mb-3', text: 'Alerts reach this phone like WhatsApp messages, also when the app is closed. Fix anything marked ⚠️, then press “Send test alert” and lock the phone.' }));
+    box.appendChild(row(st0.signedIn, 'Signed in for alerts', '', null));
+    box.appendChild(row(st0.notifications, 'Notifications allowed', 'Allow', open('notifications')));
+    box.appendChild(row(st0.background, 'Allowed to run in the background (battery)', 'Allow', open('background')));
+    box.appendChild(row(st0.exactAlarms !== false, 'Alarms & reminders allowed', 'Allow', open('alarms')));
+    box.appendChild(row(st0.lastResult === 'ok', 'Last check ' + ago(st0.lastCheck) + (st0.lastError ? ' — ' + st0.lastError : ''), '', null));
+    var msg = el('span', { class: 'text-sm', id: 'ns-test-msg' });
+    box.appendChild(el('div', { class: 'flex flex-wrap items-center gap-2 mt-4' }, [
+      el('button', { class: 'btn-primary', type: 'button', id: 'ns-test', text: '🔔 Send test alert (in 15 s)', onclick: function () {
+        try { window.CRMNative.testAlert(15); msg.textContent = 'Lock the phone now — the test alert arrives in 15 seconds.'; } catch (e) { msg.textContent = e.message; }
+      } }),
+      el('button', { class: 'btn-secondary', type: 'button', text: 'Refresh', onclick: function () { drawPhone(box); } }),
+      msg
+    ]));
+    if (oem) box.appendChild(el('p', { class: 'rp-warn text-xs mt-3', style: 'background:#fffbeb;color:#92400e;border-radius:.5rem;padding:.55rem .7rem',
+      text: 'On ' + (st0.maker || 'this phone') + ' also turn on Autostart: Settings → Apps → APJ CRM → Autostart (and set Battery saver to “No restrictions”). Otherwise the phone may close the app and stop alerts.' }));
+    if (oem) box.appendChild(el('button', { class: 'btn-secondary btn-sm mt-2', type: 'button', text: 'Open app settings', onclick: open('app') }));
+    box.appendChild(el('p', { class: 'text-xs text-muted mt-3', text: 'App ' + (st0.app || '') + ' · Android ' + (st0.android || '') }));
   }
 
   // ── my own sounds (everyone) ──────────────────────────────────────────

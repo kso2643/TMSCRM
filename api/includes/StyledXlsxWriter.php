@@ -197,7 +197,7 @@ class StyledXlsxWriter
             if ($this->sheets[$i]['filter']) {
                 [$a, $b] = explode(':', $this->sheets[$i]['filter']);
                 $abs = fn($r) => preg_replace('/^([A-Z]+)(\d+)$/', '\$$1\$$2', $r);
-                $defined .= '<definedName name="_xlnm._FilterDatabase" localSheetId="' . $i . '" hidden="1">\'' . str_replace("'", "''", $this->sheets[$i]['name']) . '\'!' . $abs($a) . ':' . $abs($b) . '</definedName>';
+                $defined .= '<definedName name="_xlnm._FilterDatabase" localSheetId="' . $i . '" hidden="1">\'' . self::esc(str_replace("'", "''", $this->sheets[$i]['name'])) . '\'!' . $abs($a) . ':' . $abs($b) . '</definedName>';
             }
         }
         $ct .= '</Types>';

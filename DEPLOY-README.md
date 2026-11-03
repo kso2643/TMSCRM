@@ -1,3 +1,34 @@
+# Update — 3 Nov (a): Phone alerts that really arrive, order "Ordered" status, paste screenshots, reports for every page (Android app 1.0.7)
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Install the new APK** (GitHub → Releases → `crm-apps`) on every phone.
+
+1. **Phone alerts when the app is closed (Android 1.0.7)**
+   - The app now wakes the phone for every alert check with Android's alarm system. The old timer stopped as soon as the screen went off, so alerts only came when the app was opened.
+   - Checks keep running after Android closes the app, and start again after a restart.
+   - **Notifications page → 📱 Phone alerts** (in the app only) shows whether everything is set:
+     - notifications allowed
+     - running in the background allowed (battery)
+     - alarms allowed
+     - when the last check ran
+   - Each missing item has an **Allow** button. **Send test alert** sends a sample in 15 seconds: lock the phone and see it arrive.
+   - On Xiaomi / Vivo / Oppo / Realme it also explains how to turn on **Autostart**.
+   - If notifications or background running are off, the app shows a "Fix now" bar once a day.
+2. **Orders: "Ordered" status**
+   - Marking lines **Ordered** in the order pop-up now updates the order itself. Once every line is ordered, the pop-up and the list show **Ordered**; if any line is taken back, it shows **Not ordered** again.
+   - The **Procurement** column in the list is now a dropdown for admins / managers. Setting the whole order Ordered / Not ordered also sets every line.
+3. **Paste screenshots with Ctrl+V on every page**
+   - Copy a screenshot (Print Screen, Win+Shift+S, Snipping Tool) and press **Ctrl+V**. It goes into the upload box you are working in — for example the invoice in the order pop-up, petty cash bills, CEO Desk attachments, documents — named `screenshot-date-time.png`, exactly as if you had chosen the file.
+   - Upload boxes that only take Excel / PDF are left alone, and the attendance selfie still needs the camera.
+4. **Reports for every page, in Excel and PDF**
+   - **⬇ Report** in the top bar of each page: this month or all time, Excel or PDF.
+   - The Reports page has separate **Excel** and **PDF** buttons on every card.
+   - New reports: Petty cash, Internal meetings, MOM, CEO Desk, CPR, Projects & Tooled-up, Vendor purchase orders, Accounts, Payroll, HR employees, Sales report entries, Order invoices.
+   - Who sees what: Petty cash / Accounts only for Super Admin, Admin and Accounts; Payroll / HR only for Super Admin and Admin.
+   - PDFs: each row stays on one line, and column widths follow the content.
+   - **Fixed:** the Attendance Excel report could open as "damaged" in Excel. The Team report now gives a real PDF.
+   - **Full backup:** checked by restoring onto a fresh server — every table, every value and every uploaded file came back identical, and importing the same backup twice adds no duplicates.
+   - If a backup zip is bigger than the hosting upload limit, raise `upload_max_filesize` / `post_max_size` in the hosting PHP settings.
+
 # Update — 29 Oct (c): WhatsApp-style phone notifications (Android app 1.0.6)
 
 **Upload:** `crm/` (only `crm-global.js` changed, plus the version stamps), then press **Ctrl+Shift+R** once. **Install the new APK** on each phone (GitHub → Releases → `crm-apps`).

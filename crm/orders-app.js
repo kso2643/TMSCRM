@@ -373,6 +373,19 @@
       return s2;
     }
 
+    // Admins mark the whole order ordered with the supplier here (every line follows);
+    // marking single lines in the pop-up rolls up to "Ordered" once all lines are ordered.
+    function procurementCell(o) {
+      if (!isAdmin()) {
+        return el('span', { class: 'badge ' + PROCUREMENT_BADGE[o.procurementStatus], text: labelOf(PROCUREMENT_STATUSES, o.procurementStatus) });
+      }
+      var s2 = el('select', { class: 'ox-sel ' + (o.procurementStatus === 'ORDERED' ? 'ox-good' : 'ox-idle'), 'aria-label': 'Procurement status', 'data-order-proc': o.id, onclick: stop },
+        PROCUREMENT_STATUSES.map(function (p) { return el('option', { value: p[0], text: p[1] }); }));
+      s2.value = o.procurementStatus || 'NOT_ORDERED';
+      s2.addEventListener('change', function () { patchOrder(o.id, 'procurement', { procurementStatus: s2.value }).catch(function () {}); });
+      return s2;
+    }
+
     function deliveryCell(o) {
       if (!canEditOrder(o)) {
         return el('span', { class: 'badge ' + STATUS_BADGE[o.deliveryStatus], text: labelOf(DELIVERY_STATUSES, o.deliveryStatus) });
@@ -416,9 +429,7 @@
       } else {
         all.forEach(function (o) {
           var open = !!expanded[o.id];
-          var procCell = el('td', { class: 'px-3 py-3 ox-nowrap' }, [
-            el('span', { class: 'badge ' + PROCUREMENT_BADGE[o.procurementStatus], text: labelOf(PROCUREMENT_STATUSES, o.procurementStatus) })
-          ]);
+          var procCell = el('td', { class: 'px-3 py-3 ox-nowrap' }, [procurementCell(o)]);
           var supplied = o.itemCount ? (o.suppliedCount || 0) + ' / ' + o.itemCount + ' supplied' : '—';
           var tr = el('tr', { class: 'table-row cursor-pointer' + (open ? ' ox-open' : ''), 'aria-expanded': open ? 'true' : 'false' }, [
             el('td', { class: 'ox-pl py-3' }, [el('span', { class: 'ox-caret', text: '▸' })]),
