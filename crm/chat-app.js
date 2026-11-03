@@ -69,7 +69,7 @@
     users.forEach(function (u) {
       listBox.appendChild(el('button', { class: 'ch-u' + (active && active.id === u.id ? ' on' : ''), 'data-user': u.id, onclick: function () { openThread(u); } }, [
         el('span', { class: 'ch-av', text: (u.name || '?').charAt(0).toUpperCase() }),
-        el('span', { class: 't' }, [el('b', { text: u.name }), el('small', { text: u.last ? (u.last.mine ? 'You: ' : '') + u.last.body : roleLabel(u.role) + (u.department ? ' · ' + u.department : '') })]),
+        el('span', { class: 't' }, [el('b', { text: u.name }), el('small', { text: u.last ? (u.last.mine ? 'You: ' : '') + String(u.last.body).replace(/📷?\s*https?:\/\/\S+\/api\/pasted-images\/\S+/g, '📷 Photo') : roleLabel(u.role) + (u.department ? ' · ' + u.department : '') })]),
         u.unread ? el('span', { class: 'ch-badge', text: String(u.unread) }) : null
       ]));
     });

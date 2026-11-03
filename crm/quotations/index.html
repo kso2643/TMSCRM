@@ -1760,7 +1760,7 @@ body.theme-apj { background: #0a1628; }
   color: var(--muted, #64748b);
 }
 </style>
-<script src="/fuel-expense-app.js?v=20261103a" defer></script><script src="/attendance-all-app.js?v=20261103a" defer></script><script src="/appointments-reminder-app.js?v=20261103a" defer></script><script src="/crm-global.js?v=20261103a" defer></script><script src="/product-suggest.js?v=20261103a" defer></script><script src="/quote-notes.js?v=20261103a" defer></script><link rel="stylesheet" href="/motion.css?v=20261103a"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261103b" defer></script><script src="/attendance-all-app.js?v=20261103b" defer></script><script src="/appointments-reminder-app.js?v=20261103b" defer></script><script src="/crm-global.js?v=20261103b" defer></script><script src="/product-suggest.js?v=20261103b" defer></script><script src="/quote-notes.js?v=20261103b" defer></script><link rel="stylesheet" href="/motion.css?v=20261103b"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 <script>
 const API_BASE = 'https://api.apjtech.in/api';
@@ -2301,13 +2301,14 @@ function quotationServerToLocal(q) {
             };
 
             try {
-                if (editingQuotationId) {
-                    await apiFetch("/quotations/" + editingQuotationId, { method: "PUT", body: JSON.stringify(payload) });
-                } else {
-                    await apiFetch("/quotations", { method: "POST", body: JSON.stringify(payload) });
-                }
+                const saved = editingQuotationId
+                    ? await apiFetch("/quotations/" + editingQuotationId, { method: "PUT", body: JSON.stringify(payload) })
+                    : await apiFetch("/quotations", { method: "POST", body: JSON.stringify(payload) });
+                // the number the server gave (with the engineer's initials, and -R1/-R2 when prices were revised)
+                const qn = saved && saved.data && saved.data.quotation && saved.data.quotation.quotationNumber;
+                if (qn) { gid("meta-no").value = qn; try { setText("q-meta-no", qn); } catch (e) {} }
                 editingQuotationId = null;
-                alert("Quotation Saved Successfully ✅");
+                alert("Quotation Saved Successfully ✅" + (qn ? "\nQuotation No. " + qn : ""));
                 tms_loadCompletedQuotations();
             } catch (e) {
                 alert("Could not save: " + e.message);
@@ -4320,13 +4321,14 @@ async function apj_saveQuotation() {
   };
 
   try {
-    if (editingQuotationId) {
-      await apiFetch('/quotations/' + editingQuotationId, { method: 'PUT', body: JSON.stringify(payload) });
-    } else {
-      await apiFetch('/quotations', { method: 'POST', body: JSON.stringify(payload) });
-    }
+    const saved = editingQuotationId
+      ? await apiFetch('/quotations/' + editingQuotationId, { method: 'PUT', body: JSON.stringify(payload) })
+      : await apiFetch('/quotations', { method: 'POST', body: JSON.stringify(payload) });
+    // the number the server gave (with the engineer's initials, and -R1/-R2 when prices were revised)
+    const qn = saved && saved.data && saved.data.quotation && saved.data.quotation.quotationNumber;
+    if (qn) { const f = gid('meta-no'); if (f) { f.value = qn; f.dispatchEvent(new Event('input', { bubbles: true })); } }
     editingQuotationId = null;
-    showToast('Quotation saved!', '💾');
+    showToast('Quotation saved!' + (qn ? ' No. ' + qn : ''), '💾');
   } catch (e) {
     showToast('Could not save: ' + e.message, '⚠️');
   }

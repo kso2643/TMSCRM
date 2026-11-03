@@ -40,6 +40,73 @@
     sc.src = '/crm-brand.js' + (v ? '?v=' + v[1] : '');
     (document.head || document.documentElement).appendChild(sc);
   })();
+  // ── Downloads inside the Android app ───────────────────────────────
+  // The app can't save "blob:" files the normal way. Every way a page makes a file — a link with
+  // "download", jsPDF / FileSaver saves (they click a link that is never put on the page), window.open
+  // of a PDF, a link whose blob is revoked straight after the click — is caught here and handed to
+  // the app (CRMNative.saveFile), which puts it in Downloads / APJ CRM and opens it.
+  // Lives in the website (not only in the app) so it works with every app version and can be fixed
+  // without reinstalling. Setting __crmNative stops the app's older built-in copy (no double saves).
+  (function appDownloads() {
+    var N = window.CRMNative;
+    if (!N || !N.saveFile) return;
+    window.__crmNative = 1;
+    var keep = {};   // blob URLs the page revokes too early — kept until the save has read them
+    var origRevoke = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = function (u) { if (keep[u]) return; return origRevoke(u); };
+    var recent = {};
+    function guessName(name, type) {
+      name = String(name || '').trim() || 'download';
+      if (!/\.[a-z0-9]{2,5}$/i.test(name)) {
+        var ext = /pdf/.test(type) ? '.pdf' : /sheet|excel/.test(type) ? '.xlsx' : /png/.test(type) ? '.png' : /jpe?g/.test(type) ? '.jpg' : /zip/.test(type) ? '.zip' : /csv/.test(type) ? '.csv' : '';
+        name += ext;
+      }
+      return name;
+    }
+    function save(href, name) {
+      var k = href + '|' + name, now = Date.now();
+      if (recent[k] && now - recent[k] < 2500) return;   // one tap = one file
+      recent[k] = now;
+      keep[href] = 1;
+      fetch(href).then(function (r) { return r.blob(); }).then(function (b) {
+        var fr = new FileReader();
+        fr.onload = function () { try { N.saveFile(String(fr.result), guessName(name, b.type), b.type || ''); } catch (e) { alert('Could not save the file: ' + e.message); } };
+        fr.readAsDataURL(b);
+      }).catch(function (e) { alert('Could not save the file: ' + e.message); })
+        .then(function () { setTimeout(function () { delete keep[href]; origRevoke(href); }, 60000); });
+    }
+    function fileHref(h) { return /^(blob|data):/.test(String(h || '')); }
+    window.CRMSaveFile = function (blob, name) { save(URL.createObjectURL(blob), name); };
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a || !fileHref(a.getAttribute('href'))) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      save(a.href, a.getAttribute('download') || a.download);
+    }, true);
+    var aClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (fileHref(this.href)) { save(this.href, this.getAttribute('download') || this.download); return; }
+      return aClick.call(this);
+    };
+    var aDispatch = HTMLAnchorElement.prototype.dispatchEvent;   // FileSaver.js / jsPDF doc.save()
+    HTMLAnchorElement.prototype.dispatchEvent = function (ev) {
+      if (ev && ev.type === 'click' && fileHref(this.href) && !this.isConnected) { save(this.href, this.getAttribute('download') || this.download); return true; }
+      return aDispatch.call(this, ev);
+    };
+    var wOpen = window.open;
+    window.open = function (u) {
+      var s0 = String(u || '');
+      if (fileHref(s0)) { save(s0, 'document'); return null; }
+      if (s0 === '' || s0 === 'about:blank') {   // "open a window now, put the file in it later"
+        var fake = { closed: false, close: function () { fake.closed = true; }, focus: function () {}, document: { write: function () {}, close: function () {} } };
+        var loc = { set href(v) { if (fileHref(v)) save(v, 'document'); }, assign: function (v) { if (fileHref(v)) save(v, 'document'); }, replace: function (v) { if (fileHref(v)) save(v, 'document'); } };
+        Object.defineProperty(fake, 'location', { get: function () { return loc; }, set: function (v) { if (fileHref(v)) save(String(v), 'document'); } });
+        return fake;
+      }
+      return wOpen.apply(window, arguments);
+    };
+  })();
+
   // Android app: signed out → stop the background alerts on the phone.
   try { if (window.CRMNative && window.CRMNative.clearSession && !localStorage.getItem('crm_token')) window.CRMNative.clearSession(); } catch (e) {}
   if (/^\/(login|trial-sheet)(\/|$)/.test(path) || /^\/404/.test(path)) return;
@@ -1228,10 +1295,13 @@
     var img = null;
     Array.prototype.some.call(cd.items || [], function (it) { if (it.kind === 'file' && /^image\//.test(it.type)) { img = it.getAsFile(); return true; } return false; });
     if (!img) return;   // ordinary text paste
-    var inp = pasteTarget();
+    // Typing in a box: the upload box that belongs to it (same form / pop-up) gets the picture;
+    // with no upload box there (chat, notes, replies…) the picture goes into the text itself.
+    var field = typingField(document.activeElement);
+    var inp = field ? nearbyFileInput(field) : pasteTarget();
     if (!inp) {
-      var tag = (document.activeElement && document.activeElement.tagName) || '';
-      if (tag !== 'TEXTAREA' && tag !== 'INPUT' && !(document.activeElement && document.activeElement.isContentEditable)) pasteNote('No place to attach a picture on this page.', true);
+      if (field) { e.preventDefault(); pasteIntoText(field, img); }
+      else pasteNote('Click in a text box or an upload box, then press Ctrl+V.', true);
       return;
     }
     e.preventDefault();
@@ -1252,6 +1322,110 @@
     if (vis && vis.animate) try { vis.animate([{ boxShadow: '0 0 0 3px #22c55e' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1200 }); } catch (x) {}
   });
   window.CRMPaste = { target: pasteTarget };
+
+  function typingField(el) {
+    if (!el || el.disabled || el.readOnly) return null;
+    if (el.isContentEditable || el.tagName === 'TEXTAREA') return el;
+    if (el.tagName === 'INPUT' && /^(text|search|email|url|tel)?$/i.test(el.getAttribute('type') || '')) return el;
+    return null;
+  }
+  // The upload box of the form / pop-up / card you are typing in — never one elsewhere on the page.
+  function nearbyFileInput(field) {
+    var n = field;
+    for (var k = 0; k < 7 && n && n.parentElement && n !== document.body; k++) {
+      n = n.parentElement;
+      var list = Array.prototype.filter.call(n.querySelectorAll('input[type=file]'), function (inp) { return takesImages(inp) && onScreen(inp.parentElement || inp); });
+      if (list.length) { list.sort(function (x, y) { return depthShared(y, field) - depthShared(x, field); }); return list[0]; }
+      if (n.matches && n.matches('form, [role=dialog], [aria-modal=true], [data-order-view], .modal, .drawer, .drawer-backdrop, .card, main')) break;
+    }
+    return null;
+  }
+  function pasteIntoText(field, img) {
+    var start = field.selectionStart, end = field.selectionEnd;
+    pasteNote('Adding the screenshot…');
+    var fd = new FormData();
+    var ext = (img.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    fd.append('file', img, 'screenshot.' + ext);
+    fetch(API + '/api/pasted-images', { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || '') }, body: fd })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok || !j.success) throw new Error(j.message || 'Could not add the screenshot'); return j; }); })
+      .then(function (j) {
+        var url = API + j.data.url;
+        field.focus();
+        if (typeof start === 'number' && field.setSelectionRange) try { field.setSelectionRange(start, end); } catch (x) {}
+        var before = field.isContentEditable ? '' : String(field.value || '').slice(0, typeof start === 'number' ? start : undefined);
+        var text = (before && !/\s$/.test(before) ? ' ' : '') + '📷 ' + url + ' ';
+        var ok = false;
+        try { ok = document.execCommand('insertText', false, text); } catch (x) {}
+        if (!ok && !field.isContentEditable) {   // fallback that React-built boxes also notice
+          var v = String(field.value || ''), a = typeof start === 'number' ? start : v.length, b = typeof end === 'number' ? end : v.length;
+          var setter = Object.getOwnPropertyDescriptor(field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set;
+          setter.call(field, v.slice(0, a) + text + v.slice(b));
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        pasteNote('📋 Screenshot added to the text — it shows as a picture once saved / sent');
+      }).catch(function (er) { pasteNote(er.message, true); });
+  }
+
+  // Pasted-screenshot links show as the picture on every page (tap to see it big).
+  var PASTED_RE = /https?:\/\/[^\s"'<>]+\/api\/pasted-images\/[a-f0-9]{40}\.(?:png|jpg|webp|gif)/g;
+  function pastedPictures(root) {
+    if (!root || !root.querySelectorAll) return;
+    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: function (t) {
+      if (!t.nodeValue || t.nodeValue.indexOf('/api/pasted-images/') === -1) return NodeFilter.FILTER_SKIP;
+      var p = t.parentElement;
+      if (!p || p.closest('textarea, input, script, style, [contenteditable=""], [contenteditable=true], [data-pasted-pic]')) return NodeFilter.FILTER_SKIP;
+      return NodeFilter.FILTER_ACCEPT;
+    } });
+    var list = [], t;
+    while ((t = w.nextNode())) list.push(t);
+    var react = isReactPage();
+    list.forEach(function (node) {
+      var txt = node.nodeValue, frag = document.createDocumentFragment(), last = 0, m;
+      if (react) {   // React owns that text: leave it, put the pictures right after its element
+        var host = node.parentElement, urls = txt.match(PASTED_RE) || [];
+        if (!host || host.getAttribute('data-pasted-done') === txt) return;
+        host.setAttribute('data-pasted-done', txt);
+        urls.forEach(function (u) { host.parentNode.insertBefore(picLink(u), host.nextSibling); });
+        return;
+      }
+      PASTED_RE.lastIndex = 0;
+      while ((m = PASTED_RE.exec(txt))) {
+        frag.appendChild(document.createTextNode(txt.slice(last, m.index).replace(/📷\s*$/, '')));
+        frag.appendChild(picLink(m[0]));
+        last = m.index + m[0].length;
+      }
+      frag.appendChild(document.createTextNode(txt.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+  function picLink(u) {
+    var a = document.createElement('a');
+    a.href = u; a.setAttribute('data-pasted-pic', '1'); a.title = 'Screenshot — tap to enlarge';
+    a.style.cssText = 'display:inline-block;margin:4px 0;vertical-align:top';
+    var im = document.createElement('img');
+    im.src = u; im.alt = 'Screenshot'; im.loading = 'lazy';
+    im.style.cssText = 'max-width:min(240px,100%);max-height:180px;border-radius:8px;border:1px solid #e2e8f0;display:block;background:#fff';
+    a.appendChild(im);
+    a.addEventListener('click', function (ev) { ev.preventDefault(); ev.stopPropagation(); bigPicture(this.href); });
+    return a;
+  }
+  function bigPicture(src) {
+    var o = document.createElement('div');
+    o.setAttribute('data-pasted-pic', 'big');
+    o.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:rgba(15,23,42,.85);display:flex;align-items:center;justify-content:center;padding:16px;cursor:zoom-out';
+    var im = document.createElement('img'); im.src = src; im.style.cssText = 'max-width:100%;max-height:100%;border-radius:8px;background:#fff';
+    o.appendChild(im);
+    o.addEventListener('click', function () { o.remove(); });
+    document.addEventListener('keydown', function k(ev) { if (ev.key === 'Escape') { o.remove(); document.removeEventListener('keydown', k); } });
+    document.body.appendChild(o);
+  }
+  (function watchPictures() {
+    var pend = null;
+    function run() { pend = null; pastedPictures(document.body); }
+    if (document.body) run(); else document.addEventListener('DOMContentLoaded', run);
+    new MutationObserver(function () { if (!pend) pend = setTimeout(run, 250); }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  })();
+  window.CRMPaste.render = pastedPictures;
 
   // ── Location gate for sales engineers ──────────────────────────────
   // SALES / SALES_ENGINEER users must keep location on to use the CRM: a live
@@ -1534,7 +1708,7 @@
     document.addEventListener('click', function () { menu.style.display = 'none'; });
     wrap.appendChild(b); wrap.appendChild(menu);
     if (qs) qs.parentNode.insertBefore(wrap, qs);
-    else { wrap.style.margin = '0 0 0 .75rem'; wrap.style.verticalAlign = 'middle'; title.appendChild(wrap); }
+    else { wrap.style.cssText += ';margin:0 0 0 .75rem;vertical-align:middle;font-size:13px;font-weight:500;line-height:1.2;letter-spacing:0;text-transform:none'; b.style.fontSize = '13px'; title.appendChild(wrap); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reportButton); else reportButton();
   // React pages change page without reloading (and may redraw the top bar): keep the button right

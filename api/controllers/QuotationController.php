@@ -57,8 +57,9 @@ class QuotationController
      * suspenders, since update() lets a quotation's company be corrected after creation,
      * which could otherwise leave a stale higher number "orphaned" under the old brand.
      */
-    private function nextQuotationNumber(string $company): string
+    private function nextQuotationNumber(string $company, ?string $userId = null): string
     {
+        $who = '-' . user_initials($userId);   // APJ/2026/0012-JK — the engineer's initials
         $prefix = $company . '/' . date('Y') . '/';
         $s = db()->prepare('SELECT quotationNumber FROM `Quotation` WHERE company=? AND quotationNumber LIKE ?');
         $s->execute([$company, $prefix . '%']);
@@ -71,7 +72,7 @@ class QuotationController
         $exists = db()->prepare('SELECT 1 FROM `Quotation` WHERE quotationNumber=? LIMIT 1');
         do {
             $max++;
-            $candidate = $prefix . str_pad((string)$max, 4, '0', STR_PAD_LEFT);
+            $candidate = $prefix . str_pad((string)$max, 4, '0', STR_PAD_LEFT) . $who;
             $exists->execute([$candidate]);
         } while ($exists->fetch());
 
@@ -83,11 +84,11 @@ class QuotationController
      * after checking it isn't already taken by another quotation; an empty/omitted value
      * falls back to the existing {COMPANY}/{year}/{seq} auto-numbering untouched.
      */
-    private function resolveQuotationNumber(array $b, string $company): string
+    private function resolveQuotationNumber(array $b, string $company, ?string $userId = null): string
     {
         $manual = trim((string)($b['quotationNumber'] ?? ''));
         if ($manual === '') {
-            return $this->nextQuotationNumber($company);
+            return $this->nextQuotationNumber($company, $userId);
         }
         $chk = db()->prepare('SELECT 1 FROM `Quotation` WHERE quotationNumber=? LIMIT 1');
         $chk->execute([$manual]);
@@ -281,7 +282,7 @@ class QuotationController
         $cs->execute([$customerId]);
         if (!$cs->fetch()) sendError('Customer not found.', 404);
 
-        $quotationNumber = $this->resolveQuotationNumber($b, $company);
+        $quotationNumber = $this->resolveQuotationNumber($b, $company, $auth['id']);
         $lh = $this->letterheadFields($b);
         $id = gen_id();
         $now = now_sql();
@@ -344,7 +345,7 @@ class QuotationController
     // PUT /api/quotations/:id
     public function update(string $id): void
     {
-        authenticate();
+        $auth = authenticate();
         $b = request_body();
         $s = db()->prepare('SELECT * FROM `Quotation` WHERE id=? LIMIT 1');
         $s->execute([$id]);
@@ -352,6 +353,7 @@ class QuotationController
         if (!$existing) sendError('Quotation not found.', 404);
         if ($existing['approvalStatus'] === 'APPROVED')
             sendError('Cannot edit an approved quotation.', 400);
+        self::ensureRevision();
 
         $lh   = $this->letterheadFields($b);
         $company = $this->resolveCompany($b, $existing['company']);
@@ -392,6 +394,21 @@ class QuotationController
             $sets[]    = 'totalAmount=?';
             $params[]  = $totalAmount;
 
+            // Price revised (an item already on the quotation got a new price or discount):
+            // the number gets -R1, then -R2… (APJ/2026/0012-JK → APJ/2026/0012-JK-R1).
+            if ($this->pricesRevised($id, $calcedItems)) {
+                $rev = (int) ($existing['revision'] ?? 0) + 1;
+                $base = $existing['baseNumber'] ?: preg_replace('/-R\d+$/', '', (string) $existing['quotationNumber']);
+                $newNo = $base . '-R' . $rev;
+                $chk = db()->prepare('SELECT 1 FROM `Quotation` WHERE quotationNumber=? AND id<>? LIMIT 1');
+                $chk->execute([$newNo, $id]);
+                if (!$chk->fetch()) {
+                    array_push($sets, 'quotationNumber=?', 'baseNumber=?', 'revision=?');
+                    array_push($params, $newNo, $base, $rev);
+                    log_activity($auth['id'] ?? null, 'QUOTATION_REVISED', 'Quotation', $id, ['from' => $existing['quotationNumber'], 'to' => $newNo]);
+                }
+            }
+
             db()->prepare('DELETE FROM `QuotationItem` WHERE quotationId=?')->execute([$id]);
             $now = now_sql();
             $ins = db()->prepare(
@@ -412,6 +429,31 @@ class QuotationController
         $params[] = $id;
         db()->prepare('UPDATE `Quotation` SET ' . implode(',', $sets) . ' WHERE id=?')->execute($params);
         $this->show($id);
+    }
+
+    /** Columns for price revisions (R1, R2…) — added on first use. */
+    private static function ensureRevision(): void
+    {
+        ensure_schema(['Quotation' => ['create' => '', 'columns' => [
+            'baseNumber' => 'VARCHAR(80) NULL',
+            'revision'   => 'INT NOT NULL DEFAULT 0',
+        ]]], 'Quotation revisions');
+    }
+
+    /** True when an item already on the quotation (same code / name) gets a different price or discount. */
+    private function pricesRevised(string $id, array $newItems): bool
+    {
+        $s = db()->prepare('SELECT itemCode, productName, unitPrice, discount, netPrice FROM `QuotationItem` WHERE quotationId=?');
+        $s->execute([$id]);
+        $old = [];
+        foreach ($s->fetchAll() as $r) $old[strtoupper(trim((string) ($r['itemCode'] ?: $r['productName'])))] = $r;
+        foreach ($newItems as $n) {
+            $k = strtoupper(trim((string) ($n['itemCode'] ?: $n['productName'])));
+            if ($k === '' || !isset($old[$k])) continue;
+            $o = $old[$k];
+            if (abs((float) $o['unitPrice'] - (float) $n['unitPrice']) > 0.004 || abs((float) $o['discount'] - (float) $n['discount']) > 0.004) return true;
+        }
+        return false;
     }
 
     // DELETE /api/quotations/:id

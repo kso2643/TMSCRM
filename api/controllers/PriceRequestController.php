@@ -329,14 +329,15 @@ $tail",
         return null;
     }
 
-    private function nextRequestNo(): string
+    /** PR-<yymm>-<sequence>-<engineer's initials>, e.g. PR-2611-0005-JK (the sequence runs on for the month). */
+    private function nextRequestNo(?string $engineerId = null): string
     {
         $prefix = 'PR-' . date('ym') . '-';
-        $s = db()->prepare("SELECT requestNo FROM `PriceRequestBatch` WHERE requestNo LIKE ? ORDER BY requestNo DESC LIMIT 1");
+        $s = db()->prepare("SELECT requestNo FROM `PriceRequestBatch` WHERE requestNo LIKE ?");
         $s->execute([$prefix . '%']);
-        $last = $s->fetchColumn();
-        $n = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
-        return $prefix . str_pad((string) $n, 4, '0', STR_PAD_LEFT);
+        $max = 0;
+        foreach ($s->fetchAll(PDO::FETCH_COLUMN) as $no) $max = max($max, (int) substr($no, strlen($prefix)));
+        return $prefix . str_pad((string) ($max + 1), 4, '0', STR_PAD_LEFT) . '-' . user_initials($engineerId);
     }
 
     /** Validates one item; returns [clean, errors[]]. Matches the product by id or item code. */
@@ -464,7 +465,7 @@ $tail",
         $pdo->beginTransaction();
         try {
             $bid = gen_id();
-            $no = $this->nextRequestNo();
+            $no = $this->nextRequestNo($auth['id']);
             $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, createdAt) VALUES (?,?,?,?,?,?,?)')
                 ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', now_sql()]);
             $ins = $pdo->prepare('INSERT INTO `PriceRequest` (id,requestedById,customerId,productId,itemCode,productName,quantity,listPrice,requestedPrice,notes,status,

@@ -6,6 +6,28 @@
  */
 
 /** Generates an opaque, URL-safe unique ID — a drop-in stand-in for Prisma's cuid(). */
+/**
+ * Two letters for a person, used in price request and quotation numbers:
+ * "Jagatheesh Kumar" → JK, "Keshav Prasath" → KP, "Saravana" → SA, "Arun" → AR.
+ */
+function name_initials(?string $name): string
+{
+    $words = preg_split('/[^\p{L}]+/u', trim((string) $name), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    if (!$words) return 'XX';
+    $two = count($words) >= 2 ? mb_substr($words[0], 0, 1) . mb_substr($words[1], 0, 1) : mb_substr($words[0], 0, 2);
+    $two = strtoupper(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $two) ?: $two);
+    $two = preg_replace('/[^A-Z]/', '', $two);
+    return str_pad(substr($two, 0, 2), 2, 'X');
+}
+
+/** A user's initials by id (see name_initials). */
+function user_initials(?string $userId): string
+{
+    if (!$userId) return 'XX';
+    $s = db()->prepare('SELECT name FROM `User` WHERE id=?'); $s->execute([$userId]);
+    return name_initials((string) $s->fetchColumn());
+}
+
 function gen_id(): string
 {
     $time = base_convert((string) floor(microtime(true) * 1000), 10, 36);

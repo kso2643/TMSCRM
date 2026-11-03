@@ -292,7 +292,7 @@ class AlertFeedController
         foreach (self::rows(
             "SELECT m.id, m.body, m.createdAt, u.name AS fromName, m.fromId FROM `ChatMessage` m LEFT JOIN `User` u ON u.id=m.fromId
              WHERE m.toId=? AND m.createdAt>? AND m.readAt IS NULL ORDER BY m.createdAt DESC LIMIT $per", [$me, $since]) as $r) {
-            $add('chat-' . $r['id'], 'CHAT_MESSAGE', 'Message from ' . ($r['fromName'] ?: 'admin'), mb_substr($r['body'], 0, 140), '/chat/#' . rawurlencode($r['fromId']), $r['createdAt']);
+            $add('chat-' . $r['id'], 'CHAT_MESSAGE', 'Message from ' . ($r['fromName'] ?: 'admin'), mb_substr(trim(preg_replace('~📷?\s*https?://\S+/api/pasted-images/\S+~u', '📷 Photo', (string) $r['body'])), 0, 140), '/chat/#' . rawurlencode($r['fromId']), $r['createdAt']);
         }
 
         // Late punch-in: requests to admins, decisions back to the employee

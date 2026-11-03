@@ -797,14 +797,33 @@
           toast(j.message); d.quotes = j.data.quotes; drawQuotes(); showMessage(j.data);
         }).catch(function (e) { toast(e.message, 'err'); }).then(function () { ask.disabled = false; });
       } });
+      // The message can be edited freely; the note below is added at the end. Copy / WhatsApp /
+      // E-mail always send exactly what is on screen.
       function showMessage(r) {
-        var ta = el('textarea', { class: 'pr-in full', rows: 8, readonly: true, 'data-sup-msg': '1' }, [r.message]);
+        var ta = el('textarea', { class: 'pr-in full', rows: 9, 'data-sup-msg': '1', 'aria-label': 'Message to the supplier (you can edit it)' }, [r.message]);
+        var note = el('textarea', { class: 'pr-in full', rows: 2, 'data-sup-note': '1', placeholder: 'Note to the supplier (optional) — e.g. urgent, need by Friday, send test certificate…' });
         var phone = String((r.vendor && r.vendor.phone) || '').replace(/\D/g, ''); if (phone.length === 10) phone = '91' + phone;
-        clear(msgBox).appendChild(el('div', { class: 'pr-sup-msg' }, [ta, el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.35rem' }, [
-          el('button', { class: 'pr-btn sm', type: 'button', text: '⧉ Copy', onclick: function () { ta.select(); try { navigator.clipboard.writeText(r.message); } catch (e) { document.execCommand('copy'); } toast('Message copied'); } }),
-          el('a', { class: 'pr-btn sm grn', target: '_blank', rel: 'noopener', href: 'https://wa.me/' + phone + '?text=' + encodeURIComponent(r.message), text: 'WhatsApp' + (phone ? '' : ' (choose contact)') }),
-          el('a', { class: 'pr-btn sm', href: 'mailto:' + ((r.vendor && r.vendor.email) || '') + '?subject=' + encodeURIComponent('Price request' + (b.requestNo ? ' ' + b.requestNo : '')) + '&body=' + encodeURIComponent(r.message), text: '✉ E-mail' })
-        ])]));
+        function text() {
+          var t = ta.value.replace(/\s+$/, ''), n = note.value.trim();
+          if (!n) return t;
+          var m = /\n\s*Thank you\.?\s*$/i.exec(t);   // the note goes above "Thank you."
+          return m ? t.slice(0, m.index) + '\n\nNote: ' + n + t.slice(m.index) : t + '\n\nNote: ' + n;
+        }
+        var wa = el('a', { class: 'pr-btn sm grn', target: '_blank', rel: 'noopener', 'data-sup-wa': '1', text: 'WhatsApp' + (phone ? '' : ' (choose contact)') });
+        var mail = el('a', { class: 'pr-btn sm', 'data-sup-mail': '1', text: '✉ E-mail' });
+        function links() {
+          var t = text();
+          wa.href = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(t);
+          mail.href = 'mailto:' + ((r.vendor && r.vendor.email) || '') + '?subject=' + encodeURIComponent('Price request' + (b.requestNo ? ' ' + b.requestNo : '') + (r.customer ? ' — ' + r.customer : '')) + '&body=' + encodeURIComponent(t);
+        }
+        ta.addEventListener('input', links); note.addEventListener('input', links); links();
+        clear(msgBox).appendChild(el('div', { class: 'pr-sup-msg' }, [
+          el('div', { class: 'pr-meta', text: '✎ You can edit the message' }), ta,
+          el('div', { class: 'pr-meta', style: 'margin-top:.35rem', text: 'Note' }), note,
+          el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.35rem' }, [
+            el('button', { class: 'pr-btn sm', type: 'button', 'data-sup-copy': '1', text: '⧉ Copy', onclick: function () { var t = text(); try { navigator.clipboard.writeText(t); } catch (e) { ta.select(); document.execCommand('copy'); } toast('Message copied'); } }),
+            wa, mail
+          ])]));
       }
       box.appendChild(el('div', { class: 'pr-sup-ask' }, [el('b', { text: 'Ask a supplier' }), el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap;align-items:center' }, [vSel, other, ask]), checks, msgBox]));
       // vendor price list

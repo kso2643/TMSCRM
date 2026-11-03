@@ -9,8 +9,9 @@
  *  - login is kept in an encrypted, app-only profile; "Sign out & clear data" wipes it
  *  - one window, no developer tools, no remote-module, hardened Electron fuses
  */
-const { app, BrowserWindow, Menu, shell, session, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, session, dialog, Notification } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 const APP_URL = 'https://crm.apjtech.in';
 const ALLOWED = new Set(['crm.apjtech.in', 'api.apjtech.in']);
@@ -85,9 +86,24 @@ app.whenReady().then(() => {
   const okPerms = new Set(['geolocation', 'media', 'notifications', 'clipboard-sanitized-write', 'fullscreen', 'mediaKeySystem']);
   ses.setPermissionRequestHandler((wc, permission, cb, details) => cb(okPerms.has(permission) && allowed(details.requestingUrl || wc.getURL())));
   ses.setPermissionCheckHandler((wc, permission, origin) => okPerms.has(permission) && allowed(origin));
-  // downloads: always ask where to save
+  // downloads (PDFs, Excel, reports…): straight into the Downloads folder, never overwriting a file
+  // ("report.pdf", "report (1).pdf"…); a notification says where it went — click it to open the file.
   ses.on('will-download', (event, item) => {
-    item.setSaveDialogOptions({ title: 'Save file', defaultPath: path.join(app.getPath('downloads'), item.getFilename()) });
+    const dir = app.getPath('downloads');
+    const name = (item.getFilename() || 'download').replace(/[\\/:*?"<>|]/g, '_');
+    const ext = path.extname(name), base = name.slice(0, name.length - ext.length);
+    let target = path.join(dir, name);
+    for (let i = 1; fs.existsSync(target) && i < 500; i++) target = path.join(dir, `${base} (${i})${ext}`);
+    item.setSavePath(target);
+    item.once('done', (e, state) => {
+      if (state !== 'completed') return;
+      if (Notification.isSupported()) {
+        const n = new Notification({ title: 'Saved to Downloads', body: path.basename(target) + ' — click to open', icon: path.join(__dirname, 'build', 'icon.png') });
+        n.on('click', () => shell.openPath(target));
+        n.show();
+      }
+      if (/\.pdf$/i.test(target)) shell.openPath(target);   // PDFs open straight away, like in a browser
+    });
   });
 
   Menu.setApplicationMenu(Menu.buildFromTemplate([

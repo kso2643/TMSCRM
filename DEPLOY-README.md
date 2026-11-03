@@ -1,3 +1,32 @@
+# Update — 3 Nov (b): PDFs save in the phone / PC app, paste screenshots while typing, supplier message edit + note, initials in PR / quotation numbers, quotation revisions R1 / R2
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **New file:** `api/controllers/PastedImageController.php`. Pasted pictures are saved in `api/uploads/pasted/` (included in the full backup).
+- **Database:** new quotation columns `baseNumber` and `revision` are added automatically.
+- **Windows app:** install the new **APJ-CRM-Setup** from GitHub → Releases → `crm-apps`. The Android app needs no reinstall for this update.
+
+1. **Downloads in the apps**
+   - **Android:** every PDF / Excel now saves to **Downloads / APJ CRM** and opens. This covers quotation PDFs (made in the page), order / PO / trial / invoice PDFs, reports and files opened in a new window. Handled by the website, so it already works with the installed app.
+   - **Windows app:** files go straight into the **Downloads** folder with no "Save as" box. Names are never overwritten ("file (1).pdf"), PDFs open straight away, and a notification shows where the file went.
+2. **Ctrl+V a screenshot while typing — every page**
+   - In a box that has an upload box next to it (order invoice, CEO Desk, petty cash…) the picture is attached there.
+   - In any other text box (chat, notes, replies, remarks…) the picture is added into the text. Every page shows it as the picture; tap to see it big.
+   - Chat: the message shows the picture. The chat list and alerts say "📷 Photo".
+3. **Price requests → Get price from supplier**
+   - The message names the **customer**.
+   - The message can be **edited**.
+   - A **Note** box adds a line above "Thank you.".
+   - Copy, WhatsApp and E-mail send exactly the edited text with the note. The e-mail subject also has the customer name.
+4. **Engineer's initials in the numbers**
+   - Two words in the name give the first letters (Jagatheesh Kumar → **JK**, Keshav Prasath → **KP**); one word gives its first two letters (Saravana → **SA**, Arun → **AR**).
+   - **Price requests:** `PR-2611-0005-JK` (the month's sequence runs on as before).
+   - **Quotations:** `APJ/2026/0012-JK` (when the Quotation No. box is left empty).
+   - Existing numbers are not changed.
+5. **Quotation revisions**
+   - When a saved quotation's **price or discount** for an item is changed, the number becomes **…-R1**, then **…-R2** (`APJ/2026/0012-JK-R1`).
+   - Changing only quantities, terms or adding a new item keeps the number.
+   - After saving, the Quotation No. box shows the new number, so the PDF prints it.
+
 # Update — 3 Nov (a): Phone alerts that really arrive, order "Ordered" status, paste screenshots, reports for every page (Android app 1.0.7)
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Install the new APK** (GitHub → Releases → `crm-apps`) on every phone.

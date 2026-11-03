@@ -99,6 +99,7 @@ require __DIR__ . '/controllers/MeetingReportController.php';   // internal meet
 require __DIR__ . '/controllers/PettyCashController.php';   // petty cash (tab on the Fuel expense page)
 require __DIR__ . '/controllers/SearchController.php';   // quick search across the CRM
 require __DIR__ . '/controllers/AppSettingsController.php'; // notification sounds / templates, CRM name and logo
+require __DIR__ . '/controllers/PastedImageController.php'; // screenshots pasted into text boxes
 require __DIR__ . '/controllers/ToolingController.php';   // projects / tooled-up / machine accessories
 require __DIR__ . '/controllers/QuotationController.php';
 require __DIR__ . '/controllers/DashboardAnalyticsController.php';
@@ -609,6 +610,14 @@ try {
     elseif ($c0 === 'search') {
         match (true) {
             $method === 'GET' && $c1 === '' => (new SearchController())->search(),
+            default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'pasted-images') {
+        $ctrl = new PastedImageController();
+        match (true) {
+            $method === 'POST' && $c1 === ''  => $ctrl->upload(),
+            $method === 'GET'  && $c1 !== '' && $c2 === '' => $ctrl->show($c1),
             default => sendError('Route not found', 404),
         };
     }

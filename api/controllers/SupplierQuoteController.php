@@ -62,9 +62,11 @@ class SupplierQuoteController
     }
 
     /** The message to send the vendor, listing the items asked about. */
-    private static function message(string $vendor, array $items, ?string $requestNo): string
+    private static function message(string $vendor, array $items, ?string $requestNo, ?string $customer = null): string
     {
-        $lines = ['Dear ' . $vendor . ',', '', 'Please send your best price, discount and delivery lead time for the following' . ($requestNo ? ' (our ref ' . $requestNo . ')' : '') . ':', ''];
+        $lines = ['Dear ' . $vendor . ',', '', 'Please send your best price, discount and delivery lead time for the following' . ($requestNo ? ' (our ref ' . $requestNo . ')' : '') . ':'];
+        if ($customer) $lines[] = 'Customer: ' . $customer;
+        $lines[] = '';
         foreach (array_values($items) as $i => $it) {
             $q = $it['quantity'] !== null ? rtrim(rtrim(number_format((float) $it['quantity'], 2, '.', ''), '0'), '.') . ' ' . ($it['unit'] ?: 'Nos') : '';
             $lines[] = ($i + 1) . '. ' . trim(($it['itemCode'] ? $it['itemCode'] . ' — ' : '') . $it['productName'] . ($it['brand'] ? ' (' . $it['brand'] . ')' : '')) . ($q ? ' — Qty ' . $q : '');
@@ -116,7 +118,8 @@ class SupplierQuoteController
                               ON DUPLICATE KEY UPDATE askedAt=VALUES(askedAt), askedById=VALUES(askedById)");
         foreach ($pick as $it) $ins->execute([gen_id(), $bid, $it['id'], $vendor['id'] ?? null, mb_substr($vendorName, 0, 160), $auth['id'], now_sql(), now_sql()]);
         log_activity($auth['id'], 'SUPPLIER_PRICE_ASKED', 'PriceRequestBatch', $bid, ['vendor' => $vendorName, 'items' => count($pick)]);
-        sendSuccess(['quotes' => self::quotes($bid), 'message' => self::message($vendorName, $pick, $items[0]['requestNo'] ?? null),
+        sendSuccess(['quotes' => self::quotes($bid), 'message' => self::message($vendorName, $pick, $items[0]['requestNo'] ?? null, $items[0]['companyName'] ?? null),
+                     'customer' => $items[0]['companyName'] ?? null,
                      'vendor' => ['name' => $vendorName, 'phone' => $vendor['phone'] ?? null, 'email' => $vendor['email'] ?? null]],
                     'Supplier request ready — send the message to ' . $vendorName, 201);
     }
