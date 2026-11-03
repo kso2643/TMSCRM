@@ -79,6 +79,16 @@ class QuotationController
         return $candidate;
     }
 
+    // GET /api/quotations/next-number?company=APJ|TMS — the number the next new quotation will get
+    // (shown in the form; the real one is still issued on save, so two people never clash).
+    public function nextNumber(): void
+    {
+        $auth = authenticate();
+        $company = strtoupper(trim((string) qp('company', '')));
+        if (!in_array($company, self::COMPANIES, true)) sendError('company must be APJ or TMS.', 400);
+        sendSuccess(['company' => $company, 'quotationNumber' => $this->nextQuotationNumber($company, $auth['id'])]);
+    }
+
     /**
      * Resolves the quotation number for create(): a manually-supplied value (trimmed) wins,
      * after checking it isn't already taken by another quotation; an empty/omitted value

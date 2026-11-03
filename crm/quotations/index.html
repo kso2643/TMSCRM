@@ -1719,6 +1719,11 @@ body.theme-apj { background: #0a1628; }
 /* ══ LATE OVERRIDES (must come after both scoped stylesheets above to win
      any cascade ties against rules of equal selector specificity) ══ */
 #app-apj .topbar { top: 52px; }
+/* v11.42: #app-apj hides horizontal overflow; with overflow:hidden the box becomes the sticky
+   container, so top:52px pushed the bar down over the "Create Quotation" heading. overflow:clip
+   hides the same overflow without that side effect; older browsers just keep the bar in place. */
+#app-apj { overflow-x: clip; overflow-y: visible; }
+@supports not (overflow: clip) { #app-apj .topbar { top: 0; } }
   </style>
 <style>
 .customer-suggest {
@@ -1760,7 +1765,7 @@ body.theme-apj { background: #0a1628; }
   color: var(--muted, #64748b);
 }
 </style>
-<script src="/fuel-expense-app.js?v=20261104b" defer></script><script src="/attendance-all-app.js?v=20261104b" defer></script><script src="/appointments-reminder-app.js?v=20261104b" defer></script><script src="/crm-global.js?v=20261104b" defer></script><script src="/product-suggest.js?v=20261104b" defer></script><script src="/quote-notes.js?v=20261104b" defer></script><script src="/quote-firm.js?v=20261104b" defer></script><link rel="stylesheet" href="/motion.css?v=20261104b"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261104c" defer></script><script src="/attendance-all-app.js?v=20261104c" defer></script><script src="/appointments-reminder-app.js?v=20261104c" defer></script><script src="/crm-global.js?v=20261104c" defer></script><script src="/product-suggest.js?v=20261104c" defer></script><script src="/quote-notes.js?v=20261104c" defer></script><script src="/quote-firm.js?v=20261104c" defer></script><link rel="stylesheet" href="/motion.css?v=20261104c"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 <script>
 const API_BASE = 'https://api.apjtech.in/api';
@@ -1921,19 +1926,19 @@ function quotationServerToLocal(q) {
                     <div class="form-row cols-1">
                         <label class="field" style="position:relative;display:block;">Company Name<input type="text" id="to-name"
                                 autocomplete="off" oninput="tms_searchCustomers(this.value)" onchange="tms_applyCustomerIfKnown()"
-                                value="Euro Cast Engineering Private Limited" />
+                                value="" placeholder="Start typing the customer name…" />
                                 <div id="tms-customer-suggest" class="customer-suggest"></div></label>
                         <input type="hidden" id="to-customerId" value="" />
                     </div>
                     <div class="form-row cols-1">
                         <label class="field">Address Line 1<input type="text" id="to-addr1"
-                                value="S.F. No. 8, Kariyampalayam Village" /></label>
+                                value="" placeholder="Street / area" /></label>
                     </div>
                     <div class="form-row cols-2">
                         <label class="field">Address Line 2<input type="text" id="to-addr2"
-                                value="Annur, Coimbatore – 641653" /></label>
+                                value="" placeholder="City – PIN" /></label>
                         <label class="field">State / Country<input type="text" id="to-state"
-                                value="Tamil Nadu, India" /></label>
+                                value="" placeholder="State, Country" /></label>
                     </div>
                 </div>
             </div>
@@ -1947,7 +1952,7 @@ function quotationServerToLocal(q) {
                 <div class="section-body">
                     <div class="form-row cols-3">
                         <label class="field">Quotation No.<input type="text" id="meta-no"
-                                placeholder="QT-2025-001" /></label>
+                                placeholder="Auto-generated when saved" /></label>
                         <label class="field">Date<input type="date" id="meta-date" /></label>
                         <label class="field">Enq. Date<input type="date" id="meta-date1" /></label>
                     </div>
@@ -1966,7 +1971,7 @@ function quotationServerToLocal(q) {
                     </div>
                     <div class="form-row cols-1">
                         <label class="field">Subject<input type="text" id="meta-subject"
-                                value="Quotation for ZECHA Solid Carbide Special Drill &amp; Endmills" /></label>
+                                value="" placeholder="e.g. Quotation for solid carbide drills" /></label>
                     </div>
                 </div>
             </div>
@@ -3636,18 +3641,7 @@ curY += 10;
             gid("meta-date1").value = new Date()
                 .toISOString()
                 .split("T")[0];
-            var pre = [
-                [
-                    "Solid Carbide Step Drill RH Art/Drg Nr. 89815",
-                    "Ø0.9×10×90 · Ø2.5×22 · Ø4×98, PT 130, 4-Facet, X-Thinned Z=2 Un-coated",
-                    "5",
-                    "2850",
-                    "10",
-                    "3 Weeks",
-                ], 
-
-            ];
-            pre.forEach((p) => tms_addItem(p[0], p[1], p[2], p[3], p[4], p[5]));
+            tms_addItem();   // a plain quotation: one empty line to fill
         })();
     
 
@@ -3736,7 +3730,7 @@ curY += 10;
           <div class="form-grid cols-1">
             <div class="field" style="position:relative;">
               <span class="field-label">Company Name</span>
-              <input type="text" id="to-name" autocomplete="off" oninput="apj_searchCustomers(this.value)" onchange="apj_applyCustomerIfKnown()" value="Euro Cast Engineering Private Limited" />
+              <input type="text" id="to-name" autocomplete="off" oninput="apj_searchCustomers(this.value)" onchange="apj_applyCustomerIfKnown()" value="" placeholder="Start typing the customer name…" />
               <input type="hidden" id="to-customerId" value="" />
               <div id="apj-customer-suggest" class="customer-suggest"></div>
             </div>
@@ -3744,17 +3738,17 @@ curY += 10;
           <div class="form-grid cols-1">
             <div class="field">
               <span class="field-label">Address Line 1</span>
-              <input type="text" id="to-addr1" value="S.F. No. 8, Kariyampalayam Village" />
+              <input type="text" id="to-addr1" value="" placeholder="Street / area" />
             </div>
           </div>
           <div class="form-grid cols-2">
             <div class="field">
               <span class="field-label">Address Line 2</span>
-              <input type="text" id="to-addr2" value="Annur, Coimbatore – 641653" />
+              <input type="text" id="to-addr2" value="" placeholder="City – PIN" />
             </div>
             <div class="field">
               <span class="field-label">State / Country</span>
-              <input type="text" id="to-state" value="Tamil Nadu, India" />
+              <input type="text" id="to-state" value="" placeholder="State, Country" />
             </div>
           </div>
         </div>
@@ -3770,7 +3764,7 @@ curY += 10;
           <div class="form-grid cols-3">
             <div class="field">
               <span class="field-label">Quotation No.</span>
-              <input type="text" id="meta-no" placeholder="QT-2025-001" />
+              <input type="text" id="meta-no" placeholder="Auto-generated when saved" />
             </div>
             <div class="field">
               <span class="field-label">Date</span>
@@ -3805,7 +3799,7 @@ curY += 10;
           <div class="form-grid cols-1">
             <div class="field">
               <span class="field-label">Subject</span>
-              <input type="text" id="meta-subject" value="Quotation for ZECHA Solid Carbide Special Drill &amp; Endmills" />
+              <input type="text" id="meta-subject" value="" placeholder="e.g. Quotation for solid carbide drills" />
             </div>
           </div>
         </div>
@@ -5273,11 +5267,7 @@ async function apj_handleQuotationPdfUpload(file) {
   const today = new Date().toISOString().split('T')[0];
   gid('meta-date').value = today;
   gid('meta-date1').value = today;
-  apj_addItem(
-    'Solid Carbide Step Drill RH Art/Drg Nr. 89815',
-    'Ø0.9×10×90 · Ø2.5×22 · Ø4×98, PT 130, 4-Facet, X-Thinned Z=2 Un-coated',
-    '5', '2850', '10', '3 Weeks'
-  );
+  apj_addItem();   // a plain quotation: one empty line to fill
 })();
 
 

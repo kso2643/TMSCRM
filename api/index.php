@@ -942,6 +942,7 @@ try {
         $ctrl = new QuotationController(); $exp = new ExportController();
         match (true) {
             $method === 'GET'   && $c1 === 'stats'                   => $ctrl->stats(),
+            $method === 'GET'   && $c1 === 'next-number'             => $ctrl->nextNumber(),
             $method === 'GET'   && $c1 === 'export'                  => $exp->exportQuotations(),
             $method === 'GET'   && $c1 === ''                        => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                        => $ctrl->create(),

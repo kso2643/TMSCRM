@@ -8,6 +8,31 @@
 (function () {
   'use strict';
   var picked = '';   // company confirmed on this visit
+  var autoNo = {};   // company → the auto number shown in its form (issued for real on save)
+
+  function noField(company) { return document.querySelector('#app-' + company.toLowerCase() + ' #meta-no'); }
+  function fetchJson(path) {
+    if (typeof window.apiFetch === 'function') return window.apiFetch(path);
+    var API = (window.CRM_API || 'https://api.apjtech.in') + '/api';
+    var t = ''; try { t = localStorage.getItem('crm_token') || ''; } catch (e) {}
+    return fetch(API + path, { headers: { Authorization: 'Bearer ' + t } }).then(function (r) { return r.json(); });
+  }
+  // Show the next quotation number in the form (only while the box is empty or still shows our last suggestion).
+  function fillAutoNo(company) {
+    var f = noField(company);
+    if (!f) return Promise.resolve();
+    return Promise.resolve(fetchJson('/quotations/next-number?company=' + company)).then(function (j) {
+      var n = j && j.data && j.data.quotationNumber;
+      if (!n) return;
+      var cur = f.value.trim();
+      if (cur && cur !== autoNo[company]) return;   // someone typed / loaded a number — leave it
+      autoNo[company] = n;
+      f.value = n;
+      f.setAttribute('data-auto-no', n);
+      f.title = 'Auto-generated — the number is confirmed when you save. You can type your own instead.';
+      f.dispatchEvent(new Event('input', { bubbles: true }));
+    }).catch(function () {});
+  }
 
   function current() { try { return localStorage.getItem('activeCompany') === 'TMS' ? 'TMS' : 'APJ'; } catch (e) { return 'APJ'; } }
   function mark(f) { picked = f; draw(); }
@@ -78,10 +103,20 @@
   function wrapSave(name, company) {
     var orig = window[name];
     if (typeof orig !== 'function' || orig.__qf) return;
+    function save(self, args) {
+      // the shown auto number is only a preview — let the server issue it at save time
+      var f = noField(company), auto = f && autoNo[company] && f.value.trim() === autoNo[company];
+      if (auto) f.value = '';
+      return Promise.resolve(orig.apply(self, args)).then(function (r) {
+        if (auto && f && !f.value.trim()) { f.value = autoNo[company]; }   // not saved (e.g. no customer) — show it again
+        else if (auto) { autoNo[company] = null; }
+        return r;
+      });
+    }
     var w = function () {
       var self = this, args = arguments;
-      if (picked === company) return orig.apply(self, args);
-      ask(company, function () { orig.apply(self, args); });
+      if (picked === company) return save(self, args);
+      ask(company, function () { save(self, args); });
     };
     w.__qf = true;
     window[name] = w;
@@ -117,8 +152,9 @@
     wrapSave('tms_saveQuotation', 'TMS');
     wrapSave('apj_saveQuotation', 'APJ');
     draw();
+    fillAutoNo('APJ'); fillAutoNo('TMS');
   }
 
-  window.QuoteFirm = { picked: function () { return picked; } };
+  window.QuoteFirm = { picked: function () { return picked; }, autoNo: function (c) { return autoNo[c]; }, refreshNo: fillAutoNo };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

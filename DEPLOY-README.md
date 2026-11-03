@@ -1,3 +1,19 @@
+# Update — 4 Nov (c): Quotations — heading fixed, number auto-generated, plain (empty) form
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database change.
+
+1. **"Create Quotation" heading fixed:** the APJ header no longer covers it. The header still stays at the top when you scroll.
+2. **Quotation number is auto-generated**
+   - When the page opens, the Quotation No. box already shows the next number for that company and engineer, e.g. `APJ/2026/0016-JK` or `TMS/2026/0001-JK`.
+   - The number is confirmed when you **Save**, so two people saving at the same time never get the same number. The saved number is written back into the box.
+   - You can still type your own number instead.
+3. **Plain quotation**
+   - The form opens empty: no sample customer (Euro Cast…), address, subject or sample drill item — just one empty item line to fill.
+   - Pick the customer from the suggestions or load a price request as before.
+   - Terms (GST, payment, validity, delivery) and the signatory stay as defaults.
+
+---
+
 # Update — 4 Nov (b): TMS / APJ on quotations, price request number on CEO Desk "Get price", Admin prices → Super Admin approves
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
