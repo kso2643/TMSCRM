@@ -78,10 +78,61 @@
     document.head.appendChild(st);
   }
 
+  // ── Kilometres travelled: everyone, over a period ─────────────────────
+  function kmCard(open) {
+    var box = el('div', { class: 'card overflow-hidden', id: 'lh-km' });
+    var now = new Date();
+    var from = el('input', { type: 'date', class: 'lh-in', id: 'lh-km-from', 'aria-label': 'From', value: iso(new Date(now.getFullYear(), now.getMonth(), 1)) });
+    var to = el('input', { type: 'date', class: 'lh-in', id: 'lh-km-to', 'aria-label': 'To', value: iso(now) });
+    var body = el('div', {});
+    var openRow = null;
+    function load() {
+      body.innerHTML = ''; body.appendChild(el('p', { class: 'px-5 py-3 text-sm text-muted', text: 'Loading…' }));
+      api('/route-log/summary?from=' + from.value + '&to=' + to.value).then(function (j) {
+        var d = j.data; body.innerHTML = '';
+        if (!d.people.length) { body.appendChild(el('p', { class: 'px-5 py-3 text-sm text-muted', text: 'No one punched in during these dates.' })); return; }
+        var tb = el('tbody');
+        d.people.forEach(function (p) {
+          var tr = el('tr', { class: 'table-row cursor-pointer', 'data-km-user': p.id, title: 'Show each day' }, [
+            el('td', { class: 'px-4 py-2 font-medium', text: p.name }),
+            el('td', { class: 'px-4 py-2 text-right font-semibold', text: p.km.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' }),
+            el('td', { class: 'px-4 py-2 text-right', text: p.odometerKm != null ? p.odometerKm.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),
+            el('td', { class: 'px-4 py-2 text-right', text: String(p.days) }),
+            el('td', { class: 'px-4 py-2 text-right', text: p.days ? (p.km / p.days).toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),
+            el('td', { class: 'px-4 py-2 text-right', style: p.locationOff ? 'color:#b91c1c;font-weight:600' : '', text: p.locationOff ? '📵 ' + p.locationOff : '—' })
+          ]);
+          var det = el('tr', { style: 'display:none', 'data-km-days': p.id }, [el('td', { colspan: '6', class: 'px-4 pb-3' }, [el('div', { class: 'lh-days' }, p.perDay.map(function (x) {
+            return el('button', { type: 'button', class: 'lh-day has', title: x.points + ' points', onclick: function () { open(p.id, x.date); window.scrollTo({ top: box.getBoundingClientRect().bottom + window.scrollY, behavior: 'smooth' }); },
+              text: new Date(x.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' · ' + x.km + ' km' });
+          }))])]);
+          tr.addEventListener('click', function () { var on = det.style.display === 'none'; if (openRow && openRow !== det) openRow.style.display = 'none'; det.style.display = on ? '' : 'none'; openRow = on ? det : null; });
+          tb.appendChild(tr); tb.appendChild(det);
+        });
+        tb.appendChild(el('tr', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [
+          el('td', { class: 'px-4 py-2 font-bold', text: 'Everyone' }),
+          el('td', { class: 'px-4 py-2 text-right font-bold', text: d.totals.km.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' }),
+          el('td', { class: 'px-4 py-2 text-right font-bold', text: d.totals.odometerKm ? d.totals.odometerKm.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),
+          el('td', { class: 'px-4 py-2 text-right font-bold', text: String(d.totals.days) }), el('td', {}), el('td', {})]));
+        body.appendChild(el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm', id: 'lh-km-table' }, [
+          el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, ['Engineer', 'GPS route', 'Odometer (entered)', 'Days', 'Per day', 'Location off'].map(function (h, i) {
+            return el('th', { class: 'table-head px-4 py-2 ' + (i ? 'text-right' : 'text-left'), text: h }); }))]), tb])]));
+        body.appendChild(el('p', { class: 'px-5 py-2 text-xs text-muted', text: 'GPS route = the road distance from the tracked points (vague points and GPS glitches are left out). Odometer = the readings entered at punch in / out. Click a name to see each day; click a day to replay it on the map.' }));
+      }).catch(function (e) { body.innerHTML = ''; body.appendChild(el('p', { class: 'px-5 py-3 text-sm', style: 'color:#b91c1c', text: e.message })); });
+    }
+    from.addEventListener('change', load); to.addEventListener('change', load);
+    box.appendChild(el('div', { class: 'px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-end justify-between gap-3' }, [
+      el('span', { class: 'text-base font-semibold', text: '🚗 Kilometres travelled' }),
+      el('div', { class: 'flex flex-wrap gap-2 items-end' }, [el('label', {}, [el('span', { class: 'lh-lab', text: 'From' }), from]), el('label', {}, [el('span', { class: 'lh-lab', text: 'To' }), to])])
+    ]));
+    box.appendChild(body);
+    load();
+    return box;
+  }
+
   function mount(root) {
     injectCss();
     var params = new URLSearchParams(location.search);
-    var state = { userId: params.get('user') || '', date: params.get('date') || iso(new Date()), users: [], data: null };
+    var state = { userId: params.get('user') || params.get('userId') || '', date: params.get('date') || iso(new Date()), users: [], data: null };
     var map = null, layers = null, playMarker = null;
 
     var userSel = el('select', { class: 'lh-in', 'aria-label': 'Person', style: 'min-width:220px' }, [el('option', { value: '', text: 'Loading people…' })]);
@@ -94,8 +145,9 @@
     root.appendChild(el('div', { class: 'space-y-4' }, [
       el('div', {}, [
         el('h1', { class: 'page-title', text: 'Location history' }),
-        el('p', { class: 'text-sm text-muted mt-1', text: 'Replay where an engineer or any user travelled on a previous day — route, stops, breaks and alerts. Location is recorded every 2 minutes while someone is punched in.' })
+        el('p', { class: 'text-sm text-muted mt-1', text: 'Replay where an engineer or any user travelled on a previous day — route, stops, breaks and alerts. Location is recorded while someone is punched in: every 30 seconds while moving, every 2 minutes when standing still (the Android app keeps recording when the app is closed).' })
       ]),
+      kmCard(function (uid, d) { state.userId = uid; userSel.value = uid; setDate(d); syncUrl(); loadDays(); }),
       el('div', { class: 'card p-4 space-y-3' }, [
         el('div', { class: 'lh-bar' }, [
           el('label', {}, [el('span', { class: 'lh-lab', text: 'Person' }), userSel]),
@@ -254,6 +306,12 @@
       (d.breaks || []).forEach(function (b) {
         if (b.lat == null) return;
         L.marker([b.lat, b.lng], { icon: emoji(b.type === 'LUNCH' ? '🍽' : '☕') }).bindPopup((b.type === 'LUNCH' ? 'Lunch' : 'Tea') + ' break ' + tm(b.startedAt) + (b.endedAt ? ' – ' + tm(b.endedAt) : '')).addTo(layers);
+      });
+      // where the location was turned off
+      (d.events || []).forEach(function (e) {
+        if (e.type !== 'LOCATION_OFF' || e.lat == null) return;
+        L.marker([e.lat, e.lng], { icon: emoji('📵') }).bindPopup('Location turned off ' + tm(e.detectedAt)).addTo(layers);
+        bounds.push([e.lat, e.lng]);
       });
       if (bounds.length === 1) map.setView(bounds[0], 15); else map.fitBounds(bounds, { padding: [30, 30] });
       if (pts.length > 1) {

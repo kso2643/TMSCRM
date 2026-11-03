@@ -13,6 +13,12 @@
  *   POST   /api/price-requests/batch/:bid/supplier      { vendorId | vendorName, itemIds[] } → asked rows + message
  *   PUT    /api/price-requests/supplier/:qid            { price, discount, leadTime, validity, note, status }
  *   DELETE /api/price-requests/supplier/:qid
+ *   PATCH  /api/price-requests/supplier/:qid/choose     { chosen: true|false, note } — "buy from this supplier" for that item
+ *                                                       (Super Admin / Admin; one per item; the others are told)
+ *   GET    /api/price-requests/supplier-lookup?no=PR-…  the price request with that number (CEO Desk)
+ *
+ * Several suppliers can be asked for the same item (each gets its own message), so their prices
+ * can be compared and one chosen.
  */
 class SupplierQuoteController
 {
@@ -32,6 +38,9 @@ class SupplierQuoteController
     {
         new PriceRequestController();
         ensure_schema(self::schema(), 'Supplier quotes');
+        ensure_schema(['SupplierQuote' => ['create' => '', 'columns' => [
+            'chosen' => 'TINYINT(1) NOT NULL DEFAULT 0', 'chosenById' => 'VARCHAR(30) NULL', 'chosenAt' => 'DATETIME NULL', 'chosenNote' => 'VARCHAR(500) NULL',
+        ]]], 'Supplier choice');
     }
 
     private static function auth(): array
@@ -53,10 +62,12 @@ class SupplierQuoteController
 
     private static function quotes(string $bid): array
     {
-        $s = db()->prepare('SELECT q.*, u.name AS updatedByName FROM `SupplierQuote` q LEFT JOIN `User` u ON u.id=COALESCE(q.updatedById, q.askedById) WHERE q.batchId=? ORDER BY q.vendorName, q.askedAt');
+        $s = db()->prepare('SELECT q.*, u.name AS updatedByName, cu.name AS chosenByName, cu.role AS chosenByRole FROM `SupplierQuote` q
+            LEFT JOIN `User` u ON u.id=COALESCE(q.updatedById, q.askedById) LEFT JOIN `User` cu ON cu.id=q.chosenById WHERE q.batchId=? ORDER BY q.vendorName, q.askedAt');
         $s->execute([$bid]);
         return array_map(function ($q) {
             foreach (['price', 'discount', 'netPrice'] as $k) if ($q[$k] !== null) $q[$k] = (float) $q[$k];
+            $q['chosen'] = !empty($q['chosen']);
             return $q;
         }, $s->fetchAll());
     }
@@ -148,6 +159,60 @@ class SupplierQuoteController
                        trim((string) ($b['note'] ?? '')) ?: null, $status, now_sql(), $auth['id'], now_sql(), $qid]);
         log_activity($auth['id'], 'SUPPLIER_PRICE_SAVED', 'SupplierQuote', $qid, ['vendor' => $q['vendorName'], 'price' => $price, 'discount' => $disc]);
         sendSuccess(['quotes' => self::quotes($q['batchId'])], 'Supplier price saved');
+    }
+
+    // PATCH /api/price-requests/supplier/:qid/choose
+    public function choose(string $qid): void
+    {
+        $auth = self::auth();
+        if (!in_array($auth['role'], ['SUPER_ADMIN', 'ADMIN'], true)) sendError('Only the Super Admin or an Admin can choose the supplier.', 403);
+        $s = db()->prepare('SELECT q.*, r.itemCode, r.productName, b.requestNo, b.requestedById FROM `SupplierQuote` q
+            JOIN `PriceRequest` r ON r.id=q.requestId JOIN `PriceRequestBatch` b ON b.id=q.batchId WHERE q.id=?');
+        $s->execute([$qid]);
+        $q = $s->fetch();
+        if (!$q) sendError('Supplier quote not found.', 404);
+        $b = request_body();
+        $on = !array_key_exists('chosen', $b) || !empty($b['chosen']);
+        $note = mb_substr(trim((string) ($b['note'] ?? '')), 0, 500) ?: null;
+        $pdo = db();
+        $pdo->beginTransaction();
+        $pdo->prepare('UPDATE `SupplierQuote` SET chosen=0, chosenById=NULL, chosenAt=NULL, chosenNote=NULL WHERE requestId=?')->execute([$q['requestId']]);
+        if ($on) $pdo->prepare('UPDATE `SupplierQuote` SET chosen=1, chosenById=?, chosenAt=?, chosenNote=? WHERE id=?')->execute([$auth['id'], now_sql(), $note, $qid]);
+        $pdo->commit();
+        $item = trim(($q['itemCode'] ? $q['itemCode'] . ' ' : '') . $q['productName']);
+        log_activity($auth['id'], $on ? 'SUPPLIER_CHOSEN' : 'SUPPLIER_UNCHOSEN', 'SupplierQuote', $qid, ['vendor' => $q['vendorName'], 'item' => $item, 'requestNo' => $q['requestNo']]);
+        // Tell the other deciders (CEO → admins, admin → Super Admin) and the engineer who asked.
+        try {
+            ChangeNotice::ensure();
+            $who = db()->prepare('SELECT name FROM `User` WHERE id=?'); $who->execute([$auth['id']]); $name = (string) $who->fetchColumn();
+            $to = db()->prepare("SELECT id FROM `User` WHERE isActive=1 AND id<>? AND role IN ('SUPER_ADMIN','ADMIN')"); $to->execute([$auth['id']]);
+            $ids = array_unique(array_merge($to->fetchAll(PDO::FETCH_COLUMN), $q['requestedById'] && $q['requestedById'] !== $auth['id'] ? [$q['requestedById']] : []));
+            $title = mb_substr(($on ? '✔ ' . $name . ' chose ' . $q['vendorName'] : '↺ ' . $name . ' cleared the supplier') . ' for ' . $item, 0, 255);
+            $body = mb_substr(($q['requestNo'] ?? '') . ($on && $q['netPrice'] !== null ? ' · ₹' . number_format((float) $q['netPrice'], 2) . ' net' : '') . ($note ? ' · ' . $note : ''), 0, 500);
+            $ins = db()->prepare('INSERT INTO `ChangeNotice` (id,userId,byId,title,body,link,createdAt) VALUES (?,?,?,?,?,?,?)');
+            foreach ($ids as $u) $ins->execute([gen_id(), $u, $auth['id'], $title, $body, '/price-requests/?q=' . rawurlencode((string) $q['requestNo']), now_sql()]);
+        } catch (Throwable $e) { error_log('Supplier choice notice: ' . $e->getMessage()); }
+        sendSuccess(['quotes' => self::quotes($q['batchId'])], $on ? $q['vendorName'] . ' chosen for ' . $item : 'Choice cleared');
+    }
+
+    // GET /api/price-requests/supplier-lookup?no=PR-2611-0005-JK
+    public function lookup(): void
+    {
+        self::auth();
+        $no = strtoupper(trim((string) qp('no', '')));
+        if ($no === '') sendError('Type the price request number (e.g. PR-2611-0005-JK).', 400);
+        $s = db()->prepare('SELECT b.id, b.requestNo, b.createdAt, c.companyName, u.name AS engineerName FROM `PriceRequestBatch` b
+            LEFT JOIN `Customer` c ON c.id=b.customerId LEFT JOIN `User` u ON u.id=b.requestedById WHERE UPPER(b.requestNo)=? LIMIT 1');
+        $s->execute([$no]);
+        $b = $s->fetch();
+        if (!$b) {   // let them type it without the initials: PR-2611-0005
+            $s = db()->prepare('SELECT b.id, b.requestNo, b.createdAt, c.companyName, u.name AS engineerName FROM `PriceRequestBatch` b
+                LEFT JOIN `Customer` c ON c.id=b.customerId LEFT JOIN `User` u ON u.id=b.requestedById WHERE UPPER(b.requestNo) LIKE ? ORDER BY b.createdAt DESC LIMIT 1');
+            $s->execute([$no . '-%']);
+            $b = $s->fetch();
+        }
+        if (!$b) sendError("No price request $no.", 404);
+        sendSuccess(['batch' => $b]);
     }
 
     // DELETE /api/price-requests/supplier/:qid

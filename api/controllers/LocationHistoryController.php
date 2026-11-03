@@ -77,15 +77,24 @@ class LocationHistoryController
         return 2 * $r * asin(min(1, sqrt($a)));
     }
 
-    /** Total path length in km, ignoring GPS jitter under 25 m between consecutive points. */
+    /**
+     * Total path length in km. To stay close to the real road distance:
+     *  - vague fixes (accuracy worse than 150 m — tower / Wi-Fi guesses) are skipped
+     *  - GPS jitter is ignored: a point counts once it is more than max(25 m, its accuracy) from the last one
+     *  - impossible jumps (faster than 150 km/h between two points) are dropped as glitches
+     */
     public static function distanceKm(array $pts): float
     {
         $m = 0; $prev = null;
         foreach ($pts as $p) {
             if ($p['lat'] === null || $p['lng'] === null) continue;
+            $acc = isset($p['accuracy']) && $p['accuracy'] !== null ? (float) $p['accuracy'] : 0;
+            if ($acc > 150) continue;
             if ($prev) {
                 $d = self::meters((float) $prev['lat'], (float) $prev['lng'], (float) $p['lat'], (float) $p['lng']);
-                if ($d < 25) continue; // jitter — keep the previous anchor
+                if ($d < max(25, $acc)) continue; // jitter — keep the previous anchor
+                $secs = isset($p['capturedAt'], $prev['capturedAt']) ? max(1, strtotime($p['capturedAt']) - strtotime($prev['capturedAt'])) : null;
+                if ($secs !== null && $d / $secs > 41.7) continue; // > 150 km/h: a glitch, not a drive
                 $m += $d;
             }
             $prev = $p;
@@ -121,6 +130,53 @@ class LocationHistoryController
         $auth = authenticate(); $this->requireViewer($auth);
         $s = db()->query("SELECT id, name, role, department FROM `User` WHERE isActive=1 ORDER BY name");
         sendSuccess(['users' => $s->fetchAll()]);
+    }
+
+    // GET /api/tracking/summary?from=YYYY-MM-DD&to=YYYY-MM-DD
+    // Kilometres travelled per person over the period (GPS route, and the odometer km they entered),
+    // days worked, location points, and how often the location went off.
+    public function summary(): void
+    {
+        $auth = authenticate(); $this->requireViewer($auth);
+        $from = to_date_only(qp('from')) ?? date('Y-m-01');
+        $to = to_date_only(qp('to')) ?? date('Y-m-d');
+        if ($to < $from) [$from, $to] = [$to, $from];
+        $end = date('Y-m-d 00:00:00', strtotime($to . ' +1 day'));
+        $att = db()->prepare("SELECT a.id, a.userId, a.date, u.name, u.role FROM `Attendance` a JOIN `User` u ON u.id=a.userId
+                              WHERE a.date>=? AND a.date<? AND a.checkIn IS NOT NULL ORDER BY u.name, a.date");
+        $att->execute([$from . ' 00:00:00', $end]);
+        $pp = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
+        $odo = [];
+        try {
+            $o = db()->prepare("SELECT userId, SUM(COALESCE(officialKm, IF(closingMeter IS NOT NULL, closingMeter-openingMeter, 0))) AS km FROM `FuelExpense` WHERE date>=? AND date<? GROUP BY userId");
+            $o->execute([$from . ' 00:00:00', $end]);
+            foreach ($o->fetchAll() as $r) $odo[$r['userId']] = (float) $r['km'];
+        } catch (PDOException $e) {}
+        $off = [];
+        $s = db()->prepare("SELECT userId, COUNT(*) AS n FROM `StationaryLog` WHERE eventType='LOCATION_OFF' AND detectedAt>=? AND detectedAt<? GROUP BY userId");
+        $s->execute([$from . ' 00:00:00', $end]);
+        foreach ($s->fetchAll() as $r) $off[$r['userId']] = (int) $r['n'];
+        $people = [];
+        foreach ($att->fetchAll() as $a) {
+            $pp->execute([$a['id']]);
+            $pts = $pp->fetchAll();
+            $km = self::distanceKm($pts);
+            $x = &$people[$a['userId']];
+            $x = $x ?? ['id' => $a['userId'], 'name' => $a['name'], 'role' => $a['role'], 'days' => 0, 'km' => 0.0, 'points' => 0, 'perDay' => []];
+            $x['days']++; $x['km'] += $km; $x['points'] += count($pts);
+            $x['perDay'][] = ['date' => substr($a['date'], 0, 10), 'km' => round($km, 2), 'points' => count($pts)];
+            unset($x);
+        }
+        $out = array_values(array_map(function ($p) use ($odo, $off) {
+            $p['km'] = round($p['km'], 1);
+            $p['odometerKm'] = isset($odo[$p['id']]) ? round($odo[$p['id']], 1) : null;
+            $p['locationOff'] = $off[$p['id']] ?? 0;
+            return $p;
+        }, $people));
+        usort($out, fn($a, $b) => $b['km'] <=> $a['km']);
+        sendSuccess(['from' => $from, 'to' => $to, 'people' => $out,
+                     'totals' => ['km' => round(array_sum(array_column($out, 'km')), 1), 'days' => array_sum(array_column($out, 'days')),
+                                  'odometerKm' => round(array_sum(array_map(fn($p) => (float) $p['odometerKm'], $out)), 1)]]);
     }
 
     // GET /api/tracking/days?userId=&month=YYYY-MM
@@ -289,10 +345,16 @@ class LocationHistoryController
             $q->execute([$auth['id'], date('Y-m-d H:i:s', time() - 1800)]);
             if ((int) $q->fetchColumn() > 0) sendSuccess([], 'Already recorded');
         }
+        $lat = is_numeric($b['lat'] ?? null) ? (float) $b['lat'] : null; $lng = is_numeric($b['lng'] ?? null) ? (float) $b['lng'] : null;
+        if ($lat === null && $type === 'LOCATION_OFF') {   // where it went off: the last point we have
+            $p = db()->prepare('SELECT lat, lng FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt DESC LIMIT 1');
+            $p->execute([$att['id']]);
+            if ($last = $p->fetch()) { $lat = (float) $last['lat']; $lng = (float) $last['lng']; }
+            elseif ($att['checkInLat'] !== null) { $lat = (float) $att['checkInLat']; $lng = (float) $att['checkInLng']; }
+        }
         db()->prepare('INSERT INTO `StationaryLog` (id,userId,attendanceId,eventType,sinceAt,detectedAt,minutes,lat,lng,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)')
             ->execute([gen_id(), $auth['id'], $att['id'], $type, to_dt($b['sinceAt'] ?? null), now_sql(),
-                       is_numeric($b['minutes'] ?? null) ? (int) $b['minutes'] : null,
-                       is_numeric($b['lat'] ?? null) ? (float) $b['lat'] : null, is_numeric($b['lng'] ?? null) ? (float) $b['lng'] : null, now_sql()]);
+                       is_numeric($b['minutes'] ?? null) ? (int) $b['minutes'] : null, $lat, $lng, now_sql()]);
         sendSuccess([], 'Recorded', 201);
     }
 }

@@ -104,6 +104,9 @@
     box.appendChild(row(st0.background, 'Allowed to run in the background (battery)', 'Allow', open('background')));
     box.appendChild(row(st0.exactAlarms !== false, 'Alarms & reminders allowed', 'Allow', open('alarms')));
     box.appendChild(row(st0.lastResult === 'ok', 'Last check ' + ago(st0.lastCheck) + (st0.lastError ? ' — ' + st0.lastError : ''), '', null));
+    if (st0.tracking !== undefined) box.appendChild(st0.tracking
+      ? row(!!st0.trackingActive, st0.trackingActive ? 'Location tracking on (punched in) — last point ' + ago(st0.lastPing) : 'Location tracking can’t start — allow location for the app (Allow all the time / While using)', 'Allow', open('app'))
+      : row(st0.location !== false, st0.location === false ? 'Location not allowed for the app — tracking can’t run when you punch in' : 'Location tracking starts when you punch in', 'Allow', open('app')));
     var msg = el('span', { class: 'text-sm', id: 'ns-test-msg' });
     box.appendChild(el('div', { class: 'flex flex-wrap items-center gap-2 mt-4' }, [
       el('button', { class: 'btn-primary', type: 'button', id: 'ns-test', text: '🔔 Send test alert (in 15 s)', onclick: function () {

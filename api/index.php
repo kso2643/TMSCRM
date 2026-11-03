@@ -450,6 +450,8 @@ try {
             $method === 'GET'   && $c1 === 'by-no' && $c2 !== ''       => $ctrl->byNumber($c2),
             $method === 'GET'   && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->index($c2),
             $method === 'POST'  && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->ask($c2),
+            $method === 'GET'   && $c1 === 'supplier-lookup'                => (new SupplierQuoteController())->lookup(),
+            $method === 'PATCH' && $c1 === 'supplier' && $c2 !== '' && $c3 === 'choose' => (new SupplierQuoteController())->choose($c2),
             $method === 'PUT'   && $c1 === 'supplier' && $c2 !== ''      => (new SupplierQuoteController())->update($c2),
             $method === 'DELETE'&& $c1 === 'supplier' && $c2 !== ''      => (new SupplierQuoteController())->delete($c2),
             $method === 'POST'  && $c1 === 'batch' && $c3 === 'remind' => $ctrl->remind($c2),
@@ -808,6 +810,7 @@ try {
             $method === 'GET' && $c1 === 'users'   => $ctrl->users(),
             $method === 'GET' && $c1 === 'days'    => $ctrl->days(),
             $method === 'GET' && $c1 === 'history' => $ctrl->history(),
+            $method === 'GET' && $c1 === 'summary' => $ctrl->summary(),
             default => sendError("Route /api/tracking/$c1 not found", 404),
         };
     }

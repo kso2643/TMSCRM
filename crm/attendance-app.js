@@ -79,6 +79,8 @@
       '.at-win span.on{outline:2px solid currentColor}.at-win .w1{background:#dcfce7;color:#166534}.at-win .w2{background:#fef3c7;color:#92400e}.at-win .w3{background:#fee2e2;color:#991b1b}',
       '.at-msg{padding:.6rem .8rem;border-radius:.6rem;font-size:.85rem;margin:.5rem 0}.at-msg.ok{background:#f0fdf4;color:#166534}.at-msg.warn{background:#fffbeb;color:#92400e}.at-msg.bad{background:#fef2f2;color:#991b1b}.at-msg.info{background:#eff6ff;color:#1e40af}',
       '.at-f label{display:block;font-size:.75rem;font-weight:600;color:#475569;margin:.5rem 0 .25rem}',
+      '.at-in{width:100%;max-width:16rem;border:1px solid #cbd5e1;border-radius:.55rem;padding:.55rem .7rem;font-size:1rem;background:#fff;color:#0f172a;margin:.25rem 0}',
+      '.dark .at-in{background:#0f172a;border-color:#334155;color:#f1f5f9}',
       '.at-f textarea,.at-f input,.at-f select{width:100%;border:1px solid #cbd5e1;border-radius:.5rem;padding:.45rem .6rem;font-size:.88rem;background:#fff;color:inherit}.dark .at-f textarea,.dark .at-f input{background:#0f172a;border-color:#334155}',
       '.at-table{width:100%;border-collapse:collapse;font-size:.85rem}.at-tw{overflow-x:auto}',
       '.at-table th{text-align:left;font-size:.72rem;text-transform:uppercase;color:#64748b;padding:.5rem;border-bottom:1px solid #e2e8f0;white-space:nowrap}',
@@ -162,6 +164,23 @@
     return el('div', {}, [cam, el('div', { class: 'at-row' }, [shoot, file])]);
   }
 
+  // Odometer reading: required at punch in and punch out for field staff (state.odoRequired).
+  function odoField(kind) {
+    var hint = kind === 'in' ? (state.lastClosing != null ? 'Yesterday’s closing: ' + Number(state.lastClosing).toLocaleString('en-IN') + ' km' : 'The km shown on your vehicle now')
+      : (state.openingMeter != null ? 'This morning: ' + Number(state.openingMeter).toLocaleString('en-IN') + ' km' : 'The km shown on your vehicle now');
+    var inp = el('input', { class: 'at-in', type: 'number', inputmode: 'decimal', min: '0', step: '0.1', id: 'at-odo-' + kind, value: state.odo || '',
+      placeholder: kind === 'in' ? 'Starting odometer (km)' : 'Closing odometer (km)', 'aria-label': kind === 'in' ? 'Starting odometer reading' : 'Closing odometer reading' });
+    inp.addEventListener('input', function () {
+      state.odo = inp.value;
+      var b = punchBox.querySelector(kind === 'in' ? '#at-in' : '#at-out');
+      if (b) b.disabled = !odoOk() || !state.photo || state.busy || (kind === 'in' && !(state.win || {}).canPunchIn);
+    });
+    return el('label', { class: 'at-f', style: 'display:block;margin-top:.5rem' }, [
+      el('span', { class: 'at-sub', style: 'display:block;font-weight:600;color:inherit', text: '🚗 ' + (kind === 'in' ? 'Starting' : 'Closing') + ' odometer reading (km) *' }),
+      inp, el('span', { class: 'at-sub', style: 'display:block', text: hint })]);
+  }
+  function odoOk() { return !state.odoRequired || (String(state.odo || '').trim() !== '' && !isNaN(Number(state.odo)) && Number(state.odo) >= 0); }
+
   function render() {
     var w = state.win || {}, r = state.record;
     clear(punchBox);
@@ -189,7 +208,8 @@
       if (!r.checkOut) {
         // Punch out needs a fresh photo and the location, same as punch in.
         right.appendChild(el('div', { class: 'at-sub', style: 'margin-top:.5rem', text: (state.photo ? '✓ Photo taken' : '✗ Photo not taken yet') + ' · location is taken when you punch out' }));
-        right.appendChild(el('div', { class: 'at-row' }, [el('button', { class: 'at-btn out', type: 'button', id: 'at-out', disabled: !state.photo || state.busy, onclick: punchOut, text: state.busy ? 'Punching out…' : 'Punch out' })]));
+        if (state.odoRequired) right.appendChild(odoField('out'));
+        right.appendChild(el('div', { class: 'at-row' }, [el('button', { class: 'at-btn out', type: 'button', id: 'at-out', disabled: !state.photo || state.busy || !odoOk(), onclick: punchOut, text: state.busy ? 'Punching out…' : 'Punch out' })]));
         left = photoPanel('out');
       } else {
         left = el('div', { class: 'at-pair' }, [
@@ -207,7 +227,8 @@
     if (w.phase === 'LOCKED' && !can) right.appendChild(el('div', { class: 'at-msg bad', id: 'at-locked', text: 'Punch-in closed at ' + ampm(w.graceUntil) + '. Send the reason below — the punch-in opens once an admin approves it.' }));
     if (w.phase === 'LOCKED' && can) right.appendChild(el('div', { class: 'at-msg ok', text: 'Your request was approved' + (req && req.decidedByName ? ' by ' + req.decidedByName : '') + ' — you can punch in now.' }));
     right.appendChild(el('div', { class: 'at-sub', text: (state.photo ? '✓ Photo taken' : '✗ Photo not taken yet') + ' · location is taken when you punch in' }));
-    var btn = el('button', { class: 'at-btn pri', type: 'button', id: 'at-in', disabled: !can || !state.photo || state.busy, onclick: punchIn, text: state.busy ? 'Punching in…' : 'Punch in' });
+    if (state.odoRequired && can) right.appendChild(odoField('in'));
+    var btn = el('button', { class: 'at-btn pri', type: 'button', id: 'at-in', disabled: !can || !state.photo || state.busy || !odoOk(), onclick: punchIn, text: state.busy ? 'Punching in…' : 'Punch in' });
     right.appendChild(el('div', { class: 'at-row' }, [btn]));
     punchBox.appendChild(el('div', { class: 'at-punch' }, [can ? photoPanel() : el('div', { class: 'at-cam', text: '🔒 Punch-in locked' }), right]));
     renderRequest();
@@ -246,23 +267,26 @@
 
   function punchIn() {
     if (!state.photo) { toast('Take a photo first.', 'err'); return; }
+    if (!odoOk()) { toast('Enter the starting odometer reading.', 'err'); return; }
     state.busy = true; render();
     getLocation().then(function (c) {
-      return api('POST', '/attendance/checkin', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo });
+      return api('POST', '/attendance/checkin', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo, odometer: state.odo || undefined });
     }).then(function (j) {
       toast(j.message || 'Punched in'); state.photo = null;
       try { localStorage.setItem('crm_punched_in', new Date().toDateString()); } catch (e) {}
-      meter('open');
+      var hadOdo = state.odo; state.odo = '';
+      if (!hadOdo) meter('open');
       return load();
     }).catch(function (e) { locFail(e, 'in'); })
       .then(function () { state.busy = false; render(); });
   }
   function punchOut() {
     if (!state.photo) { toast('Take a photo first.', 'err'); return; }
+    if (!odoOk()) { toast('Enter the closing odometer reading.', 'err'); return; }
     if (!confirm('Punch out now?')) return;
     state.busy = true; render();
-    getLocation().then(function (c) { return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo }); })
-      .then(function (j) { toast(j.message || 'Punched out'); state.photo = null; meter('close'); return load(); })
+    getLocation().then(function (c) { return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo, odometer: state.odo || undefined }); })
+      .then(function (j) { toast(j.message || 'Punched out'); state.photo = null; var hadOdo = state.odo; state.odo = ''; if (!hadOdo) meter('close'); return load(); })
       .catch(function (e) { locFail(e, 'out'); })
       .then(function () { state.busy = false; render(); });
   }
@@ -397,6 +421,7 @@
   function load() {
     return api('GET', '/attendance/today').then(function (j) {
       state.record = j.data.record; state.win = j.data.window;
+      state.odoRequired = !!j.data.odometerRequired; state.openingMeter = j.data.openingMeter; state.lastClosing = j.data.lastClosingMeter;
       if (state.record) { try { localStorage.setItem('crm_punched_in', new Date().toDateString()); } catch (e) {} }
       if (!state.stream) render();
       loadHistory(); loadFuel();

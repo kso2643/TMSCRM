@@ -370,18 +370,41 @@ class AlertFeedController
                     '/admin/location-history/', $r['startedAt']);
             }
             foreach (self::rows(
-                "SELECT s.id, s.eventType, s.minutes, s.detectedAt, u.name AS whoName FROM `StationaryLog` s
+                "SELECT s.id, s.userId, s.eventType, s.minutes, s.detectedAt, s.lat, s.lng, u.name AS whoName FROM `StationaryLog` s
                  LEFT JOIN `User` u ON u.id = s.userId
                  WHERE s.detectedAt>? AND s.userId<>? ORDER BY s.detectedAt DESC LIMIT $per",
                 [$since, $me]) as $r) {
                 $who = $r['whoName'] ?: 'Someone';
                 if ($r['eventType'] === 'LOCATION_OFF') {
-                    $add('loc-off-' . $r['id'], 'LOCATION_OFF', 'Location turned off', $who . ' is punched in but location is off — tracking is paused', '/admin/location-history/', $r['detectedAt']);
+                    $where = $r['lat'] !== null ? ' — last seen at ' . round((float) $r['lat'], 5) . ', ' . round((float) $r['lng'], 5) . ' (tap to see on the map)' : '';
+                    $add('loc-off-' . $r['id'], 'LOCATION_OFF', '📵 ' . $who . ' turned location off',
+                        $who . ' turned off location at ' . date('g:i a', strtotime($r['detectedAt'])) . ' while punched in' . $where,
+                        '/admin/location-history/?userId=' . rawurlencode($r['userId']) . '&date=' . substr($r['detectedAt'], 0, 10), $r['detectedAt']);
                 } else {
                     $add('stationary-' . $r['id'], 'STATIONARY', 'In one place for ' . (int) $r['minutes'] . '+ min',
                         $who . ($r['eventType'] === 'STATIONARY_WORKING' ? ' says it is not a break (working there)' : ' did not answer the break prompt'),
                         '/admin/location-history/', $r['detectedAt']);
                 }
+            }
+        }
+
+        // No location from someone punched in for 30+ minutes (phone off, app closed, GPS off without
+        // the page noticing) — once per silence, with where they were last seen (Super Admin).
+        if ($isSuper) {
+            foreach (self::rows(
+                "SELECT a.id, a.userId, a.checkIn, u.name AS whoName,
+                        (SELECT p.capturedAt FROM `LocationPing` p WHERE p.attendanceId=a.id ORDER BY p.capturedAt DESC LIMIT 1) AS lastAt,
+                        (SELECT CONCAT(p.lat, ',', p.lng) FROM `LocationPing` p WHERE p.attendanceId=a.id ORDER BY p.capturedAt DESC LIMIT 1) AS lastLL
+                 FROM `Attendance` a LEFT JOIN `User` u ON u.id=a.userId
+                 WHERE a.date>=? AND a.checkIn IS NOT NULL AND a.checkOut IS NULL AND a.userId<>?", [start_of_day(), $me]) as $r) {
+                $last = $r['lastAt'] ?: $r['checkIn'];
+                $at = date('Y-m-d H:i:s', strtotime($last) + 1800);
+                if ($at > now_sql() || $at <= $since) continue;
+                $ll = $r['lastLL'] ? array_map(fn($x) => round((float) $x, 5), explode(',', $r['lastLL'])) : null;
+                $who = $r['whoName'] ?: 'Someone';
+                $add('no-loc-' . $r['id'] . '-' . strtotime($last), 'LOCATION_OFF', '📵 No location from ' . $who,
+                    $who . ' is punched in but has sent no location since ' . date('g:i a', strtotime($last)) . ($ll ? ' — last seen at ' . $ll[0] . ', ' . $ll[1] : '') . '. Phone off, app closed or location off.',
+                    '/admin/location-history/?userId=' . rawurlencode($r['userId']) . '&date=' . substr($last, 0, 10), $at);
             }
         }
 

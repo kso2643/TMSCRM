@@ -72,6 +72,10 @@ class AttendanceController
             sendError($r && $r['status'] === 'PENDING' ? 'Punch-in is locked after ' . self::GRACE_UNTIL . '. Your request is waiting for admin approval.'
                 : 'Punch-in closed at ' . self::GRACE_UNTIL . '. Send a request with the reason — an admin will release the punch-in.', 403);
         }
+        // Field staff: the starting odometer reading is required (it starts the day's fuel / km record).
+        $odoRequired = FuelExpenseController::odometerRequired($auth['id']);
+        $hasOdo = isset($b['odometer']) && trim((string) $b['odometer']) !== '';
+        $opening = ($odoRequired || $hasOdo) ? FuelExpenseController::readMeter($b['odometer'] ?? '', 'starting') : null;
         // Photo is required (selfie at punch-in).
         [$bin, $ext] = self::decodePhoto($b['photo'] ?? '', 'in');
 
@@ -91,7 +95,9 @@ class AttendanceController
                     ($win['phase'] === 'LOCKED' && $win['request']) ? $win['request']['id'] : null, now_sql(), now_sql()]);
 
         $s2 = db()->prepare('SELECT * FROM `Attendance` WHERE id=? LIMIT 1'); $s2->execute([$id]);
-        sendSuccess(['record' => $s2->fetch()], 'Check-in recorded', 201);
+        $rec = $s2->fetch();
+        if ($opening !== null) FuelExpenseController::recordOpening($auth['id'], $rec, $opening);
+        sendSuccess(['record' => $rec, 'odometer' => $opening], 'Check-in recorded', 201);
     }
 
     // POST /api/attendance/checkout
@@ -114,6 +120,13 @@ class AttendanceController
         if ($lat === null || $lng === null) {
             sendError('Location is required to punch out. Turn on location (GPS) on your device and allow this site to use it, then try again.', 400);
         }
+        // Field staff: the closing odometer reading is required (not below this morning's).
+        $hasOdo = isset($b['odometer']) && trim((string) $b['odometer']) !== '';
+        $closing = null; $fx = null;
+        if (FuelExpenseController::odometerRequired($auth['id']) || $hasOdo) {
+            $closing = FuelExpenseController::readMeter($b['odometer'] ?? '', 'closing');
+            $fx = FuelExpenseController::checkClosing($record, $closing);
+        }
         // Photo is required at punch-out too.
         [$bin, $ext] = self::decodePhoto($b['photo'] ?? '', 'out');
         $outPhoto = self::savePhoto($record['id'] . '_out', $bin, $ext);
@@ -124,6 +137,7 @@ class AttendanceController
             'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,checkOutPhoto=?,workingHours=?,updatedAt=? WHERE id=?'
         )->execute([now_sql(), $lat, $lng, $outPhoto, $hours, now_sql(), $record['id']]);
 
+        if ($closing !== null && $fx) FuelExpenseController::recordClosing($fx, $closing);
         $s2 = db()->prepare('SELECT * FROM `Attendance` WHERE id=? LIMIT 1'); $s2->execute([$record['id']]);
         $upd = $s2->fetch();
         sendSuccess(['record' => $upd], "Checked out. Working hours: {$upd['workingHours']}h");
@@ -356,7 +370,23 @@ class AttendanceController
         $start = start_of_day(); $end = start_of_day_plus(1);
         $s = db()->prepare('SELECT * FROM `Attendance` WHERE userId=? AND date>=? AND date<? LIMIT 1');
         $s->execute([$auth['id'], $start, $end]);
-        sendSuccess(['record' => $s->fetch() ?: null, 'window' => $this->window($auth['id'])]);
+        $rec = $s->fetch() ?: null;
+        $fx = null;
+        if ($rec) { try { $f = db()->prepare('SELECT openingMeter, closingMeter FROM `FuelExpense` WHERE attendanceId=? LIMIT 1'); $f->execute([$rec['id']]); $fx = $f->fetch() ?: null; } catch (PDOException $e) {} }
+        sendSuccess(['record' => $rec, 'window' => $this->window($auth['id']),
+                     'odometerRequired' => FuelExpenseController::odometerRequired($auth['id']),
+                     'openingMeter' => $fx && $fx['openingMeter'] !== null ? (float) $fx['openingMeter'] : null,
+                     'lastClosingMeter' => self::lastClosing($auth['id'])]);
+    }
+
+    /** The last closing odometer reading, shown as a hint at punch in. */
+    private static function lastClosing(string $uid): ?float
+    {
+        try {
+            $s = db()->prepare('SELECT closingMeter FROM `FuelExpense` WHERE userId=? AND closingMeter IS NOT NULL ORDER BY date DESC LIMIT 1');
+            $s->execute([$uid]); $v = $s->fetchColumn();
+            return $v === false || $v === null ? null : (float) $v;
+        } catch (PDOException $e) { return null; }
     }
 
     // POST /api/attendance/late-request { reason } — after the grace time, ask an admin to release punch-in

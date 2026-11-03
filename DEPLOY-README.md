@@ -1,3 +1,34 @@
+# Update — 3 Nov (c): Accurate tracking + km per engineer + location-off alerts with the place, odometer required, suppliers item by item, CEO chooses the supplier (Android app 1.0.9)
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Install Android app 1.0.9** on the engineers' phones (GitHub → Releases → `crm-apps`).
+- **New file:** `crm/supplier-panel.js`.
+- **Database:** new supplier-choice columns are added automatically.
+
+1. **Location tracking, km, alerts, odometer**
+   - **More accurate tracking**
+     - Points are recorded every 30 s while moving and every 2 min when standing still.
+     - Vague tower / Wi-Fi fixes and GPS glitches (impossible jumps) are left out of the distance.
+     - **Android 1.0.9** keeps recording with the phone's GPS while the engineer is punched in — also when the app is closed or the phone is locked. Before, recording stopped as soon as the screen went off.
+     - It stops at punch out. The Phone alerts card shows whether tracking is on.
+   - **Location history → 🚗 Kilometres travelled**
+     - Every engineer for any dates: the GPS road distance, the odometer km they entered, days, km per day, and how often the location went off.
+     - Click a name for each day; click a day to replay the route on the map.
+   - **Location off → CEO alert with the place:** "📵 Raj turned location off at 3:42 pm — last seen at 11.0168, 76.9558". The alert opens that person's day on the map, where a 📵 marks the spot.
+   - **No location for 30 minutes** while punched in (phone switched off, app closed, location off): a CEO alert with the last place seen.
+   - **Odometer is required:** sales engineers, and anyone with a vehicle on file, must type the **starting odometer reading to punch in** and the **closing reading to punch out**.
+     - The closing reading can't be below the starting one.
+     - Km and the fuel claim are filled in automatically on the Fuel expense page.
+     - Office staff without a vehicle are not asked.
+2. **CEO Desk → 💰 Price requests** (Super Admin / Admin)
+   - Type the price request number (with or without the initials, e.g. `PR-2611-0005`) to see all its items with every supplier's price.
+   - Ask more suppliers for any item, compare (the best net price is starred ★) and press **Choose** on the supplier to buy from, with an optional note.
+   - One supplier per item. The admins and the engineer who asked get an alert: "✔ MD Super chose Kandha Machinery for EM-10…".
+   - The Price requests page shows "✔ Buy from … — chosen by …" on that item, and the answer hint uses the chosen supplier.
+3. **Price requests → Get price from supplier**
+   - **Same supplier(s) for all items:** pick one or more suppliers — each gets one message with the ticked items.
+   - **Supplier item by item:** e.g. the drills to the Zecha dealer, the end mills to another brand's dealer, or several suppliers for one item to compare. Each supplier gets **its own message with only its items** (tool-wise), with its own editable text, **its own note**, and Copy / WhatsApp / E-mail.
+   - Supplier prices are now grouped by item, so suppliers are easy to compare.
+
 # Update — 3 Nov (b): PDFs save in the phone / PC app, paste screenshots while typing, supplier message edit + note, initials in PR / quotation numbers, quotation revisions R1 / R2
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

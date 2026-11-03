@@ -550,6 +550,20 @@ public class MainActivity extends AppCompatActivity {
             });
         }
 
+        /** Punched in → record the route with the phone's GPS (AlertService), also when the app is closed. */
+        @JavascriptInterface
+        public void setTracking(boolean on) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl))) return;
+            android.content.SharedPreferences p = AlertNotifier.prefs(MainActivity.this);
+            boolean was = p.getBoolean("tracking", false);
+            p.edit().putBoolean("tracking", on).apply();
+            if (was != on || (on && !AlertService.trackingActive)) runOnUiThread(() -> AlertService.start(MainActivity.this));
+        }
+
+        /** True while the app itself is sending the location points (the page then doesn't). */
+        @JavascriptInterface
+        public boolean isTracking() { return AlertService.trackingActive; }
+
         /** For the "Phone alerts" card on the Notifications page. */
         @JavascriptInterface
         public String alertStatus() {
@@ -566,6 +580,10 @@ public class MainActivity extends AppCompatActivity {
                         .put("lastCheck", p.getLong("lastPollAt", 0))
                         .put("lastResult", p.getString("lastResult", ""))
                         .put("lastError", p.getString("lastError", ""))
+                        .put("tracking", p.getBoolean("tracking", false))
+                        .put("trackingActive", AlertService.trackingActive)
+                        .put("location", AlertService.canLocate(MainActivity.this))
+                        .put("lastPing", p.getLong("lastPingAt", 0))
                         .put("maker", Build.MANUFACTURER)
                         .put("android", Build.VERSION.RELEASE)
                         .put("app", BuildConfig.VERSION_NAME).toString();

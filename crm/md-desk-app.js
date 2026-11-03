@@ -779,7 +779,11 @@
     var tasksHidden = false;
     try { tasksHidden = ((JSON.parse(localStorage.getItem('crm_page_access') || 'null') || {}).access || {}).tasks === 'hidden'; } catch (e) {}
     var viewList = [['desk', '📨 Desk'], ['quotes', '📄 Quotations']];
+    var canPrice = (state.role === 'SUPER_ADMIN' || state.role === 'ADMIN') && window.SupplierPanel;
+    if (canPrice) viewList.push(['prices', '💰 Price requests']);
     if (!tasksHidden && window.Tasks) viewList.push(['tasks', '✅ Tasks']);
+    var priceView = el('div', { id: 'md-prices', style: 'display:none' });
+    var pricesMounted = false;
     // Desk (messages, tasks…) | Quotations (follow-up status, price negotiation) | Tasks (the old Tasks page)
     var views = el('div', { class: 'md-tabs', style: 'margin-bottom:1rem' }, viewList.map(function (v) {
       return el('button', { type: 'button', class: 'md-tab' + (v[0] === 'desk' ? ' on' : ''), 'data-view': v[0], text: v[1], onclick: function () { showView(v[0]); } });
@@ -787,11 +791,14 @@
     function showView(v) {
       Array.prototype.forEach.call(views.children, function (b) { b.classList.toggle('on', b.getAttribute('data-view') === v); });
       deskView.style.display = v === 'desk' ? '' : 'none'; quoteView.style.display = v === 'quotes' ? '' : 'none'; taskView.style.display = v === 'tasks' ? '' : 'none';
+      priceView.style.display = v === 'prices' ? '' : 'none';
       if (v === 'quotes') quotesView(quoteView);
+      if (v === 'prices' && !pricesMounted) { pricesMounted = true; pricesView(priceView); }
       if (v === 'tasks' && !tasksMounted) { tasksMounted = true; window.Tasks.mountPage(taskView); }
-      try { history.replaceState(null, '', v === 'quotes' ? '#quotes' : v === 'tasks' ? '#tasks' : location.pathname); } catch (e) {}
+      try { history.replaceState(null, '', v === 'quotes' ? '#quotes' : v === 'tasks' ? '#tasks' : v === 'prices' ? '#prices' : location.pathname); } catch (e) {}
     }
-    root.appendChild(views); root.appendChild(deskView); root.appendChild(quoteView); root.appendChild(taskView);
+    root.appendChild(views); root.appendChild(deskView); root.appendChild(quoteView); root.appendChild(priceView); root.appendChild(taskView);
+    if (canPrice && /^#prices/.test(location.hash)) setTimeout(function () { showView('prices'); }, 0);
     content.appendChild(root);
     if (location.hash === '#quotes') setTimeout(function () { showView('quotes'); }, 0);
     var th = location.hash.match(/^#tasks(?:-([a-z]+))?$/);
@@ -802,8 +809,39 @@
     var origRender = renderList;
     renderList = function () { stSel.value = state.status; origRender(); };
     api('GET', '/md-desk/recipients').then(function (j) { state.users = j.data.users || []; state.allUsers = j.data.allUsers || state.users; state.canGroups = !!j.data.canSendToGroups; renderForm(); }).catch(function () { renderForm(); });
-    load().then(function () { var h = location.hash.slice(1); if (h && h !== 'quotes' && !/^tasks/.test(h)) open(decodeURIComponent(h)); });
+    load().then(function () { var h = location.hash.slice(1); if (h && h !== 'quotes' && !/^tasks/.test(h) && !/^prices/.test(h)) open(decodeURIComponent(h)); });
     timer = setInterval(function () { if (document.visibilityState === 'visible' && !document.querySelector('.md-modal')) load(); }, 30000);
+  }
+
+  // ── Price requests: type the PR number → all its items; ask suppliers (whole request or item by
+  //    item), compare their prices and choose the supplier to buy from (supplier-panel.js) ──
+  function pricesView(host) {
+    var no = el('input', { type: 'search', id: 'md-pr-no', placeholder: 'Price request number, e.g. PR-2611-0005-JK', style: 'min-width:18rem;flex:1' });
+    var go = el('button', { type: 'button', class: 'md-btn pri', id: 'md-pr-load', text: 'Show items' });
+    var info = el('div', { id: 'md-pr-info', style: 'margin:.6rem 0' });
+    var panel = el('div', { id: 'md-pr-panel' });
+    function show() {
+      var v = no.value.trim();
+      if (!v) { no.focus(); return; }
+      clear(info).appendChild(el('div', { class: 'md-empty', text: 'Looking up ' + v + '…' })); clear(panel);
+      api('GET', '/price-requests/supplier-lookup?no=' + encodeURIComponent(v)).then(function (j) {
+        var b = j.data.batch;
+        no.value = b.requestNo;
+        try { history.replaceState(null, '', '#prices-' + encodeURIComponent(b.requestNo)); } catch (e) {}
+        clear(info).appendChild(el('div', { style: 'display:flex;flex-wrap:wrap;gap:.6rem;align-items:baseline' }, [
+          el('b', { style: 'font-size:1.05rem', text: b.requestNo }),
+          el('span', { text: (b.companyName || 'No customer') + ' · asked by ' + (b.engineerName || '—') + ' · ' + String(b.createdAt || '').slice(0, 10) }),
+          el('a', { href: '/price-requests/?q=' + encodeURIComponent(b.requestNo), text: 'Open on the Price requests page →' })]));
+        window.SupplierPanel.render(panel, b.id, { requestNo: b.requestNo });
+      }).catch(function (e) { clear(info).appendChild(el('div', { class: 'md-empty', style: 'color:#b91c1c', text: e.message })); });
+    }
+    go.onclick = show;
+    no.addEventListener('keydown', function (e) { if (e.key === 'Enter') show(); });
+    host.appendChild(el('div', { class: 'md-card' }, [
+      el('p', { style: 'margin:0 0 .5rem', text: 'Type a price request number to see all its items. Ask suppliers for the whole request or item by item, compare their prices, and choose the supplier to buy from — the admins are told and see it on the Price requests page.' }),
+      el('div', { class: 'md-bar' }, [no, go]), info, panel]));
+    var m = location.hash.match(/^#prices-(.+)$/);
+    if (m) { no.value = decodeURIComponent(m[1]); show(); }
   }
 
   // ── Quotations: every quotation with its follow-up status, engineer / admin wise ──

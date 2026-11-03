@@ -412,13 +412,15 @@
         if (trk.active) trk.active.fetchedAt = Date.now();
         if (trk.punchedIn && !was) startWatch();
         if (!trk.punchedIn) { stopWatch(); statSet(null); }
+        // Android app: track with the phone's GPS in the background while punched in (also when the app is closed)
+        try { if (window.CRMNative && window.CRMNative.setTracking) window.CRMNative.setTracking(!!trk.punchedIn); } catch (e) {}
         renderPill();
       }).catch(function () {});
   }
 
   function startWatch() {
     if (trk.watchId !== null || !navigator.geolocation) { if (!navigator.geolocation) setLocOff(true); return; }
-    trk.watchId = navigator.geolocation.watchPosition(onFix, onFixError, { enableHighAccuracy: true, maximumAge: 60000, timeout: 60000 });
+    trk.watchId = navigator.geolocation.watchPosition(onFix, onFixError, { enableHighAccuracy: true, maximumAge: 10000, timeout: 60000 });
   }
   function stopWatch() {
     if (trk.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(trk.watchId);
@@ -428,9 +430,16 @@
     var fix = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, t: Date.now() };
     trk.last = fix;
     setLocOff(false);
-    // Location point every 2 minutes (the attendance page sends its own).
-    if (Date.now() - trk.lastPingAt > PING_MS && !/^\/attendance/.test(location.pathname)) {
-      trk.lastPingAt = Date.now();
+    // Location points (the attendance page sends its own; the Android app sends them itself, also
+    // when the app is closed): every 30 s while moving, every 2 min when standing still. Vague fixes
+    // (> 100 m) are only used when nothing better came for 5 minutes, so the route stays accurate.
+    var native = false;
+    try { native = !!(window.CRMNative && window.CRMNative.isTracking && window.CRMNative.isTracking()); } catch (e) {}
+    var since = Date.now() - trk.lastPingAt;
+    var moved = trk.lastSent ? metersBetween(trk.lastSent, fix) : Infinity;
+    var good = fix.accuracy <= 100 || since > 5 * 60000;
+    if (!native && good && !/^\/attendance/.test(location.pathname) && (since > PING_MS || (since > 30000 && moved > Math.max(50, fix.accuracy)))) {
+      trk.lastPingAt = Date.now(); trk.lastSent = fix;
       post('/attendance/ping', { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy }).catch(function () {});
     }
     // Same place?
@@ -453,7 +462,8 @@
     b.addEventListener('click', function () { stopWatch(); startWatch(); });
     ban.appendChild(b);
     r.appendChild(ban);
-    post('/breaks/stationary', { eventType: 'LOCATION_OFF' }).catch(function () {});
+    var lf = trk.last || {};
+    post('/breaks/stationary', { eventType: 'LOCATION_OFF', lat: lf.lat, lng: lf.lng }).catch(function () {});
   }
 
   function checkStationary() {

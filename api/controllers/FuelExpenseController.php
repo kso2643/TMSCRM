@@ -179,6 +179,66 @@ class FuelExpenseController
         return number_format($n, $n == (int)$n ? 0 : 1);
     }
 
+    // ── Odometer at punch in / punch out (Attendance page) ──────────────
+    /** Field staff (sales engineers, or anyone with a vehicle on file) must give the odometer reading to punch in / out. */
+    public static function odometerRequired(string $userId): bool
+    {
+        $s = db()->prepare('SELECT role, vehicleType FROM `User` WHERE id=?'); $s->execute([$userId]);
+        $u = $s->fetch();
+        return $u && (in_array($u['role'], ['SALES', 'SALES_ENGINEER'], true) || trim((string) $u['vehicleType']) !== '');
+    }
+
+    /** Checks a typed reading; returns the number or sends a 400 with what to fix. */
+    public static function readMeter($v, string $what): float
+    {
+        $v = str_replace([',', ' ', 'km', 'KM'], '', (string) $v);
+        if ($v === '' || !is_numeric($v)) sendError("Enter the $what odometer reading (km shown on the vehicle).", 400);
+        $n = (float) $v;
+        if ($n < 0 || $n > 9999999) sendError("The $what odometer reading doesn't look right.", 400);
+        return $n;
+    }
+
+    /** The day's starting reading, saved with the punch in (vehicle details come from the employee's profile). */
+    public static function recordOpening(string $userId, array $attendance, float $opening): void
+    {
+        new self();   // tables
+        $u = db()->prepare('SELECT vehicleType,vehicleDetails,vehicleMileage,vehicleFuelPrice FROM `User` WHERE id=? LIMIT 1');
+        $u->execute([$userId]); $pr = $u->fetch() ?: [];
+        $s = db()->prepare('SELECT id FROM `FuelExpense` WHERE attendanceId=? LIMIT 1'); $s->execute([$attendance['id']]);
+        if ($id = $s->fetchColumn()) {
+            db()->prepare('UPDATE `FuelExpense` SET openingMeter=?,updatedAt=? WHERE id=?')->execute([$opening, now_sql(), $id]);
+            return;
+        }
+        db()->prepare('INSERT INTO `FuelExpense` (id,attendanceId,userId,date,vehicleType,vehicleDetails,mileageUsed,fuelPriceUsed,openingMeter,personalKm,miscAmount,status,createdAt,updatedAt)
+                       VALUES (?,?,?,?,?,?,?,?,?,0,0,\'OPEN\',?,?)')
+            ->execute([gen_id(), $attendance['id'], $userId, $attendance['date'], $pr['vehicleType'] ?? null, $pr['vehicleDetails'] ?? null,
+                       isset($pr['vehicleMileage']) ? (float) $pr['vehicleMileage'] : null, isset($pr['vehicleFuelPrice']) ? (float) $pr['vehicleFuelPrice'] : null,
+                       $opening, now_sql(), now_sql()]);
+    }
+
+    /** Before punch out: the closing reading must not be below the starting one. Returns the open entry (or null). */
+    public static function checkClosing(array $attendance, float $closing): ?array
+    {
+        new self();
+        $s = db()->prepare('SELECT * FROM `FuelExpense` WHERE attendanceId=? LIMIT 1'); $s->execute([$attendance['id']]);
+        $fx = $s->fetch() ?: null;
+        if ($fx && $fx['openingMeter'] !== null && $closing < (float) $fx['openingMeter'])
+            sendError('The closing reading (' . $closing . ') can’t be less than this morning’s starting reading (' . (float) $fx['openingMeter'] . ').', 400);
+        return $fx;
+    }
+
+    /** The day's closing reading, saved with the punch out: km and the fuel claim are worked out as on the Fuel expense page. */
+    public static function recordClosing(array $fx, float $closing): void
+    {
+        if (!$fx || $fx['status'] === 'CLOSED') return;
+        $me = new self();
+        $official = $me->officialKm((float) $fx['openingMeter'], $closing, (float) ($fx['personalKm'] ?? 0));
+        $fuel = $me->fuelCost(max(0, $official), $fx['mileageUsed'] !== null ? (float) $fx['mileageUsed'] : null, $fx['fuelPriceUsed'] !== null ? (float) $fx['fuelPriceUsed'] : null);
+        $misc = (float) ($fx['miscAmount'] ?? 0);
+        db()->prepare('UPDATE `FuelExpense` SET closingMeter=?,officialKm=?,fuelCost=?,totalAmount=?,status=\'CLOSED\',updatedAt=? WHERE id=?')
+            ->execute([$closing, $official, $fuel, round2($fuel + $misc), now_sql(), $fx['id']]);
+    }
+
     // POST /api/fuel-expense/start
     public function start(): void
     {

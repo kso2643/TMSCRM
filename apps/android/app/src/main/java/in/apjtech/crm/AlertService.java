@@ -1,5 +1,6 @@
 package in.apjtech.crm;
 
+import android.Manifest;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.PendingIntent;
@@ -7,7 +8,13 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.os.Bundle;
+import android.os.Looper;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -123,6 +130,83 @@ public class AlertService extends Service {
         running = true;
     }
 
+    // ── Location tracking while punched in (also when the app is closed) ────────────────
+    // The page says when someone is punched in (CRMNative.setTracking). The phone's GPS then sends
+    // a point every 30 s while moving and every 2 min when standing still (vague fixes > 100 m only
+    // when nothing better came for 5 min) to /api/attendance/ping, so the route and km are complete.
+    // GPS switched off → the CEO is told where (LOCATION_OFF with the last point).
+    static volatile boolean trackingActive = false;
+    private LocationManager lm;
+    private Location lastSent, lastGood;
+    private long lastSentAt = 0;
+    private final LocationListener listener = new LocationListener() {
+        @Override public void onLocationChanged(Location l) { onFix(l); }
+        @Override public void onProviderDisabled(String provider) { if (LocationManager.GPS_PROVIDER.equals(provider)) locationOff(); }
+        @Override public void onProviderEnabled(String provider) { }
+        @Override public void onStatusChanged(String provider, int status, Bundle extras) { }
+    };
+
+    static boolean wantsTracking(Context c) { return AlertNotifier.prefs(c).getBoolean("tracking", false) && hasSession(c); }
+    static boolean canLocate(Context c) {
+        return ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            || ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void startTracking() {
+        if (trackingActive) return;
+        lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (lm == null) return;
+        try {
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 15_000L, 0f, listener, Looper.getMainLooper());
+            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 30_000L, 0f, listener, Looper.getMainLooper());
+            lm.requestLocationUpdates(LocationManager.PASSIVE_PROVIDER, 15_000L, 0f, listener, Looper.getMainLooper());
+            trackingActive = true;
+        } catch (SecurityException | IllegalArgumentException e) { trackingActive = false; }
+    }
+
+    private void stopTracking() {
+        if (lm != null) try { lm.removeUpdates(listener); } catch (Exception ignored) { }
+        trackingActive = false;
+    }
+
+    private void onFix(Location l) {
+        if (l == null) return;
+        long now = System.currentTimeMillis();
+        boolean good = l.hasAccuracy() && l.getAccuracy() <= 100;
+        if (good) lastGood = l;
+        Location use = good ? l : (now - lastSentAt > 5 * 60_000L ? (lastGood != null && now - lastGood.getTime() < 120_000L ? lastGood : l) : null);
+        if (use == null) return;
+        long since = now - lastSentAt;
+        float moved = lastSent == null ? Float.MAX_VALUE : lastSent.distanceTo(use);
+        boolean send = since >= 120_000L || (since >= 30_000L && moved > Math.max(50f, use.getAccuracy()));
+        if (!send) return;
+        lastSent = use; lastSentAt = now;
+        final String json;
+        try {
+            json = new JSONObject().put("lat", use.getLatitude()).put("lng", use.getLongitude()).put("accuracy", use.hasAccuracy() ? use.getAccuracy() : JSONObject.NULL).put("source", "app").toString();
+        } catch (Exception e) { return; }
+        final String token = AlertNotifier.prefs(this).getString("token", "");
+        new Thread(() -> {
+            try {
+                String[] r = http("POST", "/api/attendance/ping", token, json, null);
+                if ("400".equals(r[0]) && r[1].contains("Punch in")) AlertNotifier.prefs(this).edit().putBoolean("tracking", false).apply();   // punched out elsewhere
+                AlertNotifier.prefs(this).edit().putLong("lastPingAt", System.currentTimeMillis()).apply();
+            } catch (Exception ignored) { }
+        }, "crm-ping").start();
+    }
+
+    private void locationOff() {
+        final String token = AlertNotifier.prefs(this).getString("token", "");
+        final Location l = lastSent != null ? lastSent : lastGood;
+        new Thread(() -> {
+            try {
+                JSONObject b = new JSONObject().put("eventType", "LOCATION_OFF");
+                if (l != null) b.put("lat", l.getLatitude()).put("lng", l.getLongitude());
+                http("POST", "/api/breaks/stationary", token, b.toString(), null);
+            } catch (Exception ignored) { }
+        }, "crm-locoff").start();
+    }
+
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         Notification n = new NotificationCompat.Builder(this, AlertNotifier.CHANNEL_SERVICE)
                 .setSmallIcon(R.drawable.ic_stat_notify)
@@ -134,16 +218,28 @@ public class AlertService extends Service {
                 .setShowWhen(false)
                 .setContentIntent(AlertNotifier.openIntent(this, null, null, ID))
                 .build();
+        boolean track = wantsTracking(this) && canLocate(this);
+        boolean located = false;
         try {
-            if (Build.VERSION.SDK_INT >= 34) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING);
-            else startForeground(ID, n);
-        } catch (Exception e) { stopSelf(); return START_NOT_STICKY; }
+            if (Build.VERSION.SDK_INT >= 29 && track) {   // location type: allowed while the app is open (Android checks)
+                startForeground(ID, n, (Build.VERSION.SDK_INT >= 34 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING : 0) | ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+                located = true;
+            }
+        } catch (Exception e) { located = false; }
+        if (!located) {
+            try {
+                if (Build.VERSION.SDK_INT >= 34) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING);
+                else startForeground(ID, n);
+            } catch (Exception e) { stopSelf(); return START_NOT_STICKY; }
+        }
         if (!hasSession(this)) { stopSelf(); return START_NOT_STICKY; }
+        if (track && (located || Build.VERSION.SDK_INT < 29)) startTracking(); else if (!track) stopTracking();
         pollInBackground(this, null);   // check now; it books the next check itself
         return START_STICKY;
     }
 
     @Override public void onDestroy() {
+        stopTracking();
         running = false;
         super.onDestroy();
     }

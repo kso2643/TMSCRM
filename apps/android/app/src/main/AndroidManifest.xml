@@ -15,6 +15,7 @@
     <!-- alerts like WhatsApp messages when the app is closed (AlertService), started again after a restart -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- wake the phone for each alert check (AlertAlarmReceiver) -->
@@ -54,7 +55,7 @@
         <service
             android:name=".AlertService"
             android:exported="false"
-            android:foregroundServiceType="remoteMessaging" />
+            android:foregroundServiceType="remoteMessaging|location" />
 
         <receiver android:name=".NotifyActionReceiver" android:exported="false" />
         <receiver android:name=".AlertAlarmReceiver" android:exported="false" />

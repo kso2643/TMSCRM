@@ -770,118 +770,30 @@
     det.appendChild(box);
     det.addEventListener('toggle', function () { state.supOpen[b.id] = det.open; if (det.open && !box.firstChild) load(); });
     if (det.open) load();
+    // The panel itself is shared with the CEO Desk (supplier-panel.js): suppliers for the whole request
+    // or item by item, one message per supplier, prices grouped by item, "Choose" the supplier to buy from.
     function load() {
-      clear(box).appendChild(el('div', { class: 'pr-meta', text: 'Loading…' }));
-      api('GET', '/price-requests/batch/' + encodeURIComponent(b.id) + '/supplier').then(function (j) { draw(j.data); })
-        .catch(function (e) { clear(box).appendChild(el('div', { class: 'pr-meta', text: e.message })); });
-    }
-    function draw(d) {
-      clear(box);
-      var byItem = {}; d.items.forEach(function (it) { byItem[it.id] = it; });
-      // ask a supplier
-      var vSel = el('select', { class: 'pr-in', 'aria-label': 'Supplier', 'data-sup-vendor': '1' }, [el('option', { value: '', text: 'Choose supplier…' })]
-        .concat(d.vendors.map(function (v) { return el('option', { value: v.id, text: v.name + (v.brands ? ' · ' + v.brands : '') }); }))
-        .concat([el('option', { value: '__other', text: 'Other (type the name)…' })]));
-      var other = el('input', { class: 'pr-in', placeholder: 'Supplier name', style: 'display:none', 'data-sup-other': '1' });
-      vSel.onchange = function () { other.style.display = vSel.value === '__other' ? '' : 'none'; };
-      var checks = el('div', { class: 'pr-sup-items' }, d.items.map(function (it) {
-        var cb = el('input', { type: 'checkbox', value: it.id, checked: it.status === 'PENDING' || d.items.every(function (x) { return x.status !== 'PENDING'; }) });
-        return el('label', {}, [cb, ' ' + (it.itemCode || it.productName) + (it.quantity != null ? ' × ' + Number(it.quantity) : '')]);
-      }));
-      var msgBox = el('div', {});
-      var ask = el('button', { class: 'pr-btn pri sm', type: 'button', 'data-sup-ask': '1', text: 'Create supplier request', onclick: function () {
-        var ids = Array.prototype.filter.call(checks.querySelectorAll('input'), function (c) { return c.checked; }).map(function (c) { return c.value; });
-        var body = vSel.value === '__other' ? { vendorName: other.value.trim(), itemIds: ids } : { vendorId: vSel.value, itemIds: ids };
-        ask.disabled = true;
-        api('POST', '/price-requests/batch/' + encodeURIComponent(b.id) + '/supplier', body).then(function (j) {
-          toast(j.message); d.quotes = j.data.quotes; drawQuotes(); showMessage(j.data);
-        }).catch(function (e) { toast(e.message, 'err'); }).then(function () { ask.disabled = false; });
-      } });
-      // The message can be edited freely; the note below is added at the end. Copy / WhatsApp /
-      // E-mail always send exactly what is on screen.
-      function showMessage(r) {
-        var ta = el('textarea', { class: 'pr-in full', rows: 9, 'data-sup-msg': '1', 'aria-label': 'Message to the supplier (you can edit it)' }, [r.message]);
-        var note = el('textarea', { class: 'pr-in full', rows: 2, 'data-sup-note': '1', placeholder: 'Note to the supplier (optional) — e.g. urgent, need by Friday, send test certificate…' });
-        var phone = String((r.vendor && r.vendor.phone) || '').replace(/\D/g, ''); if (phone.length === 10) phone = '91' + phone;
-        function text() {
-          var t = ta.value.replace(/\s+$/, ''), n = note.value.trim();
-          if (!n) return t;
-          var m = /\n\s*Thank you\.?\s*$/i.exec(t);   // the note goes above "Thank you."
-          return m ? t.slice(0, m.index) + '\n\nNote: ' + n + t.slice(m.index) : t + '\n\nNote: ' + n;
+      if (!window.SupplierPanel) { clear(box).appendChild(el('div', { class: 'pr-meta', text: 'Reload the page (supplier-panel.js not loaded).' })); return; }
+      window.SupplierPanel.render(box, b.id, {
+        requestNo: b.requestNo,
+        onQuotes: function (quotes) {   // best (or chosen) supplier price → hint under the answer boxes
+          var best = {};
+          quotes.forEach(function (q) {
+            var cur = best[q.requestId];
+            if (q.chosen) best[q.requestId] = q;
+            else if (q.netPrice != null && (!cur || (!cur.chosen && q.netPrice < cur.netPrice))) best[q.requestId] = q;
+          });
+          document.querySelectorAll('[data-sup-hint]').forEach(function (h) {
+            var q = best[h.getAttribute('data-sup-hint')];
+            h.textContent = q ? (q.chosen ? '✔ Buy from ' + q.vendorName + (q.netPrice != null ? ' · ' + money(q.netPrice) + ' net' : '') : 'Supplier best: ' + money(q.netPrice) + ' net · ' + q.vendorName) + (q.leadTime ? ' · ' + q.leadTime : '') : '';
+          });
+        },
+        extraActions: function (q) {
+          return q.leadTime && drafts[q.requestId] ? el('button', { class: 'pr-btn sm', type: 'button', title: 'Use this lead time in the answer', text: 'Use lead time', onclick: function () {
+            drafts[q.requestId].approvedLeadTime = q.leadTime; redraw();
+          } }) : null;
         }
-        var wa = el('a', { class: 'pr-btn sm grn', target: '_blank', rel: 'noopener', 'data-sup-wa': '1', text: 'WhatsApp' + (phone ? '' : ' (choose contact)') });
-        var mail = el('a', { class: 'pr-btn sm', 'data-sup-mail': '1', text: '✉ E-mail' });
-        function links() {
-          var t = text();
-          wa.href = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(t);
-          mail.href = 'mailto:' + ((r.vendor && r.vendor.email) || '') + '?subject=' + encodeURIComponent('Price request' + (b.requestNo ? ' ' + b.requestNo : '') + (r.customer ? ' — ' + r.customer : '')) + '&body=' + encodeURIComponent(t);
-        }
-        ta.addEventListener('input', links); note.addEventListener('input', links); links();
-        clear(msgBox).appendChild(el('div', { class: 'pr-sup-msg' }, [
-          el('div', { class: 'pr-meta', text: '✎ You can edit the message' }), ta,
-          el('div', { class: 'pr-meta', style: 'margin-top:.35rem', text: 'Note' }), note,
-          el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.35rem' }, [
-            el('button', { class: 'pr-btn sm', type: 'button', 'data-sup-copy': '1', text: '⧉ Copy', onclick: function () { var t = text(); try { navigator.clipboard.writeText(t); } catch (e) { ta.select(); document.execCommand('copy'); } toast('Message copied'); } }),
-            wa, mail
-          ])]));
-      }
-      box.appendChild(el('div', { class: 'pr-sup-ask' }, [el('b', { text: 'Ask a supplier' }), el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap;align-items:center' }, [vSel, other, ask]), checks, msgBox]));
-      // vendor price list
-      var plHits = d.items.filter(function (it) { return d.priceList[String(it.itemCode || '').toUpperCase()]; });
-      if (plHits.length) box.appendChild(el('div', { class: 'pr-sup-pl' }, [el('b', { text: 'On vendor price lists' })].concat(plHits.map(function (it) {
-        return el('div', { class: 'pr-meta' }, [el('b', { text: it.itemCode + ': ' }), d.priceList[String(it.itemCode).toUpperCase()].slice(0, 4).map(function (p) {
-          return p.vendorName + ' ' + money(p.netPrice != null ? p.netPrice : p.price) + (p.discount != null && p.netPrice == null ? ' −' + Number(p.discount) + '%' : '') + (p.leadTime ? ' (' + p.leadTime + ')' : '') + (p.stockQty != null ? ' · stock ' + Number(p.stockQty) : '');
-        }).join(' · ')]);
-      }))));
-      var qBox = el('div', {});
-      box.appendChild(qBox);
-      function drawQuotes() {
-        clear(qBox);
-        // best supplier price per item → hint under the answer boxes
-        var best = {};
-        d.quotes.forEach(function (q) { if (q.netPrice != null && (!best[q.requestId] || q.netPrice < best[q.requestId].netPrice)) best[q.requestId] = q; });
-        document.querySelectorAll('[data-sup-hint]').forEach(function (h) {
-          var q = best[h.getAttribute('data-sup-hint')]; h.textContent = q ? 'Supplier best: ' + money(q.netPrice) + ' net · ' + q.vendorName + (q.leadTime ? ' · ' + q.leadTime : '') : '';
-        });
-        if (!d.quotes.length) { qBox.appendChild(el('div', { class: 'pr-meta', style: 'margin-top:.5rem', text: 'No supplier asked yet.' })); return; }
-        var tb = el('tbody');
-        d.quotes.forEach(function (q) {
-          var it = byItem[q.requestId] || {};
-          var pr = el('input', { class: 'pr-in', type: 'number', step: 'any', min: '0', placeholder: 'Price ₹', value: q.price != null ? q.price : '', 'data-q-price': q.id });
-          var di = el('input', { class: 'pr-in', type: 'number', step: 'any', min: '0', max: '100', placeholder: 'Disc %', value: q.discount != null ? q.discount : '', style: 'width:5.5rem' });
-          var lt = el('input', { class: 'pr-in', placeholder: 'Lead time', value: q.leadTime || '', style: 'width:7rem' });
-          var no = el('input', { class: 'pr-in', placeholder: 'Note', value: q.note || '' });
-          var net = el('span', { class: 'pr-meta', text: q.netPrice != null ? money(q.netPrice) : '—' });
-          function calc() { var p = num(pr.value), x = num(di.value) || 0; net.textContent = p != null ? money(Math.round(p * (100 - x)) / 100) : '—'; }
-          pr.addEventListener('input', calc); di.addEventListener('input', calc);
-          var st = q.status === 'RECEIVED' ? ['Received', '#16a34a'] : q.status === 'NO_QUOTE' ? ['No quote', '#64748b'] : ['Asked', '#d97706'];
-          tb.appendChild(el('tr', { 'data-quote': q.id }, [
-            el('td', {}, [el('b', { text: q.vendorName }), el('div', { class: 'pr-meta', text: 'asked ' + when(q.askedAt) })]),
-            el('td', {}, [it.itemCode || it.productName || '—', it.quantity != null ? el('div', { class: 'pr-meta', text: 'Qty ' + Number(it.quantity) }) : null]),
-            el('td', {}, [el('span', { class: 'pr-badge', style: '--c:' + st[1], text: st[0] })]),
-            el('td', {}, [pr]), el('td', {}, [di]), el('td', { class: 'r' }, [net]), el('td', {}, [lt]), el('td', {}, [no]),
-            el('td', { style: 'white-space:nowrap' }, [
-              el('button', { class: 'pr-btn grn sm', type: 'button', 'data-q-save': q.id, text: 'Save', onclick: function () {
-                api('PUT', '/price-requests/supplier/' + encodeURIComponent(q.id), { price: pr.value, discount: di.value, leadTime: lt.value, note: no.value })
-                  .then(function (j) { toast(j.message); d.quotes = j.data.quotes; drawQuotes(); }).catch(function (e) { toast(e.message, 'err'); });
-              } }), ' ',
-              el('button', { class: 'pr-btn sm', type: 'button', title: 'Supplier did not quote', text: '✕ No quote', onclick: function () {
-                api('PUT', '/price-requests/supplier/' + encodeURIComponent(q.id), { status: 'NO_QUOTE', note: no.value }).then(function (j) { d.quotes = j.data.quotes; drawQuotes(); }).catch(function (e) { toast(e.message, 'err'); });
-              } }), ' ',
-              q.leadTime && drafts[q.requestId] ? el('button', { class: 'pr-btn sm', type: 'button', title: 'Use this lead time in the answer', text: 'Use lead time', onclick: function () {
-                drafts[q.requestId].approvedLeadTime = q.leadTime; redraw();
-              } }) : null, ' ',
-              el('button', { class: 'pr-btn red sm', type: 'button', title: 'Remove', text: '🗑', onclick: function () {
-                if (!confirm('Remove ' + q.vendorName + ' for this item?')) return;
-                api('DELETE', '/price-requests/supplier/' + encodeURIComponent(q.id)).then(function (j) { d.quotes = j.data.quotes; drawQuotes(); }).catch(function (e) { toast(e.message, 'err'); });
-              } })
-            ])
-          ]));
-        });
-        qBox.appendChild(el('div', { class: 'pr-scroll', style: 'margin-top:.6rem' }, [el('table', { class: 'pr-tbl', 'data-sup-quotes': '1' }, [
-          el('thead', {}, [el('tr', {}, ['Supplier', 'Item', 'Status', 'Price', 'Disc %', 'Net', 'Lead time', 'Note', ''].map(function (h, i) { return el('th', { class: i === 5 ? 'r' : null, text: h }); }))]), tb])]));
-      }
-      drawQuotes();
+      });
     }
     return det;
   }
