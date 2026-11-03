@@ -462,6 +462,7 @@ try {
             $method === 'POST'  && $c1 === 'batch' && $c2 === ''       => $ctrl->createBatch(),
             $method === 'PATCH' && $c1 === 'batch' && $c2 !== '' && $c3 === 'firm' => $ctrl->setFirm($c2),
             $method === 'PATCH' && $c1 === 'batch' && $c3 === 'respond' => $ctrl->respondBatch($c2),
+            $method === 'PATCH' && $c1 === 'batch' && $c3 === 'propose' => $ctrl->propose($c2),
             $method === 'DELETE'&& $c1 === 'batch' && $c2 !== ''       => $ctrl->deleteBatch($c2),
             $method === 'GET'   && $c1 === ''                          => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                          => $ctrl->create(),

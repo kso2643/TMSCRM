@@ -438,6 +438,46 @@
       // Get price: a task to get the price from the supplier
       ctx.getPrice = true;
       add('title', 'Task (optional)', { placeholder: 'e.g. Get price from Sandvik for these inserts' }, true);
+      // Type a price request number → its customer, company and every item are filled in
+      var prNo = el('input', { id: 'md-prno', placeholder: 'e.g. PR-2611-0005-JK (or PR-2611-0005)', autocomplete: 'off', style: 'flex:1;min-width:12rem' });
+      var prBtn = el('button', { type: 'button', class: 'md-btn sm pri', id: 'md-prno-load', text: 'Show items' });
+      var prInfo = el('div', { id: 'md-prno-info', style: 'font-size:.8rem;margin-top:.35rem' });
+      function loadPr() {
+        var v = prNo.value.trim().toUpperCase();
+        if (!v) { prNo.focus(); return; }
+        prBtn.disabled = true; prInfo.textContent = 'Looking up ' + v + '…'; prInfo.style.color = '#64748b';
+        api('GET', '/price-requests/by-no/' + encodeURIComponent(v) + '?all=1').then(function (j) {
+          var d = j.data; prNo.value = d.requestNo;
+          ctx.batchId = d.batchId; ctx.requestNo = d.requestNo;
+          if (d.customer) {
+            ctx.customerName = d.customer.companyName; ctx.customerId = d.customer.id;
+            var ci = document.getElementById('md-customerName'); if (ci) ci.value = d.customer.companyName;
+          }
+          if (d.firm) { state.firm = d.firm; formBox.querySelectorAll('[data-md-firm]').forEach(function (b) { b.classList.toggle('pri', b.getAttribute('data-md-firm') === d.firm); }); }
+          ctx.lines = (d.items || []).map(function (x) {
+            var pr = x.status === 'APPROVED' ? x.approvedPrice : (x.proposal ? x.proposal.price : null);
+            var di = x.status === 'APPROVED' ? x.approvedDiscount : (x.proposal ? x.proposal.discount : x.discount);
+            return { itemCode: x.itemCode || '', productName: x.productName || '', quantity: x.quantity != null ? x.quantity : '',
+                     price: pr != null ? pr : '', discount: di != null ? di : '', supplier: x.supplierName || '' };
+          });
+          if (!ctx.lines.length) ctx.lines = null;
+          ctx.redraw();
+          if (inp.title && !inp.title.value) inp.title.value = 'Get price · ' + d.requestNo + (d.customer ? ' · ' + d.customer.companyName : '');
+          if (inp.details && !inp.details.value && d.notes) inp.details.value = d.notes;
+          var c = d.counts || {};
+          clear(prInfo).appendChild(el('div', { 'data-prno-loaded': d.requestNo, style: 'display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;color:#0f172a' }, [
+            el('b', { text: '✓ ' + d.requestNo }), firmBadge(d.firm),
+            el('span', { text: (d.customer ? d.customer.companyName : 'No customer') + ' · asked by ' + ((d.requestedBy && d.requestedBy.name) || '—') + ' · ' + (d.items || []).length + ' item' + ((d.items || []).length === 1 ? '' : 's') }),
+            el('span', { class: 'md-badge', style: '--c:#b45309', text: (c.PENDING || 0) + ' pending' }),
+            c.APPROVED ? el('span', { class: 'md-badge', style: '--c:#15803d', text: c.APPROVED + ' approved' }) : null,
+            el('a', { href: '/price-requests/?q=' + encodeURIComponent(d.requestNo), target: '_blank', text: 'Open →' })]));
+          toast('Loaded ' + (d.items || []).length + ' item(s) from ' + d.requestNo);
+        }).catch(function (e) { prInfo.textContent = e.message; prInfo.style.color = '#b91c1c'; })
+          .then(function () { prBtn.disabled = false; });
+      }
+      prBtn.onclick = loadPr;
+      prNo.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); loadPr(); } });
+      g.appendChild(field('Price request no. — fills the customer and all its items', el('div', {}, [el('div', { style: 'display:flex;gap:.4rem' }, [prNo, prBtn]), prInfo]), true));
       var cp = customerPicker(ctx, copyQuote); cp.querySelector('label').textContent = 'For customer (optional)';
       g.appendChild(cp);
       g.appendChild(linesEditor(ctx));
@@ -483,6 +523,7 @@
       if ((t === 'PRICE' || t === 'QUOTATION') && !state.firm) { toast('Choose TMS or APJ (our company).', 'err'); return; }
       if (t === 'PRICE' || t === 'QUOTATION') {
         body.firm = state.firm;
+        if (ctx.batchId) body.batchId = ctx.batchId;
         body.customerName = ctx.customerName || ''; body.customerId = ctx.customerId || '';
         body.items = (ctx.lines || []).filter(function (l) { return String(l.itemCode).trim() || String(l.productName).trim() || String(l.price == null ? '' : l.price).trim(); });
         if (qid) body.quotationId = qid;
@@ -609,6 +650,7 @@
       ]));
       var facts = [];
       if (i.type === 'TASK' || (i.type === 'PRICE' && i.dueDate)) facts.push([i.type === 'PRICE' ? 'Need price by' : 'Due date', i.dueDate ? dmy(i.dueDate) + (i.overdue ? ' (overdue)' : '') : '—']);
+      if (i.type === 'PRICE' && i.requestNo) facts.push(['Price request', i.requestNo]);
       if (i.type === 'PRICE') facts.push(['Customer', i.customerName || '—'], ['Items', String((i.items || []).length || 1)], ['Priced', (i.items || []).filter(function (l) { return l.price != null; }).length + ' of ' + ((i.items || []).length || 1)]);
       if (i.type === 'QUOTATION') facts.push(['CEO Desk no.', i.deskNo || '—'], ['Quotation no.', i.quotationNo || '—'], ['Customer', i.customerName], ['Value', i.amount != null ? money(i.amount) : '—']);
       function ppl(lbl, list, c) {

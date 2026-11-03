@@ -99,7 +99,7 @@
     setTimeout(function () { t.classList.remove('in'); }, 3400);
     setTimeout(function () { t.remove(); }, 3800);
   }
-  var canRespond = false, isAdminTier = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(me().role) !== -1;
+  var canRespond = false, canApprove = false, isAdminTier = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(me().role) !== -1;
   var STATUS = {
     PENDING: ['Pending', '#d97706'], APPROVED: ['Approved', '#16a34a'], REJECTED: ['Rejected', '#dc2626'],
     PARTIAL: ['Partly answered', '#2563eb'], DONE: ['Answered', '#0f766e']
@@ -202,6 +202,9 @@
       '.pr-scroll{overflow-x:auto}',
       '.pr-ans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem;min-width:220px}',
       '.pr-ans .full{grid-column:1/-1}',
+      '.pr-prop{grid-column:1/-1;background:#fffbeb;border:1px solid #fde68a;border-radius:.45rem;padding:.4rem .5rem;font-size:.76rem;color:#78350f;line-height:1.35}',
+      '.dark .pr-prop{background:#422006;border-color:#854d0e;color:#fde68a}',
+      '.pr-ans .lbl{grid-column:1/-1;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-top:.15rem}',
       '.pr-ans .pr-seg button{padding:.32rem .3rem;font-size:.76rem}',
       '.pr-ans .pr-seg button.on[data-v=APPROVED]{background:#16a34a}.pr-ans .pr-seg button.on[data-v=REJECTED]{background:#dc2626}',
       '.pr-ractions{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:flex-end;margin-top:.7rem;align-items:center}',
@@ -238,7 +241,7 @@
     ROOT.appendChild(el('div', { class: 'pr-head' }, [
       el('div', {}, [
         el('h1', { text: 'Price requests' }),
-        el('p', { text: isAdminTier ? 'Engineers ask for prices here — answer each item with the approved price and discount.' : 'Ask for a price for one or many items for a company. You’ll get an alert when it’s answered.' })
+        el('p', { text: isAdminTier ? (me().role === 'SUPER_ADMIN' ? 'Engineers ask for prices here. Admins pick the supplier and fill the price — you approve.' : 'Engineers ask for prices here. Pick the supplier and fill the price for each item and save — the Super Admin approves.') : 'Ask for a price for one or many items for a company. You’ll get an alert when it’s answered.' })
       ]),
       el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, [
         el('button', { class: 'pr-btn', type: 'button', text: '⤓ Excel template', onclick: function () { download('/price-requests/template', 'price-request-template.xlsx').catch(function (e) { toast(e.message, 'err'); }); } }),
@@ -551,7 +554,7 @@
       listHost.style.opacity = '.6';
       api('GET', q).then(function (r) {
         listHost.style.opacity = '';
-        canRespond = r.data.canRespond;
+        canRespond = r.data.canRespond; canApprove = !!r.data.canApprove;
         var newCount = r.data.counts.OPEN;
         if (newCount !== state.openCount) { state.openCount = newCount; var tab = ROOT.querySelector('.pr-tab[data-tab="requests"]'); if (tab) { var n = tab.querySelector('.n'); if (newCount) { if (!n) { n = el('span', { class: 'n' }); tab.appendChild(n); } n.textContent = String(newCount); } else if (n) n.remove(); } }
         drawBar(r.data);
@@ -641,6 +644,7 @@
     function historyBox(h) {
       var det = el('details', { class: 'pr-hist' }, [el('summary', { text: 'Negotiation history (' + h.length + ')' })]);
       h.forEach(function (x) {
+        if (x.type === 'PROPOSED') { det.appendChild(el('div', { class: 'pr-meta' }, [el('b', { text: 'Priced ' + money(x.price) + (x.discount != null ? ' · ' + x.discount + '%' : '') + ' · 🏭 ' + (x.supplier || '') + (x.supplierPrice != null ? ' (cost ' + money(x.supplierPrice) + ')' : '') }), ' — ' + (x.by || '') + ', ' + when(x.at) + ' · for approval' + (x.note ? ' · “' + x.note + '”' : '')])); return; }
         if (x.type === 'CODE_FIX') { det.appendChild(el('div', { class: 'pr-meta' }, [el('b', { text: 'Code corrected ' + (x.from || '') + ' → ' + x.to }), ' — ' + (x.by || '') + ', ' + when(x.at)])); return; }
         var what = x.type === 'ANSWER' ? (x.status === 'REJECTED' ? 'Rejected' : 'Approved ' + money(x.price) + (x.discount != null ? ' · ' + x.discount + '%' : ''))
           : (x.type === 'REVISION' ? 'Asked revised ' : 'Asked ') + money(x.price) + (x.discount != null ? ' · ' + x.discount + '%' : '');
@@ -670,28 +674,40 @@
       var tb = el('tbody');
       b.items.forEach(function (it, i) {
         var ansCell = el('td');
-        if (it.status !== 'PENDING' && !(canRespond && editing[it.id])) {
+        if (it.status !== 'PENDING' && !(canApprove && editing[it.id])) {
           ansCell.appendChild(badge(it.status));
           if (it.status === 'APPROVED') ansCell.appendChild(el('div', { style: 'margin-top:.25rem;font-weight:600', text: money(it.approvedPrice) + (it.approvedDiscount != null ? ' · ' + it.approvedDiscount + '% disc' : '') }));
           if (it.status === 'APPROVED' && it.approvedLeadTime) ansCell.appendChild(el('div', { class: 'pr-meta', text: 'Lead time ' + it.approvedLeadTime }));
+          if (it.status === 'APPROVED' && it.supplierName) ansCell.appendChild(el('div', { class: 'pr-meta', 'data-approved-supplier': it.id, text: '🏭 ' + it.supplierName + (it.supplierPrice != null ? ' · cost ' + money(it.supplierPrice) : '') }));
           if (it.responseNote) ansCell.appendChild(el('div', { class: 'pr-meta', text: it.responseNote }));
           if (it.respondedBy) ansCell.appendChild(el('div', { class: 'pr-meta', text: 'by ' + it.respondedBy.name }));
           if (b.requestedBy.id === me().id && !b.legacy) ansCell.appendChild(reviseBox(it));
-          if (canRespond) ansCell.appendChild(el('button', { class: 'pr-btn sm', type: 'button', style: 'margin-top:.35rem', 'data-edit-answer': it.id, text: '✎ Edit answer', onclick: function () { editing[it.id] = true; fillBody(); } }));
+          if (canApprove) ansCell.appendChild(el('button', { class: 'pr-btn sm', type: 'button', style: 'margin-top:.35rem', 'data-edit-answer': it.id, text: '✎ Edit answer', onclick: function () { editing[it.id] = true; fillBody(); } }));
         } else if (answering) {
           var d = drafts[it.id] || (drafts[it.id] = it.status !== 'PENDING'
             ? { status: it.status, approvedPrice: it.approvedPrice != null ? it.approvedPrice : '', approvedDiscount: it.approvedDiscount != null ? it.approvedDiscount : '', approvedLeadTime: it.approvedLeadTime || '', responseNote: it.responseNote || '' }
-            : { status: '', approvedPrice: it.requestedPrice != null ? it.requestedPrice : (it.listPrice != null ? it.listPrice : ''), approvedDiscount: it.discount != null ? it.discount : '', approvedLeadTime: it.leadTime || '', responseNote: '' });
+            : (it.proposal
+              ? { status: '', approvedPrice: it.proposal.price != null ? it.proposal.price : '', approvedDiscount: it.proposal.discount != null ? it.proposal.discount : '', approvedLeadTime: it.proposal.leadTime || '', responseNote: it.proposal.note || '' }
+              : { status: '', approvedPrice: it.requestedPrice != null ? it.requestedPrice : (it.listPrice != null ? it.listPrice : ''), approvedDiscount: it.discount != null ? it.discount : '', approvedLeadTime: it.leadTime || '', responseNote: '' }));
+          if (d.supplierName == null) { d.supplierName = it.supplierName || ''; d.supplierPrice = it.supplierPrice != null ? it.supplierPrice : ''; }
+          function touch() { d.touched = true; drawActions(); }
+          var supIn = el('input', { class: 'pr-in full', placeholder: 'Supplier *', 'aria-label': 'Supplier for ' + it.productName, value: d.supplierName, list: 'pr-sups-' + it.id, autocomplete: 'off', 'data-sup-name': it.id });
+          var supDl = el('datalist', { id: 'pr-sups-' + it.id });
+          var supPr = el('input', { class: 'pr-in', type: 'number', step: 'any', min: '0', placeholder: 'Supplier price ₹', 'aria-label': 'Supplier price for ' + it.productName, value: d.supplierPrice, 'data-sup-price': it.id });
+          supIn.addEventListener('input', function () { d.supplierName = supIn.value; touch(); });
+          supPr.addEventListener('input', function () { d.supplierPrice = supPr.value; touch(); });
           var seg = el('div', { class: 'pr-seg full' });
           var price = el('input', { class: 'pr-in', type: 'number', step: 'any', min: '0', placeholder: 'Price ₹', 'aria-label': 'Approved price for ' + it.productName, value: d.approvedPrice });
           var disc = el('input', { class: 'pr-in', type: 'number', step: 'any', min: '0', max: '100', placeholder: 'Disc %', 'aria-label': 'Approved discount for ' + it.productName, value: d.approvedDiscount });
           var note = el('input', { class: 'pr-in full', placeholder: 'Note (required to reject)', 'aria-label': 'Note for ' + it.productName, value: d.responseNote });
           var lead = el('input', { class: 'pr-in full', placeholder: 'Lead time (e.g. 3 weeks)', 'aria-label': 'Lead time for ' + it.productName, value: d.approvedLeadTime });
-          lead.addEventListener('input', function () { d.approvedLeadTime = lead.value; });
-          price.addEventListener('input', function () { d.approvedPrice = price.value; });
-          disc.addEventListener('input', function () { d.approvedDiscount = disc.value; });
-          note.addEventListener('input', function () { d.responseNote = note.value; });
-          [['APPROVED', 'Approve'], ['REJECTED', 'Reject']].forEach(function (o) {
+          lead.addEventListener('input', function () { d.approvedLeadTime = lead.value; touch(); });
+          price.addEventListener('input', function () { d.approvedPrice = price.value; touch(); });
+          disc.addEventListener('input', function () { d.approvedDiscount = disc.value; touch(); });
+          note.addEventListener('input', function () { d.responseNote = note.value; touch(); });
+          price.placeholder = 'Our price ₹'; price.setAttribute('data-our-price', it.id);
+          if (!canApprove) note.placeholder = 'Note for the Super Admin (optional)';
+          if (canApprove) [['APPROVED', 'Approve'], ['REJECTED', 'Reject']].forEach(function (o) {
             seg.appendChild(el('button', { type: 'button', 'data-v': o[0], class: d.status === o[0] ? 'on' : '', text: o[1], onclick: function () {
               d.status = d.status === o[0] ? '' : o[0];
               Array.prototype.forEach.call(seg.children, function (x) { x.classList.toggle('on', x.getAttribute('data-v') === d.status); });
@@ -716,7 +732,12 @@
               }).catch(function () {});
             }, 250);
           });
-          ansCell.appendChild(el('div', { class: 'pr-ans' }, [seg, price, disc, lead, code, codesDl, codeInfo, note,
+          var prop = it.proposal ? el('div', { class: 'pr-prop', 'data-proposal': it.id }, [
+            el('b', { text: canApprove ? '⏳ For your approval' : '⏳ Waiting for Super Admin approval' }),
+            el('div', { text: '🏭 ' + (it.supplierName || '—') + (it.supplierPrice != null ? ' · cost ' + money(it.supplierPrice) : '') + ' → our price ' + money(it.proposal.price) + (it.proposal.discount != null ? ' · ' + it.proposal.discount + '% disc' : '') + (it.proposal.leadTime ? ' · ' + it.proposal.leadTime : '') }),
+            el('div', { style: 'opacity:.8', text: 'by ' + ((it.proposal.by && it.proposal.by.name) || '—') + ' · ' + when(it.proposal.at) + (it.proposal.note ? ' · “' + it.proposal.note + '”' : '') })]) : null;
+          ansCell.appendChild(el('div', { class: 'pr-ans' }, [prop, canApprove ? seg : null, el('div', { class: 'lbl', text: 'Supplier' }), supIn, supDl, supPr,
+            el('div', { class: 'lbl', text: 'Price to the customer' }), price, disc, lead, code, codesDl, codeInfo, note,
             editing[it.id] ? el('button', { class: 'pr-btn sm full', type: 'button', text: 'Cancel edit', onclick: function () { delete editing[it.id]; delete drafts[it.id]; fillBody(); } }) : null]));
           ansCell.appendChild(el('div', { class: 'pr-meta pr-sup-hint', 'data-sup-hint': it.id }));
         } else ansCell.appendChild(badge('PENDING'));
@@ -764,7 +785,26 @@
             } }));
         }
         if (!answering) return;
+        if (!canApprove) {   // Admin: save the supplier + price for the Super Admin to approve
+          var ready = b.items.filter(function (it) { var d = drafts[it.id]; return it.status === 'PENDING' && d && d.touched; });
+          var save2 = el('button', { class: 'pr-btn grn', type: 'button', id: 'pr-propose', 'data-propose': b.id, disabled: !ready.length,
+            text: ready.length ? 'Save ' + ready.length + ' item' + (ready.length === 1 ? '' : 's') + ' for Super Admin approval' : 'Fill the supplier and price to save' });
+          save2.addEventListener('click', function () {
+            var items = ready.map(function (it) { var d = drafts[it.id]; return { id: it.id, supplierName: (d.supplierName || '').trim(), supplierPrice: d.supplierPrice, proposedPrice: d.approvedPrice, proposedDiscount: d.approvedDiscount, proposedLeadTime: d.approvedLeadTime, proposedNote: d.responseNote }; });
+            save2.disabled = true; save2.textContent = 'Saving…';
+            api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/propose', { items: items }).then(function (r) {
+              toast(r.message); delete state.drafts[b.id]; reload();
+            }).catch(function (e) { toast(e.message, 'err'); save2.disabled = false; drawActions(); });
+          });
+          acts.appendChild(save2);
+          return;
+        }
         var chosen = Object.keys(drafts).filter(function (k) { return drafts[k].status; }).length;
+        var proposed = b.items.filter(function (it) { return it.status === 'PENDING' && it.proposal; });
+        if (proposed.length) acts.appendChild(el('button', { class: 'pr-btn sm', type: 'button', 'data-approve-proposed': b.id, text: '✔ Approve all ' + proposed.length + ' priced by admin', onclick: function () {
+          proposed.forEach(function (it) { if (drafts[it.id]) drafts[it.id].status = 'APPROVED'; });
+          fillBody();
+        } }));
         acts.appendChild(el('button', { class: 'pr-btn sm', type: 'button', text: 'Approve all at asked / list price', onclick: function () {
           b.items.forEach(function (it) { if (it.status === 'PENDING' && drafts[it.id]) drafts[it.id].status = 'APPROVED'; });
           fillBody();
@@ -772,7 +812,7 @@
         var save = el('button', { class: 'pr-btn grn', type: 'button', text: chosen ? 'Save ' + chosen + ' answer' + (chosen === 1 ? '' : 's') : 'Choose Approve or Reject', disabled: !chosen });
         save.addEventListener('click', function () {
           var items = Object.keys(drafts).filter(function (k) { return drafts[k].status; }).map(function (k) {
-            var d = drafts[k]; return { id: k, status: d.status, approvedPrice: d.approvedPrice, approvedDiscount: d.approvedDiscount, approvedLeadTime: d.approvedLeadTime, responseNote: d.responseNote, correctedCode: d.correctedCode || '' };
+            var d = drafts[k]; return { id: k, status: d.status, approvedPrice: d.approvedPrice, approvedDiscount: d.approvedDiscount, approvedLeadTime: d.approvedLeadTime, responseNote: d.responseNote, correctedCode: d.correctedCode || '', supplierName: (d.supplierName || '').trim(), supplierPrice: d.supplierPrice };
           });
           save.disabled = true; save.textContent = 'Saving…';
           api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/respond', { items: items }).then(function (r) {
@@ -808,15 +848,26 @@
             if (q.chosen) best[q.requestId] = q;
             else if (q.netPrice != null && (!cur || (!cur.chosen && q.netPrice < cur.netPrice))) best[q.requestId] = q;
           });
+          var byItem = {};
+          quotes.forEach(function (q) { (byItem[q.requestId] = byItem[q.requestId] || []).push(q); });
+          Object.keys(byItem).forEach(function (rid) {
+            var dl = document.getElementById('pr-sups-' + rid); if (!dl) return;
+            clear(dl); byItem[rid].forEach(function (q) { dl.appendChild(el('option', { value: q.vendorName, text: q.netPrice != null ? money(q.netPrice) + ' net' : 'price not in yet' })); });
+          });
           document.querySelectorAll('[data-sup-hint]').forEach(function (h) {
             var q = best[h.getAttribute('data-sup-hint')];
             h.textContent = q ? (q.chosen ? '✔ Buy from ' + q.vendorName + (q.netPrice != null ? ' · ' + money(q.netPrice) + ' net' : '') : 'Supplier best: ' + money(q.netPrice) + ' net · ' + q.vendorName) + (q.leadTime ? ' · ' + q.leadTime : '') : '';
           });
         },
         extraActions: function (q) {
-          return q.leadTime && drafts[q.requestId] ? el('button', { class: 'pr-btn sm', type: 'button', title: 'Use this lead time in the answer', text: 'Use lead time', onclick: function () {
-            drafts[q.requestId].approvedLeadTime = q.leadTime; redraw();
-          } }) : null;
+          var d = drafts[q.requestId];
+          if (!d) return null;
+          return el('span', { style: 'display:inline-flex;gap:.3rem;flex-wrap:wrap' }, [
+            el('button', { class: 'pr-btn sm', type: 'button', 'data-use-supplier': q.id, title: 'Put this supplier and price in the answer', text: 'Use this supplier', onclick: function () {
+              d.supplierName = q.vendorName; d.supplierPrice = q.netPrice != null ? q.netPrice : (q.price != null ? q.price : ''); if (q.leadTime) d.approvedLeadTime = q.leadTime;
+              d.touched = true; redraw(); toast(q.vendorName + ' filled in — enter our price and save');
+            } }),
+            q.leadTime ? el('button', { class: 'pr-btn sm', type: 'button', title: 'Use this lead time in the answer', text: 'Use lead time', onclick: function () { d.approvedLeadTime = q.leadTime; d.touched = true; redraw(); } }) : null]);
         }
       });
     }

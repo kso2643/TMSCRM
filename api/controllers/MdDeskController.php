@@ -166,6 +166,10 @@ $tail"],
         $s->execute(array_merge([$id], $p));
         $r = $s->fetch();
         if (!$r) sendError('Item not found.', 404);
+        $r['requestNo'] = null;
+        if (!empty($r['batchId'])) {
+            try { $q = db()->prepare('SELECT requestNo FROM `PriceRequestBatch` WHERE id=?'); $q->execute([$r['batchId']]); $r['requestNo'] = $q->fetchColumn() ?: null; } catch (Throwable $e) {}
+        }
         return self::shape($r);
     }
 
@@ -407,6 +411,13 @@ $tail"],
             $auth['id'], $shared ? null : ($toIds[0] ?? null), $shared ? 'PEOPLE' : ($toIds ? 'ADMINS' : $group),
             $shared ? json_encode($toIds) : null, $reportTo ? json_encode($reportTo) : null, $now, $now, $deskNo]);
         if ($firm) db()->prepare('UPDATE `MdDeskItem` SET firm=? WHERE id=?')->execute([$firm, $id]);
+        $batchId = trim((string) ($b['batchId'] ?? ''));
+        if ($type === 'PRICE' && $batchId !== '') {
+            try {
+                $q = db()->prepare('SELECT id FROM `PriceRequestBatch` WHERE id=?'); $q->execute([$batchId]);
+                if ($q->fetchColumn()) db()->prepare('UPDATE `MdDeskItem` SET batchId=? WHERE id=?')->execute([$batchId, $id]);
+            } catch (Throwable $e) {}
+        }
         log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $id, ['type' => $type, 'title' => $title, 'to' => count($toIds), 'reportTo' => count($reportTo)]);
         sendSuccess(['item' => self::load($auth, $id), 'count' => max(1, count($toIds))], $shared ? 'Sent to ' . count($toIds) . ' people (one shared task)' : 'Sent', 201);
     }

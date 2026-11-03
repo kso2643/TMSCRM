@@ -1,3 +1,30 @@
+# Update — 4 Nov (b): TMS / APJ on quotations, price request number on CEO Desk "Get price", Admin prices → Super Admin approves
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
+- **New file:** `crm/quote-firm.js`.
+- **Database:** new supplier / price columns on price request items are added automatically.
+
+1. **Quotations → Our company: TMS or APJ**
+   - A bar above the form asks **"Our company — TMS or APJ \*"**. Picking one opens that company's form; anything already typed moves across with it.
+   - Until a company has been chosen, **Save** asks "Which company is this quotation for?" first. The quotation number, letterhead and signatory follow that choice.
+   - Opening a saved quotation, or loading a price request into it, counts as the choice.
+2. **CEO Desk → Get price → Price request no.**
+   - Type the price request number (with or without the initials, e.g. `PR-2611-0005`) and press **Show items** or Enter.
+   - It fills in the customer, TMS / APJ, the notes and **every item**: code, product and quantity. Already-priced items also get their price, discount and supplier.
+   - It also shows who asked and how many items are pending or approved. The Get price task is linked to the request ("Price request" in the task details).
+3. **Price requests → Admin fills, Super Admin approves**
+   - **Admin:** for each item, fill the **supplier** (with suggestions from the suppliers you asked) and the supplier's price, then **our price**, discount and lead time, and press **"Save N items for Super Admin approval"**.
+     - "Use this supplier" in the 🏭 supplier panel fills the supplier, price and lead time in one click.
+     - The Super Admin gets an alert: "💰 Admin priced 2 items of PR-… — please approve".
+     - The item shows "⏳ Waiting for Super Admin approval".
+   - **Super Admin:** each item shows "⏳ For your approval", with the supplier, cost, our price and who priced it. The price boxes are already filled.
+     - Change anything if needed, then **Approve / Reject**, or press **"✔ Approve all N priced by admin"**, then **Save**.
+   - **Only the Super Admin can approve or reject.** Admins fill and save; they no longer approve.
+   - **Engineers** see "Pending" until approval, then the approved price. They never see the supplier or what we pay.
+   - After approval, admins see "🏭 supplier · cost ₹…" under the approved price.
+
+---
+
 # Update — 4 Nov (a): TMS / APJ on price requests, orders and the CEO Desk; meeting summaries in front with a centred pop-up
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.

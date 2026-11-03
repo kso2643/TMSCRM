@@ -82,6 +82,15 @@ class PriceRequestController
                     'existingPrice'    => 'DECIMAL(14,2) NULL',
                     // how many the customer uses per month (for the admin; not copied to the quotation)
                     'monthlyVolume'    => 'DECIMAL(14,2) NULL',
+                    // Admin picks the supplier and fills the price → Super Admin approves (v11.41)
+                    'supplierName'     => 'VARCHAR(255) NULL',
+                    'supplierPrice'    => 'DECIMAL(14,2) NULL',
+                    'proposedPrice'    => 'DECIMAL(14,2) NULL',
+                    'proposedDiscount' => 'DECIMAL(6,2) NULL',
+                    'proposedLeadTime' => 'VARCHAR(60) NULL',
+                    'proposedNote'     => 'VARCHAR(500) NULL',
+                    'proposedById'     => 'VARCHAR(30) NULL',
+                    'proposedAt'       => 'DATETIME NULL',
                 ],
             ],
             'PriceRequestBatch' => [
@@ -100,11 +109,12 @@ $tail",
         ];
     }
 
-    private const SELECT = 'SELECT r.*, u.name AS requestedByName, u.role AS requestedByRole, a.name AS respondedByName,
+    private const SELECT = 'SELECT r.*, u.name AS requestedByName, u.role AS requestedByRole, a.name AS respondedByName, pb.name AS proposedByName,
                                    c.companyName AS customerName, b.requestNo, b.notes AS batchNotes, b.lastRemindedAt, b.remindCount, b.firm
                             FROM `PriceRequest` r
                             LEFT JOIN `User` u ON u.id = r.requestedById
                             LEFT JOIN `User` a ON a.id = r.respondedById
+                            LEFT JOIN `User` pb ON pb.id = r.proposedById
                             LEFT JOIN `Customer` c ON c.id = r.customerId
                             LEFT JOIN `PriceRequestBatch` b ON b.id = r.batchId';
 
@@ -120,7 +130,30 @@ $tail",
         return $v === null ? null : (float) $v;
     }
 
+    /** Supplier name / cost / the admin's proposal are shown to Admin and Super Admin only. */
+    private static bool $showSupplier = false;
+    private static function viewerSeesSupplier(array $auth): bool
+    {
+        return self::$showSupplier = (ROLE_LEVELS[$auth['role']] ?? 0) >= ROLE_LEVELS['ADMIN'];
+    }
+
     private function shape(array $r): array
+    {
+        $out = $this->shapeBase($r);
+        if (!self::$showSupplier && $out['history']) $out['history'] = array_values(array_filter($out['history'], fn($h) => ($h['type'] ?? '') !== 'PROPOSED'));
+        if (self::$showSupplier) {
+            $out['supplierName'] = $r['supplierName'] ?? null;
+            $out['supplierPrice'] = isset($r['supplierPrice']) ? self::money($r['supplierPrice']) : null;
+            $out['proposal'] = !empty($r['proposedAt']) ? [
+                'price' => self::money($r['proposedPrice']), 'discount' => isset($r['proposedDiscount']) ? self::money($r['proposedDiscount']) : null,
+                'leadTime' => $r['proposedLeadTime'] ?? null, 'note' => $r['proposedNote'] ?? null,
+                'by' => ['id' => $r['proposedById'], 'name' => $r['proposedByName'] ?? null], 'at' => $r['proposedAt'],
+            ] : null;
+        }
+        return $out;
+    }
+
+    private function shapeBase(array $r): array
     {
         return [
             'id'             => $r['id'],
@@ -275,6 +308,7 @@ $tail",
     {
         $auth = authenticate();
         require_admin($auth);
+        if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can approve or reject. Save the supplier and price for approval instead.', 403);
         $row = $this->fetchRow($id);
         if (!$row) sendError('Price request not found.', 404);
 
@@ -544,6 +578,7 @@ $tail",
     public function batches(): void
     {
         $auth = authenticate();
+        self::viewerSeesSupplier($auth);
         $where = []; $params = [];
         if (!is_admin_tier($auth['role']) || qp('mine')) { $where[] = 'r.requestedById=?'; $params[] = $auth['id']; }
         elseif (qp('requestedById')) { $where[] = 'r.requestedById=?'; $params[] = qp('requestedById'); }
@@ -568,7 +603,8 @@ $tail",
         $requesters = [];
         if (is_admin_tier($auth['role'])) $requesters = db()->query("SELECT DISTINCT u.id, u.name FROM `PriceRequest` r JOIN `User` u ON u.id = r.requestedById ORDER BY u.name")->fetchAll();
         sendSuccess(['batches' => array_slice($all, 0, 200), 'counts' => $counts, 'requesters' => $requesters,
-                     'canRespond' => (ROLE_LEVELS[$auth['role']] ?? 0) >= ROLE_LEVELS['ADMIN'], 'supplyTypes' => self::SUPPLY_TYPES]);
+                     'canRespond' => (ROLE_LEVELS[$auth['role']] ?? 0) >= ROLE_LEVELS['ADMIN'], 'canApprove' => $auth['role'] === 'SUPER_ADMIN',
+                     'supplyTypes' => self::SUPPLY_TYPES]);
     }
 
     // PATCH /api/price-requests/batch/:id/respond (admin) — { items:[{id, status, approvedPrice?, approvedDiscount?, responseNote?}] }
@@ -576,6 +612,8 @@ $tail",
     {
         $auth = authenticate();
         require_admin($auth);
+        if ($auth['role'] !== 'SUPER_ADMIN') sendError('Only the Super Admin can approve or reject. Save the supplier and price for approval instead.', 403);
+        self::viewerSeesSupplier($auth);
         $bt = $this->batch($bid);
         if (!$bt) sendError('Price request not found.', 404);
         $ids = array_column($bt['items'], 'id');
@@ -609,12 +647,17 @@ $tail",
                 $msg = 'Product code corrected: ' . ($item['itemCode'] ?: '(none)') . ' → ' . $newCode;
                 $note = $note ? $msg . ' — ' . $note : $msg;
             }
-            $ok[] = [$status, $price, $disc, $note, $id, $lt ? mb_substr($lt, 0, 60) : null, $fix];
+            $sup = trim((string) ($e['supplierName'] ?? ''));
+            $sp = str_replace(',', '', (string) ($e['supplierPrice'] ?? ''));
+            if ($sp !== '' && (!is_numeric($sp) || (float) $sp < 0)) { $errs[] = $item['productName'] . ': supplier price must be a number'; continue; }
+            $ok[] = [$status, $price, $disc, $note, $id, $lt ? mb_substr($lt, 0, 60) : null, $fix, $sup !== '' ? mb_substr($sup, 0, 255) : null, $sp !== '' ? round((float) $sp, 2) : null];
         }
         if ($errs) sendError(implode(' · ', array_slice($errs, 0, 8)), 400);
         $u = db()->prepare('UPDATE `PriceRequest` SET status=?,approvedPrice=?,approvedDiscount=?,approvedLeadTime=?,responseNote=?,respondedById=?,respondedAt=?,updatedAt=?,history=? WHERE id=?');
         $fixU = db()->prepare('UPDATE `PriceRequest` SET originalItemCode=COALESCE(originalItemCode, itemCode, productName), itemCode=?, productName=?, productId=COALESCE(?, productId) WHERE id=?');
-        foreach ($ok as [$st, $pr, $di, $no, $id, $lt, $fix]) {
+        $supU = db()->prepare('UPDATE `PriceRequest` SET supplierName=COALESCE(?, supplierName), supplierPrice=COALESCE(?, supplierPrice) WHERE id=?');
+        foreach ($ok as [$st, $pr, $di, $no, $id, $lt, $fix, $sup, $sp]) {
+            if ($sup !== null || $sp !== null) $supU->execute([$sup, $sp, $id]);
             if ($fix) $fixU->execute([$fix['code'], $fix['name'], $fix['productId'], $id]);
             $h = $this->historyOf($id);
             if ($fix) $h[] = ['type' => 'CODE_FIX', 'at' => now_sql(), 'by' => $auth['name'], 'from' => $fix['old'], 'to' => $fix['code'], 'note' => $no];
@@ -623,6 +666,67 @@ $tail",
         }
         log_activity($auth['id'], 'PRICE_REQUEST_ANSWERED', 'PriceRequestBatch', $bid, ['items' => count($ok)]);
         sendSuccess(['batch' => $this->batch($bid)], 'Saved ' . count($ok) . ' answer' . (count($ok) === 1 ? '' : 's'));
+    }
+
+    // PATCH /api/price-requests/batch/:id/propose (Admin / Super Admin) — the admin picks the supplier
+    // and fills the price; the item stays PENDING for the engineer until the Super Admin approves.
+    // { items:[{id, supplierName, supplierPrice?, proposedPrice, proposedDiscount?, proposedLeadTime?, proposedNote?}] }
+    public function propose(string $bid): void
+    {
+        $auth = authenticate();
+        if ((ROLE_LEVELS[$auth['role']] ?? 0) < ROLE_LEVELS['ADMIN']) sendError('Only an Admin or the Super Admin can fill the supplier and price.', 403);
+        self::viewerSeesSupplier($auth);
+        $bt = $this->batch($bid);
+        if (!$bt) sendError('Price request not found.', 404);
+        $byId = []; foreach ($bt['items'] as $i) $byId[$i['id']] = $i;
+        $entries = is_array(request_body()['items'] ?? null) ? request_body()['items'] : [];
+        if (!$entries) sendError('Nothing to save.', 400);
+        $num = function ($v) { $v = str_replace([',', '%', '₹'], '', trim((string) $v)); return $v === '' ? '' : $v; };
+        $errs = []; $ok = [];
+        foreach ($entries as $e) {
+            $id = (string) ($e['id'] ?? '');
+            if (!isset($byId[$id])) { $errs[] = 'Unknown item'; continue; }
+            $it = $byId[$id]; $nm = $it['productName'] ?: $it['itemCode'];
+            if ($it['status'] !== 'PENDING') { $errs[] = $nm . ': already answered'; continue; }
+            $sup = trim((string) ($e['supplierName'] ?? ''));
+            if ($sup === '') { $errs[] = $nm . ': choose the supplier'; continue; }
+            $pr = $num($e['proposedPrice'] ?? '');
+            if ($pr === '' || !is_numeric($pr) || (float) $pr < 0) { $errs[] = $nm . ': enter our price'; continue; }
+            $sp = $num($e['supplierPrice'] ?? '');
+            if ($sp !== '' && (!is_numeric($sp) || (float) $sp < 0)) { $errs[] = $nm . ': supplier price must be a number'; continue; }
+            $d = $num($e['proposedDiscount'] ?? '');
+            if ($d !== '' && (!is_numeric($d) || (float) $d < 0 || (float) $d > 100)) { $errs[] = $nm . ': discount must be 0–100 %'; continue; }
+            $lt = trim((string) ($e['proposedLeadTime'] ?? ''));
+            if ($lt !== '' && is_numeric($lt)) $lt .= ' days';
+            $ok[] = [$id, mb_substr($sup, 0, 255), $sp === '' ? null : round((float) $sp, 2), round((float) $pr, 2), $d === '' ? null : round((float) $d, 2),
+                     $lt === '' ? null : mb_substr($lt, 0, 60), mb_substr(trim((string) ($e['proposedNote'] ?? '')), 0, 500) ?: null, $nm];
+        }
+        if ($errs) sendError(implode(' · ', array_slice($errs, 0, 8)), 400);
+        $now = now_sql();
+        $u = db()->prepare('UPDATE `PriceRequest` SET supplierName=?, supplierPrice=?, proposedPrice=?, proposedDiscount=?, proposedLeadTime=?, proposedNote=?, proposedById=?, proposedAt=?, updatedAt=?, history=? WHERE id=?');
+        foreach ($ok as [$id, $sup, $sp, $pr, $di, $lt, $no]) {
+            $h = $this->historyOf($id);
+            $h[] = ['type' => 'PROPOSED', 'at' => $now, 'by' => $auth['name'], 'supplier' => $sup, 'supplierPrice' => $sp, 'price' => $pr, 'discount' => $di, 'leadTime' => $lt, 'note' => $no];
+            $u->execute([$sup, $sp, $pr, $di, $lt, $no, $auth['id'], $now, $now, json_encode($h, JSON_UNESCAPED_UNICODE), $id]);
+            // the chosen supplier on the supplier panel follows the admin's pick
+            try {
+                db()->prepare('UPDATE `SupplierQuote` SET chosen=0, chosenById=NULL, chosenAt=NULL WHERE requestId=?')->execute([$id]);
+                db()->prepare('UPDATE `SupplierQuote` SET chosen=1, chosenById=?, chosenAt=? WHERE requestId=? AND LOWER(vendorName)=LOWER(?)')->execute([$auth['id'], $now, $id, $sup]);
+            } catch (Throwable $e) { /* supplier quotes table not created yet */ }
+        }
+        log_activity($auth['id'], 'PRICE_REQUEST_PROPOSED', 'PriceRequestBatch', $bid, ['items' => count($ok)]);
+        // Tell the Super Admin(s) there is something to approve.
+        if ($auth['role'] !== 'SUPER_ADMIN') {
+            try {
+                ChangeNotice::ensure();
+                $to = db()->prepare("SELECT id FROM `User` WHERE isActive=1 AND role='SUPER_ADMIN' AND id<>?"); $to->execute([$auth['id']]);
+                $title = mb_substr('💰 ' . $auth['name'] . ' priced ' . count($ok) . ' item' . (count($ok) === 1 ? '' : 's') . ' of ' . $bt['requestNo'] . ' — please approve', 0, 255);
+                $body = mb_substr(implode(' · ', array_map(fn($x) => $x[7] . ': ' . $x[1] . ' → ₹' . number_format($x[3], 2), array_slice($ok, 0, 6))), 0, 500);
+                $ins = db()->prepare('INSERT INTO `ChangeNotice` (id,userId,byId,title,body,link,createdAt) VALUES (?,?,?,?,?,?,?)');
+                foreach ($to->fetchAll(PDO::FETCH_COLUMN) as $uid) $ins->execute([gen_id(), $uid, $auth['id'], $title, $body, '/price-requests/?q=' . rawurlencode((string) $bt['requestNo']), $now]);
+            } catch (Throwable $e) { error_log('Price proposal notice: ' . $e->getMessage()); }
+        }
+        sendSuccess(['batch' => $this->batch($bid)], 'Saved ' . count($ok) . ' item' . (count($ok) === 1 ? '' : 's') . ' for Super Admin approval');
     }
 
     // DELETE /api/price-requests/batch/:id — requester while every item is pending, or admin
@@ -787,11 +891,22 @@ $tail",
     {
         $auth = authenticate();
         $no = strtoupper(trim(urldecode($no)));
-        $s = db()->prepare('SELECT id FROM `PriceRequestBatch` WHERE requestNo=?'); $s->execute([$no]);
+        $all = (bool) qp('all');
+        $s = db()->prepare('SELECT id FROM `PriceRequestBatch` WHERE UPPER(requestNo)=?'); $s->execute([$no]);
         $bid = $s->fetchColumn();
+        if (!$bid && $all && preg_match('/^PR-\d{4}-\d{4}$/', $no)) {   // typed without the engineer's initials
+            $s = db()->prepare('SELECT id FROM `PriceRequestBatch` WHERE UPPER(requestNo) LIKE ? ORDER BY createdAt DESC LIMIT 1'); $s->execute([$no . '-%']);
+            $bid = $s->fetchColumn();
+        }
         if (!$bid) sendError("Price request $no not found.", 404);
+        self::viewerSeesSupplier($auth);
         $bt = $this->batch($bid);
         if (!is_admin_tier($auth['role']) && $bt['requestedBy']['id'] !== $auth['id']) sendError("Price request $no was raised by someone else.", 403);
+        if ($all) {   // CEO Desk → Get price: every item, whatever its status
+            $f = db()->prepare('SELECT firm, notes FROM `PriceRequestBatch` WHERE id=?'); $f->execute([$bid]); $fb = $f->fetch() ?: [];
+            sendSuccess(['batchId' => $bid, 'requestNo' => $bt['requestNo'], 'firm' => $fb['firm'] ?? null, 'notes' => $fb['notes'] ?? null,
+                         'customer' => $bt['customer'], 'requestedBy' => $bt['requestedBy'], 'items' => $bt['items'], 'counts' => $bt['counts']]);
+        }
         $approved = array_values(array_filter($bt['items'], fn($i) => $i['status'] === 'APPROVED'));
         if (!$approved) sendError("Price request $no has no approved items yet.", 400);
         $c = null;
