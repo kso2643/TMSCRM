@@ -201,12 +201,12 @@ class SupplierQuoteController
         self::auth();
         $no = strtoupper(trim((string) qp('no', '')));
         if ($no === '') sendError('Type the price request number (e.g. PR-2611-0005-JK).', 400);
-        $s = db()->prepare('SELECT b.id, b.requestNo, b.createdAt, c.companyName, u.name AS engineerName FROM `PriceRequestBatch` b
+        $s = db()->prepare('SELECT b.id, b.requestNo, b.firm, b.createdAt, b.requestedById, c.companyName, u.name AS engineerName FROM `PriceRequestBatch` b
             LEFT JOIN `Customer` c ON c.id=b.customerId LEFT JOIN `User` u ON u.id=b.requestedById WHERE UPPER(b.requestNo)=? LIMIT 1');
         $s->execute([$no]);
         $b = $s->fetch();
         if (!$b) {   // let them type it without the initials: PR-2611-0005
-            $s = db()->prepare('SELECT b.id, b.requestNo, b.createdAt, c.companyName, u.name AS engineerName FROM `PriceRequestBatch` b
+            $s = db()->prepare('SELECT b.id, b.requestNo, b.firm, b.createdAt, b.requestedById, c.companyName, u.name AS engineerName FROM `PriceRequestBatch` b
                 LEFT JOIN `Customer` c ON c.id=b.customerId LEFT JOIN `User` u ON u.id=b.requestedById WHERE UPPER(b.requestNo) LIKE ? ORDER BY b.createdAt DESC LIMIT 1');
             $s->execute([$no . '-%']);
             $b = $s->fetch();

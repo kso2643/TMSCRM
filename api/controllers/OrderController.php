@@ -137,6 +137,7 @@ class OrderController
                     'customerId'             => 'VARCHAR(30) NULL',
                     'engineerId'             => 'VARCHAR(30) NULL',
                     'orderType'              => "VARCHAR(10) NOT NULL DEFAULT 'VERBAL'",
+                    'firm'                   => 'VARCHAR(5) NULL',   // our company the order is for: TMS / APJ
                     'poDocumentOriginalName' => 'VARCHAR(255) NULL',
                     'poDocumentStoredName'   => 'VARCHAR(255) NULL',
                     'poDocumentMime'         => 'VARCHAR(100) NULL',
@@ -274,6 +275,7 @@ class OrderController
             ],
             'engineer'           => ['id' => $row['engineerId'], 'name' => $row['engineerName'], 'role' => $row['engineerRole']],
             'orderType'          => $row['orderType'],
+            'firm'               => $row['firm'] ?? null,
             'poDocument'         => $row['poDocumentStoredName'] ? [
                 'originalName' => $row['poDocumentOriginalName'],
                 'mime'         => $row['poDocumentMime'],
@@ -644,6 +646,7 @@ class OrderController
         if (qp('procurementStatus')) { $where[] = 'o.procurementStatus=?'; $params[] = qp('procurementStatus'); }
         if (qp('proformaStatus'))    { $where[] = 'o.proformaStatus=?';    $params[] = qp('proformaStatus'); }
         if (qp('orderType'))      { $where[] = 'o.orderType=?';      $params[] = qp('orderType'); }
+        if (in_array($f = strtoupper((string) qp('firm', '')), ['TMS', 'APJ'], true)) { $where[] = 'o.firm=?'; $params[] = $f; }
         if (qp('customerId'))     { $where[] = 'o.customerId=?';     $params[] = qp('customerId'); }
         if (qp('brand'))          { $where[] = 'EXISTS (SELECT 1 FROM `CustomerOrderItem` bi WHERE bi.orderId=o.id AND bi.brand=?)'; $params[] = qp('brand'); }
         if (qp('search')) {
@@ -719,6 +722,8 @@ class OrderController
 
         $items = $this->parseItems($b['items'] ?? []);
         if (!$items) sendError('Add at least one product to the order.', 400);
+        $firm = strtoupper(trim((string) ($b['firm'] ?? '')));
+        if (!in_array($firm, ['TMS', 'APJ'], true)) sendError('Choose TMS or APJ — which of our companies the order is for.', 400);
 
         $engineerId = $auth['id'];
         if (is_admin_tier($auth['role']) && !empty($b['engineerId'])) {
@@ -749,6 +754,7 @@ class OrderController
             $id, $customerId, $engineerId, $orderType, $poOriginal, $poStored, $poMime, $poSize,
             $verbalDetails, $orderDate, bp_trim($b, 'notes'), now_sql(), now_sql(),
         ]);
+        db()->prepare('UPDATE `CustomerOrder` SET firm=? WHERE id=?')->execute([$firm, $id]);
         if (($ov = self::orderValue($b)) !== null) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([$ov, $id]);
         if (($pn = mb_substr(trim((string) ($b['poNumber'] ?? '')), 0, 80)) !== '') db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([$pn, $id]);
         $this->replaceItems($id, $items);
@@ -807,6 +813,11 @@ class OrderController
              poDocumentMime=?,poDocumentSize=?,verbalDetails=?,orderDate=?,notes=?,updatedAt=? WHERE id=?'
         )->execute([$customerId, $orderType, $poOriginal, $poStored, $poMime, $poSize, $verbalDetails, $orderDate, $notes, now_sql(), $id]);
         if (bp_has($b, 'orderValue')) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([self::orderValue($b), $id]);
+        if (bp_has($b, 'firm')) {
+            $firm = strtoupper(trim((string) $b['firm']));
+            if (!in_array($firm, ['TMS', 'APJ'], true)) sendError('Choose TMS or APJ.', 400);
+            db()->prepare('UPDATE `CustomerOrder` SET firm=? WHERE id=?')->execute([$firm, $id]);
+        }
         if (bp_has($b, 'poNumber')) db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([mb_substr(trim((string) $b['poNumber']), 0, 80) ?: null, $id]);
 
         if (bp_has($b, 'items')) {

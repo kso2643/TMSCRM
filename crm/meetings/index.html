@@ -95,9 +95,9 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
   background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 12px; margin-bottom: 16px;
 }
+.filter-bar #f-status, .filter-bar #f-type { min-width: 170px; } /* don't widen when options load */
 .filter-bar input[type="text"],
 .filter-bar input[type="date"],
-.filter-bar #f-status, .filter-bar #f-type { min-width: 170px; } /* don't widen when options load */
 .filter-bar select {
   font-family: inherit; font-size: .82rem; color: var(--dark);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -106,7 +106,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 .filter-bar input[type="text"] { width: 200px; }
 .filter-search-wrap { position: relative; }
 .filter-search-wrap svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted-light); pointer-events: none; }
-.filter-search-wrap input { padding-left: 30px; width: 200px; }
+.filter-search-wrap input, .filter-bar .filter-search-wrap input { padding-left: 30px; width: 200px; }
 .filter-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-light); margin-right: -2px; }
 .filter-name-group { display: flex; gap: 8px; align-items: center; padding-left: 8px; border-left: 1px solid var(--border); flex-wrap: wrap; }
 .btn-clear {
@@ -295,14 +295,49 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 @media (max-width: 640px) {
   .user-chip #user-name { display: none; }
   .filter-bar { flex-direction: column; align-items: stretch; }
-  .filter-bar input[type="text"], .filter-search-wrap input, .filter-bar select { width: 100%; }
+  .filter-bar input[type="text"], .filter-bar .filter-search-wrap input, .filter-bar select { width: 100%; }
   .filter-name-group { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 8px; width: 100%; }
   .drawer { width: 100vw; }
 }
+/* v11.40 — summary on every card; details open as a pop-up in the centre of the page */
+.meeting-card { gap: 8px; }
+.meeting-summary {
+  font-size: .84rem; color: var(--dark); line-height: 1.45; background: var(--bg); border-left: 3px solid var(--blue);
+  border-radius: 6px; padding: 7px 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  white-space: pre-line; word-break: break-word;
+}
+.meeting-summary b { color: var(--muted); font-weight: 700; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; margin-right: 4px; }
+.meeting-summary.empty { color: var(--muted-light); border-left-color: var(--border); font-style: italic; }
+.meeting-open-hint { font-size: .74rem; color: var(--blue); font-weight: 600; align-self: flex-end; }
+#drawer-backdrop { justify-content: center; align-items: center; padding: 16px; }
+#drawer-backdrop .drawer {
+  width: min(720px, 100%); height: auto; max-height: calc(100vh - 32px); border-radius: 14px; overflow-y: auto;
+}
+#drawer-backdrop:not(.is-hidden) .drawer { animation: mt-pop-in .2s cubic-bezier(.2,.8,.2,1) both; }
+#drawer-backdrop.crm-leaving .drawer { animation: mt-pop-out .16s ease-in both; }
+@keyframes mt-pop-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes mt-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(.98); } }
+#drawer-backdrop .drawer-header { border-radius: 14px 14px 0 0; }
+#drawer-backdrop .drawer-footer { border-radius: 0 0 14px 14px; justify-content: flex-end; }
+#drawer-backdrop .drawer-footer .btn-primary, #drawer-backdrop .drawer-footer .btn-secondary { flex: 0 0 auto; min-width: 140px; }
+.mt-summary-box { background: var(--blue-light); border-radius: 10px; padding: 12px 14px; font-size: .9rem; line-height: 1.5; color: var(--dark); white-space: pre-line; word-break: break-word; }
+.mt-summary-box .rf-label { color: var(--blue-dark); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; display: block; margin-bottom: 4px; }
+.mt-details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.mt-details-grid .readonly-field { background: var(--bg); border-radius: 8px; padding: 8px 10px; white-space: pre-line; word-break: break-word; }
+@media (min-width: 720px) { #drawer-backdrop .audit-strip { flex-direction: row; flex-wrap: wrap; gap: 4px 18px; } }
+@media (max-width: 640px) {
+  #drawer-backdrop { padding: 0; align-items: flex-end; }
+  #drawer-backdrop .drawer { width: 100vw; max-height: 92vh; border-radius: 14px 14px 0 0; }
+  #drawer-backdrop .drawer-footer { border-radius: 0; }
+  #drawer-backdrop .drawer-footer .btn-primary, #drawer-backdrop .drawer-footer .btn-secondary { flex: 1; min-width: 0; }
+}
+.dark .meeting-summary { background: #0f172a; color: #e2e8f0; }
+.dark .mt-summary-box { background: #1e3a8a33; color: #e2e8f0; }
+.dark .mt-details-grid .readonly-field { background: #0f172a; }
 .today-fixed{padding:.55rem .75rem;border:1px solid #cbd5e1;border-radius:.5rem;background:#f1f5f9;color:#0f172a;font-weight:600;font-size:.9rem}
 .dark .today-fixed{background:#1e293b;border-color:#334155;color:#e2e8f0}
 </style>
-<script src="/fuel-expense-app.js?v=20261103c" defer></script><script src="/attendance-all-app.js?v=20261103c" defer></script><script src="/appointments-reminder-app.js?v=20261103c" defer></script><script src="/crm-global.js?v=20261103c" defer></script><link rel="stylesheet" href="/motion.css?v=20261103c"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261104a" defer></script><script src="/attendance-all-app.js?v=20261104a" defer></script><script src="/appointments-reminder-app.js?v=20261104a" defer></script><script src="/crm-global.js?v=20261104a" defer></script><link rel="stylesheet" href="/motion.css?v=20261104a"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 
 <div id="auth-gate" class="state-block" style="max-width:420px;margin:80px auto;">
@@ -359,7 +394,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 </div>
 
 <div class="drawer-backdrop is-hidden" id="drawer-backdrop">
-  <div class="drawer" id="drawer">
+  <div class="drawer" id="drawer" role="dialog" aria-modal="true">
     <!-- populated by JS -->
   </div>
 </div>
@@ -598,12 +633,16 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     var attBits = [["photo", "📷", "photo"], ["file", "📎", "file"], ["voice", "🎙", "voice note"]].filter(function (k) { return ac[k[0]]; })
       .map(function (k) { return '<span class="badge badge-att" title="' + ac[k[0]] + " " + k[2] + (ac[k[0]] === 1 ? "" : "s") + '">' + k[1] + " " + ac[k[0]] + "</span>"; }).join("");
     if (attBits) badges += attBits;
+    var sumKey = ["summary", "notes", "customerRequirements", "actionItems", "trialFeedback"].filter(function (k) { return m[k] && String(m[k]).trim(); })[0];
+    var summaryHtml = sumKey
+      ? '<div class="meeting-summary" data-summary="' + sumKey + '" title="' + escapeHtml(String(m[sumKey]).slice(0, 400)) + '"><b>' + ({ summary: "Summary", notes: "Notes", customerRequirements: "Requirements", actionItems: "Action items", trialFeedback: "Trial feedback" }[sumKey]) + "</b>" + escapeHtml(String(m[sumKey]).trim()) + "</div>"
+      : '<div class="meeting-summary empty" data-summary="">No summary written yet — click to add notes.</div>';
     var metaBits = ['<span><b>By</b> ' + escapeHtml((m.user && m.user.name) || "—") + "</span>"];
     if (m.assignedTo && m.assignedTo.name) metaBits.push('<span><b>Assigned</b> ' + escapeHtml(m.assignedTo.name) + "</span>");
     if (m.updatedBy && m.updatedBy.name) metaBits.push('<span><b>Updated by</b> ' + escapeHtml(m.updatedBy.name) + "</span>");
 
     return (
-      '<div class="meeting-card" data-id="' + escapeHtml(m.id) + '">' +
+      '<div class="meeting-card" role="button" tabindex="0" aria-label="Open meeting details" data-id="' + escapeHtml(m.id) + '">' +
         '<div class="meeting-card-top">' +
           "<div>" +
             '<div class="meeting-company">' + escapeHtml(customer.companyName || "Unknown customer") + "</div>" +
@@ -611,6 +650,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
           "</div>" +
           '<div class="meeting-date">' + escapeHtml(fmtDate(m.meetingDate)) + "</div>" +
         "</div>" +
+        summaryHtml +
         '<div class="meeting-badges">' + badges + "</div>" +
         '<div class="meeting-meta">' + metaBits.join("") + "</div>" +
         followupHtml +
@@ -631,6 +671,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     region.innerHTML = '<div class="meeting-list">' + items.map(meetingCardHtml).join("") + "</div>";
     Array.prototype.forEach.call(region.querySelectorAll(".meeting-card"), function (card) {
       card.addEventListener("click", function () { openDrawer(card.getAttribute("data-id")); });
+      card.addEventListener("keydown", function (e) { if ((e.key === "Enter" || e.key === " ") && e.target === card) { e.preventDefault(); openDrawer(card.getAttribute("data-id")); } });
     });
   }
 
@@ -742,10 +783,14 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     var customer = m.customer || {};
     var drawer = document.getElementById("drawer");
 
-    var extraFields = ["notes","summary","actionItems","customerRequirements","competitorInfo","opportunities","trialFeedback"]
+    var summaryTop = m.summary && String(m.summary).trim()
+      ? '<div class="mt-summary-box" id="mt-summary"><span class="rf-label">Summary / description</span>' + escapeHtml(String(m.summary).trim()) + "</div>"
+      : (m.notes && String(m.notes).trim() ? '<div class="mt-summary-box" id="mt-summary"><span class="rf-label">Notes</span>' + escapeHtml(String(m.notes).trim()) + "</div>" : "");
+    var extraFields = ["actionItems","customerRequirements","competitorInfo","opportunities","trialFeedback"]
       .filter(function (k) { return m[k]; })
       .map(function (k) {
-        return '<div class="readonly-field"><span class="rf-label">' + humanize(k) + "</span>" + escapeHtml(m[k]) + "</div>";
+        var lbl = { actionItems: "Action items", customerRequirements: "Customer requirements", competitorInfo: "Competitor info", opportunities: "Opportunities", trialFeedback: "Trial feedback" }[k] || humanize(k);
+        return '<div class="readonly-field"><span class="rf-label">' + lbl + "</span>" + escapeHtml(m[k]) + "</div>";
       }).join("");
 
     drawer.innerHTML =
@@ -753,10 +798,12 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
         "<div>" +
           "<h2>" + escapeHtml(customer.companyName || "Meeting") + "</h2>" +
           "<p>" + escapeHtml(customer.contactPerson || "") + (customer.contactPerson ? " · " : "") + escapeHtml(fmtDate(m.meetingDate)) + "</p>" +
+          '<div class="meeting-badges" style="margin-top:6px"><span class="badge ' + statusBadgeClass(m.status) + '">' + escapeHtml(humanize(m.status)) + '</span><span class="badge badge-type">' + escapeHtml(humanize(m.meetingType)) + "</span></div>" +
         "</div>" +
         '<button class="drawer-close" id="drawer-close" aria-label="Close">&times;</button>' +
       "</div>" +
       '<div class="drawer-body">' +
+        summaryTop +
         '<div class="audit-strip">' +
           "<span><b>Logged by</b> " + escapeHtml((m.user && m.user.name) || "—") + "</span>" +
           (m.assignedTo ? "<span><b>Assigned to</b> " + escapeHtml(m.assignedTo.name) + "</span>" : "") +
@@ -770,7 +817,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
         '<div class="field-group"><label>Follow-up priority</label><select id="edit-priority"></select></div>' +
         '<div class="field-group"><label>Notes</label><textarea id="edit-notes" placeholder="Add or update notes…">' + escapeHtml(m.notes || "") + "</textarea></div>" +
         '<div class="field-group"><label>Photos, files &amp; voice notes</label><div id="edit-att"></div></div>' +
-        (extraFields ? '<div class="field-group"><label>Additional details on file (read-only here)</label>' + extraFields + "</div>" : "") +
+        (extraFields ? '<div class="field-group"><label>More details</label><div class="mt-details-grid">' + extraFields + "</div></div>" : "") +
       "</div>" +
       '<div id="drawer-feedback"></div>' +
       '<div class="drawer-footer">' +

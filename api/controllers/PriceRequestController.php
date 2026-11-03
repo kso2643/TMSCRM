@@ -94,13 +94,14 @@ $tail",
                 'columns' => [
                     'lastRemindedAt' => 'DATETIME NULL',
                     'remindCount'    => 'INT NOT NULL DEFAULT 0',
+                    'firm'           => 'VARCHAR(5) NULL',   // our company the price is for: TMS / APJ
                 ],
             ],
         ];
     }
 
     private const SELECT = 'SELECT r.*, u.name AS requestedByName, u.role AS requestedByRole, a.name AS respondedByName,
-                                   c.companyName AS customerName, b.requestNo, b.notes AS batchNotes, b.lastRemindedAt, b.remindCount
+                                   c.companyName AS customerName, b.requestNo, b.notes AS batchNotes, b.lastRemindedAt, b.remindCount, b.firm
                             FROM `PriceRequest` r
                             LEFT JOIN `User` u ON u.id = r.requestedById
                             LEFT JOIN `User` a ON a.id = r.respondedById
@@ -451,6 +452,8 @@ $tail",
         $c->execute([$customerId]);
         $cust = $c->fetch();
         if (!$cust) sendError('Company not found.', 404);
+        $firm = strtoupper(trim((string) ($b['firm'] ?? '')));
+        if (!in_array($firm, ['TMS', 'APJ'], true)) sendError('Choose TMS or APJ — which of our companies the price is for.', 400);
         $items = is_array($b['items'] ?? null) ? array_values($b['items']) : [];
         if (!$items) sendError('Add at least one item.', 400);
         if (count($items) > self::MAX_ITEMS) sendError('At most ' . self::MAX_ITEMS . ' items per request.', 400);
@@ -466,8 +469,8 @@ $tail",
         try {
             $bid = gen_id();
             $no = $this->nextRequestNo($auth['id']);
-            $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, createdAt) VALUES (?,?,?,?,?,?,?)')
-                ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', now_sql()]);
+            $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, firm, createdAt) VALUES (?,?,?,?,?,?,?,?)')
+                ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', $firm, now_sql()]);
             $ins = $pdo->prepare('INSERT INTO `PriceRequest` (id,requestedById,customerId,productId,itemCode,productName,quantity,listPrice,requestedPrice,notes,status,
                                   batchId,category,brand,supplyType,unit,discount,leadTime,expectedDelivery,sortOrder,createdAt,updatedAt,priority,existingPrice,monthlyVolume)
                                   VALUES (?,?,?,?,?,?,?,?,?,?,\'PENDING\',?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
@@ -506,6 +509,7 @@ $tail",
                     'requestedBy' => ['id' => $r['requestedById'], 'name' => $r['requestedByName']],
                     'notes' => $r['batchNotes'] ?? null, 'createdAt' => $r['createdAt'], 'items' => [],
                     'lastRemindedAt' => $r['lastRemindedAt'] ?? null, 'remindCount' => (int) ($r['remindCount'] ?? 0),
+                    'firm' => $r['firm'] ?? null,
                 ];
             }
             $out[$key]['items'][] = $this->shape($r);
@@ -521,6 +525,21 @@ $tail",
         return array_values($out);
     }
 
+    // PATCH /api/price-requests/batch/:bid/firm { firm: TMS|APJ } — set / correct which of our companies it is for
+    public function setFirm(string $bid): void
+    {
+        $auth = authenticate();
+        $firm = strtoupper(trim((string) (request_body()['firm'] ?? '')));
+        if (!in_array($firm, ['TMS', 'APJ'], true)) sendError('Choose TMS or APJ.', 400);
+        $s = db()->prepare('SELECT requestedById, requestNo FROM `PriceRequestBatch` WHERE id=?'); $s->execute([$bid]);
+        $bt = $s->fetch();
+        if (!$bt) sendError('Price request not found.', 404);
+        if (!is_admin_tier($auth['role']) && $bt['requestedById'] !== $auth['id']) sendError('Only the engineer who asked or an admin can change this.', 403);
+        db()->prepare('UPDATE `PriceRequestBatch` SET firm=? WHERE id=?')->execute([$firm, $bid]);
+        log_activity($auth['id'], 'PRICE_REQUEST_FIRM', 'PriceRequestBatch', $bid, ['firm' => $firm]);
+        sendSuccess(['firm' => $firm], ($bt['requestNo'] ?: 'Request') . ' is for ' . $firm);
+    }
+
     // GET /api/price-requests/batches?status=OPEN|DONE|ALL&requestedById=&search=
     public function batches(): void
     {
@@ -528,6 +547,7 @@ $tail",
         $where = []; $params = [];
         if (!is_admin_tier($auth['role']) || qp('mine')) { $where[] = 'r.requestedById=?'; $params[] = $auth['id']; }
         elseif (qp('requestedById')) { $where[] = 'r.requestedById=?'; $params[] = qp('requestedById'); }
+        if (in_array($f = strtoupper((string) qp('firm', '')), ['TMS', 'APJ'], true)) { $where[] = 'b.firm=?'; $params[] = $f; }
         if (($q = trim((string) qp('search', ''))) !== '') {
             $like = "%$q%";
             $where[] = '(c.companyName LIKE ? OR r.productName LIKE ? OR r.itemCode LIKE ? OR r.brand LIKE ? OR b.requestNo LIKE ?)';

@@ -63,7 +63,9 @@ class MdDeskController
 $tail", 'columns' => ['toGroup' => "VARCHAR(10) NOT NULL DEFAULT 'ADMINS'", 'items' => 'MEDIUMTEXT NULL', 'customerId' => 'VARCHAR(30) NULL', 'batchId' => 'VARCHAR(30) NULL',
                 'assignees' => 'MEDIUMTEXT NULL', 'reportTo' => 'MEDIUMTEXT NULL',
                 // CEO-yymm-nnnn — typed on the Quotations page to load the customer and items
-                'deskNo' => 'VARCHAR(20) NULL']],
+                'deskNo' => 'VARCHAR(20) NULL',
+                // TMS / APJ — which of our companies the price / quotation is for
+                'firm' => 'VARCHAR(5) NULL']],
             'MdDeskFile' => ['create' => "CREATE TABLE IF NOT EXISTS `MdDeskFile` (
   `id` VARCHAR(30) NOT NULL, `itemId` VARCHAR(30) NOT NULL, `fileName` VARCHAR(255) NOT NULL, `storedName` VARCHAR(80) NOT NULL,
   `size` INT NOT NULL DEFAULT 0, `uploadedById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -368,6 +370,9 @@ $tail"],
         if ($disc !== null && ($disc < 0 || $disc > 100)) sendError('Discount must be between 0 and 100 %.', 400);
         $lines = in_array($type, ['PRICE', 'QUOTATION'], true) ? self::itemLines($b['items'] ?? []) : [];
         $custId = trim((string) ($b['customerId'] ?? '')) ?: null;
+        $firm = strtoupper(trim((string) ($b['firm'] ?? '')));
+        if (!in_array($firm, ['TMS', 'APJ'], true)) $firm = null;
+        if (in_array($type, ['PRICE', 'QUOTATION'], true) && !$firm) sendError('Choose TMS or APJ — which of our companies this is for.', 400);
         $deskNo = self::nextNo();
 
         if ($type === 'PRICE') {
@@ -401,6 +406,7 @@ $tail"],
             $price, $disc, trim((string) ($b['quotationId'] ?? '')) ?: null, $qno ?: null, $amount, $lines ? json_encode($lines, JSON_UNESCAPED_UNICODE) : null,
             $auth['id'], $shared ? null : ($toIds[0] ?? null), $shared ? 'PEOPLE' : ($toIds ? 'ADMINS' : $group),
             $shared ? json_encode($toIds) : null, $reportTo ? json_encode($reportTo) : null, $now, $now, $deskNo]);
+        if ($firm) db()->prepare('UPDATE `MdDeskItem` SET firm=? WHERE id=?')->execute([$firm, $id]);
         log_activity($auth['id'], 'MD_DESK_SENT', 'MdDeskItem', $id, ['type' => $type, 'title' => $title, 'to' => count($toIds), 'reportTo' => count($reportTo)]);
         sendSuccess(['item' => self::load($auth, $id), 'count' => max(1, count($toIds))], $shared ? 'Sent to ' . count($toIds) . ' people (one shared task)' : 'Sent', 201);
     }
@@ -437,7 +443,16 @@ $tail"],
     {
         $auth = self::auth();
         $item = self::load($auth, $id);
-        $st = strtoupper((string) (request_body()['status'] ?? ''));
+        $body = request_body();
+        if (array_key_exists('firm', $body) && !isset($body['status'])) {
+            $firm = strtoupper(trim((string) $body['firm']));
+            if (!in_array($firm, ['TMS', 'APJ'], true)) sendError('Choose TMS or APJ.', 400);
+            if (!self::canWork($auth, $item)) sendError('You cannot change this item.', 403);
+            db()->prepare('UPDATE `MdDeskItem` SET firm=?, updatedAt=? WHERE id=?')->execute([$firm, now_sql(), $id]);
+            log_activity($auth['id'], 'MD_DESK_FIRM', 'MdDeskItem', $id, ['firm' => $firm]);
+            sendSuccess(['item' => self::load($auth, $id)], 'Company set to ' . $firm);
+        }
+        $st = strtoupper((string) ($body['status'] ?? ''));
         if (!in_array($st, ['OPEN', 'DONE'], true)) sendError('Status must be OPEN or DONE.', 400);
         if ($st === 'DONE') db()->prepare("UPDATE `MdDeskItem` SET status='DONE', doneAt=?, doneById=?, updatedAt=? WHERE id=?")->execute([now_sql(), $auth['id'], now_sql(), $id]);
         else db()->prepare("UPDATE `MdDeskItem` SET status=IF(seenAt IS NULL,'OPEN','SEEN'), doneAt=NULL, doneById=NULL, updatedAt=? WHERE id=?")->execute([now_sql(), $id]);

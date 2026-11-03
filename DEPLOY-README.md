@@ -1,3 +1,36 @@
+# Update — 4 Nov (a): TMS / APJ on price requests, orders and the CEO Desk; meeting summaries in front with a centred pop-up
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
+- **Database:** a `firm` column is added automatically to price requests, orders and CEO Desk items.
+- **Older records** have no company yet. They show "⚠ Choose our company" (or "TMS / APJ not set") until someone picks one.
+
+1. **Price requests**
+   - **New price request:** card "1. Company" has **TMS / APJ**. You must pick one before sending.
+   - Each request shows a TMS or APJ badge.
+   - A **TMS / APJ filter** sits above the list.
+   - Open a request to correct the company. The person who raised it and admins can do this.
+2. **Orders**
+   - **New order / Edit order:** pick **TMS or APJ** (required).
+   - The list has a **TMS / APJ column** and a **TMS / APJ filter**.
+   - The order pop-up shows the company badge.
+3. **CEO Desk**
+   - **Get price** and **New quotation** have **TMS / APJ** (required). Messages and tasks don't ask for it.
+   - Every item shows its badge.
+   - A **TMS & APJ filter** sits next to "All types".
+   - Open an item to change the company.
+   - **💰 Price requests tab:** typing a request number shows its company, which you can change there.
+4. **Meetings & follow-ups**
+   - Every meeting card shows the **summary / description** (or the notes) in front, in two lines.
+   - Click a card (or press Enter on it) to open the full details in a **pop-up in the centre of the page**:
+     - the summary in a highlighted box at the top
+     - status, follow-up, notes and attachments
+     - action items, requirements and other details in a tidy grid
+   - **Esc** or a click outside closes it. On phones it opens from the bottom, full width.
+   - **"Log meeting"** opens in the same centred pop-up.
+   - **Look fixed:** the search and date boxes in the filter bar have their proper border and size again, and the search icon no longer covers the text.
+
+---
+
 # Update — 3 Nov (c): Accurate tracking + km per engineer + location-off alerts with the place, odometer required, suppliers item by item, CEO chooses the supplier (Android app 1.0.9)
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Install Android app 1.0.9** on the engineers' phones (GitHub → Releases → `crm-apps`).

@@ -220,7 +220,7 @@
   function mount(root) {
     injectCss();
     var all = [];
-    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '', brandF = '';
+    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '', brandF = '', firmF = '';
     var engineers = [];
     var expanded = {};    // orderId -> true while its row is open
     var presets = {};     // orderId -> delivery status picked from the dropdown that needs the materials panel
@@ -272,6 +272,7 @@
       if (procurementStatus) q.push('procurementStatus=' + procurementStatus);
       if (proformaStatus) q.push('proformaStatus=' + proformaStatus);
       if (brandF) q.push('brand=' + encodeURIComponent(brandF));
+      if (firmF) q.push('firm=' + firmF);
       q.push('limit=100');
       return q.join('&');
     }
@@ -352,10 +353,11 @@
        labelled('Price / proforma', sel('All', PROFORMA_STATUSES, proformaStatus, function (v) { proformaStatus = v; })),
        labelled('Procurement', sel('All procurement statuses', PROCUREMENT_STATUSES, procurementStatus, function (v) { procurementStatus = v; })),
        labelled('Type', sel('All types', ORDER_TYPES, orderType, function (v) { orderType = v; })),
+       labelled('TMS / APJ', sel('Both companies', [['TMS', 'TMS'], ['APJ', 'APJ']], firmF, function (v) { firmF = v; })),
        labelled('Brand', sel('All brands', BRANDS.map(function (b) { return [b, b]; }), brandF, function (v) { brandF = v; })),
        el('div', { class: 'flex items-end' }, [el('button', {
          class: 'btn-secondary w-full', text: 'Clear filters',
-         onclick: function () { from = to = engineerId = deliveryStatus = orderType = procurementStatus = proformaStatus = brandF = ''; renderFilters(); load(); }
+         onclick: function () { from = to = engineerId = deliveryStatus = orderType = procurementStatus = proformaStatus = brandF = firmF = ''; renderFilters(); load(); }
        })])
       ].forEach(function (n) { filters.appendChild(n); });
     }
@@ -420,7 +422,7 @@
     }
 
     function renderTable() {
-      var heads = ['', 'Customer', 'Sales engineer', 'Type', 'Brand', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Invoice', 'Materials', 'PDF'];
+      var heads = ['', 'Customer', 'TMS / APJ', 'Sales engineer', 'Type', 'Brand', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Invoice', 'Materials', 'PDF'];
       var tbody = el('tbody');
       if (!all.length) {
         tbody.appendChild(el('tr', {}, [el('td', {
@@ -434,6 +436,7 @@
           var tr = el('tr', { class: 'table-row cursor-pointer' + (open ? ' ox-open' : ''), 'aria-expanded': open ? 'true' : 'false' }, [
             el('td', { class: 'ox-pl py-3' }, [el('span', { class: 'ox-caret', text: '▸' })]),
             el('td', { class: 'px-3 py-3 font-medium ox-nowrap', text: (o.customer && o.customer.companyName) || '—' }),
+            el('td', { class: 'px-3 py-3', 'data-order-firm-cell': o.id }, [o.firm ? el('span', { class: 'badge ' + (o.firm === 'APJ' ? 'badge-green' : 'badge-blue'), text: o.firm }) : el('span', { class: 'text-muted', text: '—' })]),
             el('td', { class: 'px-3 py-3 ox-nowrap' }, [el('span', { class: 'ox-eng', title: 'Show materials', text: (o.engineer && o.engineer.name) || '—' })]),
             el('td', { class: 'px-3 py-3' }, [el('span', { class: 'badge ' + TYPE_BADGE[o.orderType], text: labelOf(ORDER_TYPES, o.orderType) })]),
             el('td', { class: 'px-3 py-3', 'data-order-brands': '' }, (o.brands && o.brands.length ? o.brands : (fullOrders[o.id] && fullOrders[o.id].items ? fullOrders[o.id].items.map(function (i) { return i.brand; }).filter(function (b, k, a) { return b && a.indexOf(b) === k; }) : []))
@@ -501,6 +504,7 @@
             el('h2', { class: 'section-title mb-0', text: (order.customer && order.customer.companyName) || 'Order' }),
             el('p', { class: 'text-xs text-muted mt-0.5', text: fmtDate(order.orderDate) + ' · ' + ((order.engineer && order.engineer.name) || '') + (order.poNumber ? ' · PO ' + order.poNumber : '') }),
             el('div', { class: 'flex items-center gap-2 flex-wrap mt-2' }, [
+              order.firm ? el('span', { class: 'badge ' + (order.firm === 'APJ' ? 'badge-green' : 'badge-blue'), 'data-view-firm': order.firm, text: order.firm }) : el('span', { class: 'badge badge-red', text: 'TMS / APJ not set' }),
               el('span', { class: 'badge ' + TYPE_BADGE[order.orderType], text: labelOf(ORDER_TYPES, order.orderType) }),
               el('span', { class: 'badge ' + PROCUREMENT_BADGE[order.procurementStatus], text: labelOf(PROCUREMENT_STATUSES, order.procurementStatus) }),
               el('span', { class: 'badge ' + STATUS_BADGE[order.deliveryStatus], text: labelOf(DELIVERY_STATUSES, order.deliveryStatus) }),
@@ -1167,6 +1171,7 @@
       var state = {
         customerId: order ? order.customer.id : '', customerLabel: order ? order.customer.companyName : '',
         orderType: order ? order.orderType : 'VERBAL',
+        firm: order ? order.firm || '' : '',
         verbalDetails: order ? order.verbalDetails || '' : '',
         orderDate: order ? order.orderDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
         notes: order ? order.notes || '' : '',
@@ -1385,6 +1390,14 @@
           }));
         });
         wrap.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted', text: 'Type' }), el('div', { class: 'mt-1' }, [typeRow])]));
+
+        // Our company: TMS / APJ (required)
+        var firmRow = el('div', { class: 'flex gap-2', role: 'radiogroup', 'aria-label': 'Our company' });
+        ['TMS', 'APJ'].forEach(function (f) {
+          firmRow.appendChild(el('button', { type: 'button', 'data-order-firm': f, class: (state.firm === f ? 'btn-primary' : 'btn-secondary'), text: f,
+            onclick: function () { state.firm = f; render(); } }));
+        });
+        wrap.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted' }, ['Our company — TMS or APJ ', el('span', { style: 'color:#dc2626', text: '*' })]), el('div', { class: 'mt-1' }, [firmRow])]));
 
         if (state.orderType === 'PO') {
           var fileLabel = state.file ? state.file.name : (order && order.poDocument ? order.poDocument.originalName + ' (current)' : 'No file chosen');
@@ -1673,6 +1686,7 @@
       function submitCreate() {
         errMsg = '';
         if (!state.customerId) { errMsg = 'Please choose a customer.'; return render(); }
+        if (!state.firm) { errMsg = 'Choose TMS or APJ (our company).'; return render(); }
         if (!state.items.length) { errMsg = 'Add at least one product.'; return render(); }
         if (state.orderType === 'PO' && !state.file) { errMsg = 'Please attach the purchase order document.'; return render(); }
         if (state.orderType === 'VERBAL' && !state.verbalDetails.trim()) { errMsg = 'Please note what was agreed.'; return render(); }
@@ -1680,6 +1694,7 @@
         var fd = new FormData();
         fd.append('customerId', state.customerId);
         fd.append('orderType', state.orderType);
+        fd.append('firm', state.firm);
         fd.append('orderDate', state.orderDate);
         fd.append('notes', state.notes || '');
         fd.append('orderValue', state.orderValue == null ? '' : String(state.orderValue));
@@ -1700,6 +1715,7 @@
       function submitEdit() {
         errMsg = '';
         if (!state.items.length) { errMsg = 'Add at least one product.'; return render(); }
+        if (!state.firm) { errMsg = 'Choose TMS or APJ (our company).'; return render(); }
 
         var goingToPO = state.orderType === 'PO' && order.orderType !== 'PO';
         if (goingToPO && !state.file) {
@@ -1714,6 +1730,7 @@
           customerId: state.customerId,
           orderType: goingToPO ? order.orderType : state.orderType, // don't flip to PO here — the upload call below does that
           orderDate: state.orderDate,
+          firm: state.firm,
           notes: state.notes,
           orderValue: state.orderValue == null ? '' : String(state.orderValue),
           items: state.items.map(function (i) {

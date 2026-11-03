@@ -50,6 +50,18 @@
     (kids || []).forEach(function (c) { if (c != null && c !== false) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return n;
   }
+  function firmBadge(f) { return f ? el('span', { class: 'md-badge', 'data-firm-badge': f, style: '--c:' + (f === 'APJ' ? '#15803d' : '#1d4ed8'), text: f }) : null; }
+  // TMS / APJ chooser — which of our companies a price / quotation is for
+  function firmPicker(cur, onPick, attr) {
+    var row = el('div', { class: 'md-firm', role: 'radiogroup', 'aria-label': 'Our company' });
+    ['TMS', 'APJ'].forEach(function (f) {
+      var b = el('button', { type: 'button', class: 'md-btn sm' + (cur === f ? ' pri' : ''), text: f });
+      b.setAttribute(attr || 'data-md-firm', f);
+      b.onclick = function () { row.querySelectorAll('button').forEach(function (x) { x.classList.toggle('pri', x === b); }); onPick(f); };
+      row.appendChild(b);
+    });
+    return row;
+  }
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
   function money(v) { return v == null || v === '' ? '—' : '₹' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function dmy(s) { var d = new Date(String(s || '').slice(0, 10) + 'T00:00:00'); return isNaN(d) ? '' : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
@@ -90,6 +102,7 @@
       '.md-types{display:grid;grid-template-columns:repeat(2,1fr);gap:.4rem;margin-bottom:.7rem}',
       '.md-type{display:flex;align-items:center;gap:.45rem;padding:.55rem .6rem;border:1px solid #e2e8f0;border-radius:.6rem;background:#fff;cursor:pointer;font-size:.84rem;font-weight:600;color:#334155;text-align:left}',
       '.md-type .i{width:1.6rem;height:1.6rem;border-radius:.45rem;display:flex;align-items:center;justify-content:center;font-size:.9rem;color:#fff;background:var(--c);flex:none}',
+      '.md-firm{display:inline-flex;gap:.35rem;flex-wrap:wrap}',
       '.md-type.on{border-color:var(--c);box-shadow:0 0 0 2px color-mix(in srgb,var(--c) 25%,transparent);background:color-mix(in srgb,var(--c) 6%,#fff)}',
       '.dark .md-type{background:#0f172a;border-color:#334155;color:#e2e8f0}',
       '.md-grid{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}.md-f.w{grid-column:1/-1}',
@@ -411,6 +424,9 @@
         ctx.redraw(); toast('Copied ' + j.data.items.length + ' item(s) from ' + q.quotationNumber);
       }).catch(function (e) { toast(e.message, 'err'); });
     }
+    if (t === 'PRICE' || t === 'QUOTATION') {
+      g.appendChild(field('Our company — TMS or APJ *', firmPicker(state.firm || '', function (f) { state.firm = f; }), true));
+    }
     if (t === 'MESSAGE') {
       add('title', 'Subject (optional)', { placeholder: 'e.g. Sakthi Auto payment follow-up' }, true);
       add('details', 'Message', { tag: 'textarea', placeholder: 'Write your message…', rows: 4 }, true);
@@ -464,7 +480,9 @@
       var grp = picked.filter(function (k) { return k.charAt(0) === '_'; })[0];
       var body = { type: t, toIds: grp ? [] : picked, toGroup: grp === '__EVERYONE' ? 'EVERYONE' : 'ADMINS', priority: prio.value, reportTo: Object.keys(state.rptSel) };
       Object.keys(inp).forEach(function (k) { body[k] = inp[k].value.trim(); });
+      if ((t === 'PRICE' || t === 'QUOTATION') && !state.firm) { toast('Choose TMS or APJ (our company).', 'err'); return; }
       if (t === 'PRICE' || t === 'QUOTATION') {
+        body.firm = state.firm;
         body.customerName = ctx.customerName || ''; body.customerId = ctx.customerId || '';
         body.items = (ctx.lines || []).filter(function (l) { return String(l.itemCode).trim() || String(l.productName).trim() || String(l.price == null ? '' : l.price).trim(); });
         if (qid) body.quotationId = qid;
@@ -491,6 +509,7 @@
       if (state.tab === 'inbox' && !i.toMe) return false;
       if (state.tab === 'sent' && !i.mine) return false;
       if (state.type && i.type !== state.type) return false;
+      if (state.firm2 && i.firm !== state.firm2) return false;
       if (state.status === 'OPEN' && i.status === 'DONE') return false;
       if (state.status === 'DONE' && i.status !== 'DONE') return false;
       var dr = dateRange(), day = String(i.createdAt || '').slice(0, 10);
@@ -541,6 +560,7 @@
       var T = TYPES[i.type] || TYPES.MESSAGE, P = PRIO[i.priority] || PRIO.NORMAL, S = STATUS[i.status] || STATUS.OPEN;
       var right = el('div', { class: 'r' }, [
         when(i.createdAt),
+        firmBadge(i.firm),
         el('span', { class: 'md-badge', style: '--c:' + S[1], text: S[0] }),
         i.priority !== 'NORMAL' ? el('span', { class: 'md-badge', style: '--c:' + P[1], text: P[0] }) : null,
         i.dueDate ? el('span', { class: 'md-badge', style: '--c:' + (i.overdue ? '#dc2626' : '#475569'), text: (i.overdue ? 'Overdue · ' : 'Due ') + dmy(i.dueDate) }) : null,
@@ -578,6 +598,7 @@
           el('h3', { text: i.title }),
           el('div', { style: 'font-size:.8rem;color:#64748b;margin-top:.2rem', text: T.label + ' · from ' + (i.fromName || '—') + ' to ' + toLabel(i) + ' · ' + when(i.createdAt) }),
           el('div', { style: 'display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.35rem' }, [
+            firmBadge(i.firm),
             el('span', { class: 'md-badge', style: '--c:' + S[1], text: S[0] + (i.status === 'DONE' && i.doneByName ? ' by ' + i.doneByName : '') }),
             el('span', { class: 'md-badge', style: '--c:' + P[1], text: P[0] + ' priority' }),
             i.deskNo ? el('button', { type: 'button', class: 'md-badge', 'data-desk-no': i.deskNo, style: '--c:#0f766e;border:0;cursor:pointer', title: 'Copy — type this number on the Quotations page to load the customer and items',
@@ -597,6 +618,13 @@
       if (i.reportTo && i.reportTo.length) dlg.appendChild(ppl('📋 Report to:', i.reportTo, 'background:#ede9fe;color:#5b21b6'));
       if (facts.length) dlg.appendChild(el('div', { class: 'md-facts' }, facts.map(function (f) { return el('div', {}, [el('span', { text: f[0] }), f[1] || '—']); })));
       var canWork = state.role === 'SUPER_ADMIN' || state.role === 'ADMIN' || i.fromId === state.me || i.toId === state.me || (i.assignees || []).some(function (u) { return u.id === state.me; });
+      if ((i.type === 'PRICE' || i.type === 'QUOTATION') && canWork) {
+        dlg.appendChild(el('div', { class: 'md-firm-set', 'data-firm-set': i.id, style: 'display:flex;gap:.5rem;align-items:center;margin-top:.5rem;font-size:.82rem' }, [
+          el('b', { text: i.firm ? 'Company:' : '⚠ Choose the company:' }),
+          firmPicker(i.firm || '', function (f) {
+            api('PATCH', '/md-desk/' + encodeURIComponent(i.id), { firm: f }).then(function (r) { toast(r.message || 'Saved'); return api('GET', '/md-desk/' + encodeURIComponent(i.id)); }).then(draw).catch(function (e) { toast(e.message, 'err'); });
+          }, 'data-set-md-firm')]));
+      }
       if (i.items && i.items.length) {
         var gp = i.type === 'PRICE', itemsBox = el('div', { style: 'overflow-x:auto' });
         var drawItems = function () {
@@ -754,6 +782,8 @@
     listBox = el('div', { class: 'md-list', id: 'md-list' });
     var typeSel = el('select', { id: 'md-ftype' }, [el('option', { value: '', text: 'All types' })].concat(Object.keys(TYPES).map(function (k) { return el('option', { value: k, text: TYPES[k].label }); })));
     typeSel.onchange = function () { state.type = typeSel.value; renderList(); };
+    var firmSel = el('select', { id: 'md-ffirm', 'aria-label': 'TMS / APJ' }, [['', 'TMS & APJ'], ['TMS', 'TMS'], ['APJ', 'APJ']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+    firmSel.onchange = function () { state.firm2 = firmSel.value; renderList(); };
     var stSel = el('select', { id: 'md-fstatus' }, [['OPEN', 'Open'], ['DONE', 'Done'], ['', 'All']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
     stSel.onchange = function () { state.status = stSel.value; renderList(); };
     var search = el('input', { type: 'search', placeholder: 'Search…', id: 'md-search' });
@@ -770,7 +800,7 @@
     };
     dFrom.onchange = function () { state.dfrom = dFrom.value; renderList(); };
     dTo.onchange = function () { state.dto = dTo.value; renderList(); };
-    var right = el('div', { class: 'md-card' }, [tabsBox, el('div', { class: 'md-bar' }, [typeSel, stSel, rangeSel, dFrom, dTo, search]), listBox]);
+    var right = el('div', { class: 'md-card' }, [tabsBox, el('div', { class: 'md-bar' }, [typeSel, firmSel, stSel, rangeSel, dFrom, dTo, search]), listBox]);
     var deskView = el('div', { class: 'md-cols' }, [formBox, right]);
     var quoteView = el('div', { id: 'md-quotes', style: 'display:none' });
     var taskView = el('div', { id: 'md-tasks', style: 'display:none' });
@@ -830,6 +860,11 @@
         try { history.replaceState(null, '', '#prices-' + encodeURIComponent(b.requestNo)); } catch (e) {}
         clear(info).appendChild(el('div', { style: 'display:flex;flex-wrap:wrap;gap:.6rem;align-items:baseline' }, [
           el('b', { style: 'font-size:1.05rem', text: b.requestNo }),
+          firmBadge(b.firm),
+          el('span', { 'data-pr-firm-set': '' }, [el('span', { style: 'font-size:.8rem;margin-right:.3rem', text: b.firm ? 'Change:' : '⚠ TMS / APJ:' }),
+            firmPicker(b.firm || '', function (f) {
+              api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/firm', { firm: f }).then(function (r) { toast(r.message || 'Saved'); show(); }).catch(function (e) { toast(e.message, 'err'); });
+            }, 'data-pr-firm')]),
           el('span', { text: (b.companyName || 'No customer') + ' · asked by ' + (b.engineerName || '—') + ' · ' + String(b.createdAt || '').slice(0, 10) }),
           el('a', { href: '/price-requests/?q=' + encodeURIComponent(b.requestNo), text: 'Open on the Price requests page →' })]));
         window.SupplierPanel.render(panel, b.id, { requestNo: b.requestNo });

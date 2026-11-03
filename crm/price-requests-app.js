@@ -104,6 +104,7 @@
     PENDING: ['Pending', '#d97706'], APPROVED: ['Approved', '#16a34a'], REJECTED: ['Rejected', '#dc2626'],
     PARTIAL: ['Partly answered', '#2563eb'], DONE: ['Answered', '#0f766e']
   };
+  function firmBadge(f) { return el('span', { class: 'pr-badge', 'data-firm-badge': f, style: '--c:' + (f === 'APJ' ? '#0f766e' : '#1d4ed8') + ';margin-right:.45rem', text: f }); }
   function badge(s) { var x = STATUS[s] || [s, '#64748b']; return el('span', { class: 'pr-badge', style: '--c:' + x[1], text: x[0] }); }
 
   /* ── styles ──────────────────────────────────────────────────────── */
@@ -271,7 +272,7 @@
   }
 
   function renderNew(body) {
-    if (!state.form) state.form = { customer: null, notes: '', items: [blankItem()], source: 'FORM', problems: [] };
+    if (!state.form) state.form = { customer: null, firm: '', notes: '', items: [blankItem()], source: 'FORM', problems: [] };
     var F = state.form;
 
     // Company
@@ -311,8 +312,19 @@
     drawCompany();
     var notes = el('textarea', { class: 'pr-in', id: 'pr-notes', rows: '2', placeholder: 'Optional — anything about the whole request (delivery, competitor, deadline…)', value: F.notes });
     notes.addEventListener('input', function () { F.notes = notes.value; });
+    // Which of our companies the price is for (TMS / APJ) — required
+    var firmBox = el('div', { class: 'pr-firm', role: 'radiogroup', 'aria-label': 'Our company' });
+    function drawFirm() {
+      clear(firmBox);
+      [['TMS', 'TMS'], ['APJ', 'APJ']].forEach(function (f) {
+        firmBox.appendChild(el('button', { type: 'button', role: 'radio', 'aria-checked': F.firm === f[0] ? 'true' : 'false', class: 'pr-chip' + (F.firm === f[0] ? ' on' : ''), 'data-firm': f[0], text: f[1],
+          onclick: function () { F.firm = f[0]; drawFirm(); } }));
+      });
+    }
+    drawFirm();
     body.appendChild(el('div', { class: 'pr-card' }, [
       el('h2', {}, ['1. Company']),
+      el('div', { class: 'pr-f', style: 'margin-bottom:.6rem' }, [el('label', {}, ['Our company — TMS or APJ ', el('span', { class: 'req', text: '*' })]), firmBox]),
       el('div', { class: 'pr-row2' }, [
         el('div', { class: 'pr-f' }, [el('label', { for: 'pr-company' }, ['Company ', el('span', { class: 'req', text: '*' })]), compHost]),
         el('div', { class: 'pr-f' }, [el('label', { for: 'pr-notes', text: 'Note for the whole request' }), notes])
@@ -495,6 +507,7 @@
         if (miss.length) errs.push('Item ' + (i + 1) + ': ' + miss.join(', '));
       });
       if (!F.customer) errs.unshift('Select the company');
+      if (!F.firm) errs.unshift('Choose TMS or APJ (our company)');
       return errs;
     }
 
@@ -508,7 +521,7 @@
       }
       btn.disabled = true; btn.textContent = 'Sending…';
       api('POST', '/price-requests/batch', {
-        customerId: F.customer.id, notes: F.notes, source: F.source,
+        customerId: F.customer.id, firm: F.firm, notes: F.notes, source: F.source,
         items: F.items.map(function (i) {
           return { productId: i.productId, itemCode: i.itemCode, productName: i.productName, category: i.category, brand: i.brand, supplyType: i.supplyType,
             quantity: i.quantity, unit: i.unit, requestedPrice: i.requestedPrice, existingPrice: i.existingPrice, monthlyVolume: i.monthlyVolume, priority: i.priority || 'NORMAL', notes: i.notes };
@@ -534,7 +547,7 @@
     var listHost = el('div', { id: 'pr-list' }, [el('div', { class: 'pr-empty', text: 'Loading…' })]);
     body.appendChild(bar); body.appendChild(listHost);
     function load() {
-      var q = '/price-requests/batches?status=' + state.filter + (state.search ? '&search=' + encodeURIComponent(state.search) : '') + (state.who ? '&requestedById=' + state.who : '');
+      var q = '/price-requests/batches?status=' + state.filter + (state.search ? '&search=' + encodeURIComponent(state.search) : '') + (state.who ? '&requestedById=' + state.who : '') + (state.firm ? '&firm=' + state.firm : '');
       listHost.style.opacity = '.6';
       api('GET', q).then(function (r) {
         listHost.style.opacity = '';
@@ -550,6 +563,10 @@
       [['OPEN', 'Waiting', d.counts.OPEN], ['DONE', 'Answered', d.counts.DONE], ['ALL', 'All', d.counts.OPEN + d.counts.DONE]].forEach(function (f) {
         bar.appendChild(el('button', { class: 'pr-chip' + (state.filter === f[0] ? ' on' : ''), type: 'button', 'data-f': f[0], text: f[1] + ' (' + f[2] + ')', onclick: function () { state.filter = f[0]; load(); } }));
       });
+      var fs = el('select', { class: 'pr-in', style: 'width:auto', 'aria-label': 'TMS or APJ', 'data-firm-filter': '1', onchange: function () { state.firm = fs.value; load(); } },
+        [['', 'TMS & APJ'], ['TMS', 'TMS'], ['APJ', 'APJ']].map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+      fs.value = state.firm || '';
+      bar.appendChild(fs);
       var s = el('input', { class: 'pr-in', type: 'search', placeholder: 'Search company, product, brand, PR no…', value: state.search, style: 'flex:1 1 220px;width:auto' });
       var t; s.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { state.search = s.value.trim(); load(); }, 300); });
       bar.appendChild(s);
@@ -584,7 +601,7 @@
       if (open && !inner.firstChild) fillBody();
     } }, [
       el('div', {}, [
-        el('div', { class: 't' }, [(b.requestNo || 'Request') + ' · ' + (b.customer ? b.customer.companyName : 'No company')]),
+        el('div', { class: 't' }, [b.firm ? firmBadge(b.firm) : null, (b.requestNo || 'Request') + ' · ' + (b.customer ? b.customer.companyName : 'No company')]),
         el('div', { class: 's', text: b.items.length + ' item' + (b.items.length === 1 ? '' : 's') + (isAdminTier ? ' · by ' + (b.requestedBy.name || '—') : '') + ' · ' + when(b.createdAt) + (b.value ? ' · target ' + money(b.value) : '') })
       ]),
       el('div', { style: 'display:flex;align-items:center;gap:.6rem' }, [
@@ -635,6 +652,14 @@
     function fillBody() {
       clear(inner);
       if (b.notes) inner.appendChild(el('div', { class: 'pr-note', text: '📝 ' + b.notes }));
+      // TMS / APJ: set it on older requests, or correct it (the engineer who asked or an admin)
+      if (!b.legacy && (isAdminTier || (b.requestedBy && b.requestedBy.id === me().id))) {
+        inner.appendChild(el('div', { class: 'pr-meta', 'data-firm-set': b.id, style: 'display:flex;gap:.35rem;align-items:center;margin:.2rem 0 .6rem' }, [b.firm ? 'Our company:' : '⚠ Choose our company:'].concat(['TMS', 'APJ'].map(function (f) {
+          return el('button', { type: 'button', class: 'pr-chip' + (b.firm === f ? ' on' : ''), 'data-set-firm': f, text: f, onclick: function () {
+            api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/firm', { firm: f }).then(function (j) { toast(j.message); b.firm = f; reload(); }).catch(function (e) { toast(e.message, 'err'); });
+          } });
+        }))));
+      }
       var drafts = state.drafts[b.id] || (state.drafts[b.id] = {});
       var editing = state.editing || (state.editing = {});
       var answering = canRespond && (b.counts.PENDING > 0 || b.items.some(function (x) { return editing[x.id]; }));
