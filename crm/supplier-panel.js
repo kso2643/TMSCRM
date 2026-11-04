@@ -6,7 +6,8 @@
       - "Suppliers item by item": e.g. the drills to the Zecha dealer, the end mills to another brand's
         dealer; several suppliers can be picked for one item to compare. One message per supplier with
         only that supplier's items (tool-wise), each with its own editable text and note.
-   2. Supplier prices, grouped by item: type each supplier's price / discount / lead time; the best
+   2. Supplier prices, grouped by item: type each supplier's price / discount / lead time and our
+      customer price (margin shown); the best
       net price is marked; the Super Admin / Admin presses "Choose" on the supplier to buy from
       (the others are told, and it shows here for everyone).
    API: /api/price-requests/batch/:bid/supplier, /api/price-requests/supplier/:qid(/choose) (SupplierQuoteController).
@@ -73,6 +74,7 @@
       '.sp-badge{display:inline-block;border-radius:9999px;padding:.08rem .5rem;font-size:.7rem;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 14%,#fff)}',
       '.sp-msgs{display:grid;gap:.6rem}@media(min-width:1100px){.sp-msgs{grid-template-columns:1fr 1fr}}',
       '.sp-best{color:#15803d;font-weight:700}',
+      '.sp-acts{min-width:11rem}.sp-acts>*{margin:.12rem 0}',
       '#sp-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483600;background:#0f172a;color:#fff;padding:.6rem 1rem;border-radius:.6rem;font:500 .85rem system-ui,sans-serif;transition:opacity .3s;opacity:0;pointer-events:none}',
       '#sp-toast.bad{background:#7f1d1d}'
     ].join('\n');
@@ -250,18 +252,26 @@
         if (!qs.length) return;
         var best = null; qs.forEach(function (q) { if (q.netPrice != null && (best == null || q.netPrice < best)) best = q.netPrice; });
         var chosen = qs.filter(function (q) { return q.chosen; })[0];
-        tb.appendChild(el('tr', { class: 'sp-item', 'data-sp-qitem': it.id }, [el('td', { colspan: '9' }, [
+        tb.appendChild(el('tr', { class: 'sp-item', 'data-sp-qitem': it.id }, [el('td', { colspan: '10' }, [
           itemLabel(it) + (it.quantity != null ? ' · Qty ' + Number(it.quantity) : ''),
           chosen ? el('span', { class: 'sp-badge', style: '--c:#15803d;margin-left:.5rem', text: '✔ Buy from ' + chosen.vendorName + (chosen.chosenByName ? ' — chosen by ' + chosen.chosenByName : '') }) : el('span', { class: 'sp-meta', style: 'margin-left:.5rem;font-weight:400', text: qs.length + ' supplier' + (qs.length === 1 ? '' : 's') + ' asked' })
         ])]));
         qs.forEach(function (q) {
-          var pr = el('input', { class: 'sp-in', type: 'number', step: 'any', min: '0', placeholder: 'Price ₹', value: q.price != null ? q.price : '', style: 'width:7rem', 'data-q-price': q.id });
-          var di = el('input', { class: 'sp-in', type: 'number', step: 'any', min: '0', max: '100', placeholder: 'Disc %', value: q.discount != null ? q.discount : '', style: 'width:5rem' });
-          var lt = el('input', { class: 'sp-in', placeholder: 'Lead time', value: q.leadTime || '', style: 'width:6.5rem' });
-          var no = el('input', { class: 'sp-in', placeholder: 'Note', value: q.note || '', style: 'width:9rem' });
+          var pr = el('input', { class: 'sp-in', type: 'number', step: 'any', min: '0', placeholder: 'Price ₹', value: q.price != null ? q.price : '', style: 'width:6rem', 'data-q-price': q.id });
+          var di = el('input', { class: 'sp-in', type: 'number', step: 'any', min: '0', max: '100', placeholder: 'Disc %', value: q.discount != null ? q.discount : '', style: 'width:4.3rem' });
+          var lt = el('input', { class: 'sp-in', placeholder: 'Lead time', value: q.leadTime || '', style: 'width:5.5rem' });
+          var no = el('input', { class: 'sp-in', placeholder: 'Note', value: q.note || '', style: 'width:6.5rem' });
+          // our price to the customer for this offer (the supplier price is our cost) → margin
+          var cu = el('input', { class: 'sp-in', type: 'number', step: 'any', min: '0', placeholder: 'Customer ₹', value: q.customerPrice != null ? q.customerPrice : '', style: 'width:6.3rem', 'data-q-cust': q.id, 'aria-label': 'Customer price from ' + q.vendorName });
+          var mg = el('div', { class: 'sp-meta', 'data-q-margin': q.id, style: 'white-space:nowrap' });
           var net = el('span', { class: q.netPrice != null && q.netPrice === best && qs.length > 1 ? 'sp-best' : '', text: q.netPrice != null ? money(q.netPrice) + (q.netPrice === best && qs.length > 1 ? ' ★' : '') : '—' });
-          function calc() { var p = num(pr.value), x = num(di.value) || 0; net.textContent = p != null ? money(Math.round(p * (100 - x)) / 100) : '—'; }
-          pr.addEventListener('input', calc); di.addEventListener('input', calc);
+          function calc() {
+            var p = num(pr.value), x = num(di.value) || 0, n = p != null ? Math.round(p * (100 - x)) / 100 : null, c = num(cu.value);
+            net.textContent = n != null ? money(n) : '—';
+            if (n != null && c != null && c > 0) { var m = c - n, pc = Math.round(m / c * 1000) / 10; mg.textContent = 'margin ' + money(m) + ' · ' + pc + '%'; mg.style.color = m < 0 ? '#b91c1c' : pc < 10 ? '#b45309' : '#15803d'; }
+            else mg.textContent = '';
+          }
+          pr.addEventListener('input', calc); di.addEventListener('input', calc); cu.addEventListener('input', calc); calc();
           var st = q.status === 'RECEIVED' ? ['Received', '#16a34a'] : q.status === 'NO_QUOTE' ? ['No quote', '#64748b'] : ['Asked', '#d97706'];
           var decide = canDecide ? el('button', { class: 'sp-btn ' + (q.chosen ? 'grn' : ''), type: 'button', 'data-q-choose': q.id, title: q.chosen ? 'Clear the choice' : 'Buy this item from ' + q.vendorName, text: q.chosen ? '✔ Chosen' : 'Choose',
             onclick: function () {
@@ -271,12 +281,12 @@
                 .then(function (j) { toast(j.message); d.quotes = j.data.quotes; drawQuotes(); if (opts.onChange) opts.onChange(); }).catch(function (e) { toast(e.message, true); });
             } }) : (q.chosen ? el('span', { class: 'sp-badge', style: '--c:#15803d', text: '✔ Chosen' }) : null);
           tb.appendChild(el('tr', { class: q.chosen ? 'sp-chosen' : '', 'data-quote': q.id }, [
-            el('td', { style: 'min-width:10rem' }, [el('b', { text: q.vendorName }), el('div', { class: 'sp-meta', text: 'asked ' + when(q.askedAt) + (q.chosen && q.chosenNote ? ' · “' + q.chosenNote + '”' : '') })]),
+            el('td', { style: 'min-width:8.5rem' }, [el('b', { text: q.vendorName }), el('div', { class: 'sp-meta', text: 'asked ' + when(q.askedAt) + (q.chosen && q.chosenNote ? ' · “' + q.chosenNote + '”' : '') })]),
             el('td', {}, [el('span', { class: 'sp-badge', style: '--c:' + st[1], text: st[0] })]),
-            el('td', {}, [pr]), el('td', {}, [di]), el('td', { class: 'sp-r', style: 'white-space:nowrap' }, [net]), el('td', {}, [lt]), el('td', {}, [no]),
-            el('td', { style: 'white-space:nowrap' }, [
+            el('td', {}, [pr]), el('td', {}, [di]), el('td', { class: 'sp-r', style: 'white-space:nowrap' }, [net]), el('td', {}, [cu, mg]), el('td', {}, [lt]), el('td', {}, [no]),
+            el('td', { class: 'sp-acts' }, [
               el('button', { class: 'sp-btn grn', type: 'button', 'data-q-save': q.id, text: 'Save', onclick: function () {
-                api('PUT', '/price-requests/supplier/' + encodeURIComponent(q.id), { price: pr.value, discount: di.value, leadTime: lt.value, note: no.value })
+                api('PUT', '/price-requests/supplier/' + encodeURIComponent(q.id), { price: pr.value, discount: di.value, customerPrice: cu.value, leadTime: lt.value, note: no.value })
                   .then(function (j) { toast(j.message); d.quotes = j.data.quotes; drawQuotes(); }).catch(function (e) { toast(e.message, true); });
               } }), ' ',
               el('button', { class: 'sp-btn', type: 'button', title: 'Supplier did not quote', text: '✕ No quote', onclick: function () {
@@ -293,7 +303,7 @@
         });
       });
       qBox.appendChild(el('div', { class: 'sp-scroll', style: 'margin-top:.5rem' }, [el('table', { class: 'sp-tbl' }, [
-        el('thead', {}, [el('tr', {}, ['Supplier', 'Status', 'Price', 'Disc %', 'Net', 'Lead time', 'Note', '', 'Buy from'].map(function (h, i) { return el('th', { class: i === 4 ? 'sp-r' : null, text: h }); }))]), tb])]));
+        el('thead', {}, [el('tr', {}, ['Supplier', 'Status', 'Supplier price', 'Disc %', 'Net (cost)', 'Customer price', 'Lead time', 'Note', '', 'Buy from'].map(function (h, i) { return el('th', { class: i === 4 ? 'sp-r' : null, text: h }); }))]), tb])]));
     }
     load();
     return { reload: load };

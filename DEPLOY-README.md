@@ -1,3 +1,42 @@
+# Update — 4 Nov (h): customer price + PO to supplier (PDF / Excel), supplier prices hidden from engineers, paste a message into a quotation, logged-in name + Revise on quotations, punch-out rules + GPS km
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Phone app:** install the new APK from the `crm-apps` release (better tracking, see 5).
+- **New file:** `crm/quote-extras.js`.
+- **Database:** new columns are added automatically: customer price on supplier quotes, PO link on price-request items, the revision link on quotations, and GPS km, typed km and the late punch-out reason on attendance.
+
+1. **Two prices, then the PO to the supplier** (Price requests → open a request → 🏭 Get price from supplier)
+   - Each supplier row now has **Supplier price** (our cost) and **Customer price** (what we sell at), with the **margin** in ₹ and %. It is red below 0 and amber below 10 %.
+   - **Use this supplier** fills in the supplier, the cost and the customer price in the answer.
+   - Once the prices are approved, a green box **📄 Purchase order to the supplier** appears (Super Admin / Admin). It shows each supplier with its items, cost, sale and margin.
+   - **📄 Raise PO** makes the PO in the existing PO format (TMS or APJ letterhead, as on Vendors → Purchase orders), at the supplier's rate and discount.
+     - GST 18 %, payment 30 days and door delivery are filled in. The subject quotes the PR number and the customer. You are the signatory.
+     - There is one PO per supplier. **Raise all** does them all at once.
+   - Each PO has **⬇ PDF**, **⬇ Excel** and **✎ Open / edit** (opens it on the Vendors page). The Vendors → Purchase orders list has **⬇ Excel** too.
+   - If a PO is deleted, it can be raised again.
+2. **Supplier prices are never shown to engineers.**
+   - Engineers only ever see the approved customer price. The supplier panel, supplier names, costs and POs are for the Super Admin and Admins only.
+   - **Fixed:** when the CEO chose a supplier, the engineer's alert used to include the supplier's name and net price. It now just says "Supplier fixed for … — price coming soon".
+3. **Quotation from a message (your question):** Quotations → **📋 Paste message** (next to "Load approved prices").
+   - Copy the WhatsApp or e-mail message (or rows from Excel) and paste it. The items are read out: item code, description, qty (10 nos / qty 10), price (Rs 450 / ₹450 / 450/-), discount (10 %) and delivery (2 weeks / ex-stock).
+   - Check and correct them in the table, then **Add to the quotation**.
+   - For prices that went through a price request, type the PR number and press **Load approved prices** (this already existed). No copying is needed.
+   - Also: opening a price-request link from an alert now finds the request even when it is already answered.
+4. **Quotations**
+   - **Your name as signatory.** A new quotation gets the signed-in person in "Authorised by", and their designation from the user profile (Admin → Users → designation). The fixed names are gone. Saved quotations keep their own name.
+   - The list shows **👤 who signed / made** each quotation.
+   - **✎ Revise** on each saved quotation makes a revised copy numbered **…-R1**, then -R2…, and opens it to change. The original stays as it was, marked "Revised → newer copy". This works on approved quotations too.
+5. **Attendance / punch out** (field staff = Sales, or anyone with a vehicle set)
+   - **6:30 pm reminder:** a banner on every page (Punch out / Later) and an alert on the phone. Punch-out time is 6:30–7:00 pm.
+   - **After 7:00 pm** the punch out asks why: 💼 working late / 🚗 travelling (from → to, purpose) / 🤝 at a customer / 📝 other.
+   - **GPS km:** the punch-out card shows today's km by GPS and what the closing odometer should be. A warning appears if the typed odometer is far off. The GPS km are saved with the punch out.
+   - **Phone or GPS off:** any stretch of 20+ min with no location point is listed with its times. The punch out then needs the reason, and the km travelled in that time can be typed. The typed km are added in Location history ("+ 6 km typed (GPS off)").
+   - **Admin:** Attendance → All employees shows the late reason and GPS + typed km on each row.
+   - **More accurate tracking.** In the app and the web page:
+     - Points taken without network are kept on the phone and sent later with their real time, so no km are lost in no-signal areas.
+     - A real GPS fix beats a tower guess.
+     - When driving fast, a point is taken every 15 s, so bends in the road count.
+     - Tower guesses more than 2 km off are ignored.
+
 # Update — 4/5 Nov (g): APJ suggestions readable, delete customer, editable theme, new login page, Engineer notes
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.

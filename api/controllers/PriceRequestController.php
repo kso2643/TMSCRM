@@ -91,6 +91,8 @@ class PriceRequestController
                     'proposedNote'     => 'VARCHAR(500) NULL',
                     'proposedById'     => 'VARCHAR(30) NULL',
                     'proposedAt'       => 'DATETIME NULL',
+                    // purchase order raised to the supplier for this item (v11.47)
+                    'poId'             => 'VARCHAR(30) NULL',
                 ],
             ],
             'PriceRequestBatch' => [
@@ -137,6 +139,17 @@ $tail",
         return self::$showSupplier = (ROLE_LEVELS[$auth['role']] ?? 0) >= ROLE_LEVELS['ADMIN'];
     }
 
+    /** The PO raised for an item: {id, poNumber, vendorName} — null when that PO was deleted since. */
+    private static array $poCache = [];
+    private static function poRef(string $id): ?array
+    {
+        if (!array_key_exists($id, self::$poCache)) {
+            try { $s = db()->prepare('SELECT id, poNumber, vendorName, status FROM `PurchaseOrder` WHERE id=?'); $s->execute([$id]); self::$poCache[$id] = $s->fetch() ?: null; }
+            catch (PDOException $e) { self::$poCache[$id] = null; }
+        }
+        return self::$poCache[$id];
+    }
+
     private function shape(array $r): array
     {
         $out = $this->shapeBase($r);
@@ -144,6 +157,7 @@ $tail",
         if (self::$showSupplier) {
             $out['supplierName'] = $r['supplierName'] ?? null;
             $out['supplierPrice'] = isset($r['supplierPrice']) ? self::money($r['supplierPrice']) : null;
+            $out['po'] = !empty($r['poId']) ? self::poRef((string) $r['poId']) : null;
             $out['proposal'] = !empty($r['proposedAt']) ? [
                 'price' => self::money($r['proposedPrice']), 'discount' => isset($r['proposedDiscount']) ? self::money($r['proposedDiscount']) : null,
                 'leadTime' => $r['proposedLeadTime'] ?? null, 'note' => $r['proposedNote'] ?? null,

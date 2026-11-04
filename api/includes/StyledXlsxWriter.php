@@ -56,6 +56,10 @@ class StyledXlsxWriter
     public function setWidths(int $sheet, array $widths): void { $this->sheets[$sheet]['widths'] = $widths; }
     public function freeze(int $sheet, int $rows): void { $this->sheets[$sheet]['freeze'] = $rows; }
     public function autoFilter(int $sheet, string $range): void { $this->sheets[$sheet]['filter'] = $range; }
+    /** Merge a range on the sheet, e.g. 'A1:I1'. */
+    public function merge(int $sheet, string $range): void { $this->sheets[$sheet]['merges'][] = $range; }
+    /** Portrait page (default is landscape). */
+    public function portrait(int $sheet): void { $this->sheets[$sheet]['portrait'] = true; }
     public function rowCount(int $sheet): int { return count($this->sheets[$sheet]['rows']); }
 
     public function addRow(int $sheet, array $cells, string $rowStyle = 'default', ?float $height = null): int
@@ -96,6 +100,7 @@ class StyledXlsxWriter
     {
         $x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+        if (!empty($sh['portrait'])) $x .= '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>';   // one page wide
         if ($sh['freeze'] > 0) {
             $top = 'A' . ($sh['freeze'] + 1);
             $x .= '<sheetViews><sheetView workbookViewId="0"><pane ySplit="' . $sh['freeze'] . '" topLeftCell="' . $top . '" activePane="bottomLeft" state="frozen"/>'
@@ -117,7 +122,8 @@ class StyledXlsxWriter
                 $st = $this->styleIndex($c['s'] ?? $row['style']);
                 $v = $c['v'] ?? null;
                 if (isset($c['f'])) {
-                    $x .= '<c r="' . $ref . '" s="' . $st . '"><f>' . self::esc($c['f']) . '</f></c>';
+                    // a cached value ('v') lets viewers that do not recalculate show the result too
+                    $x .= '<c r="' . $ref . '" s="' . $st . '"><f>' . self::esc($c['f']) . '</f>' . (isset($c['v']) && is_numeric($c['v']) ? '<v>' . (0 + $c['v']) . '</v>' : '') . '</c>';
                 } elseif (($c['t'] ?? '') === 'date' && $v) {
                     $d = self::excelDate((string) $v);
                     $x .= $d === null
@@ -135,8 +141,13 @@ class StyledXlsxWriter
         }
         $x .= '</sheetData>';
         if ($sh['filter']) $x .= '<autoFilter ref="' . $sh['filter'] . '"/>';
+        if (!empty($sh['merges'])) {
+            $x .= '<mergeCells count="' . count($sh['merges']) . '">';
+            foreach ($sh['merges'] as $m) $x .= '<mergeCell ref="' . $m . '"/>';
+            $x .= '</mergeCells>';
+        }
         $x .= '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'
-            . '<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/>';
+            . '<pageSetup orientation="' . (!empty($sh['portrait']) ? 'portrait' : 'landscape') . '" paperSize="9" fitToWidth="1" fitToHeight="0"/>';
         return $x . '</worksheet>';
     }
 

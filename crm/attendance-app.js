@@ -209,6 +209,7 @@
         // Punch out needs a fresh photo and the location, same as punch in.
         right.appendChild(el('div', { class: 'at-sub', style: 'margin-top:.5rem', text: (state.photo ? '✓ Photo taken' : '✗ Photo not taken yet') + ' · location is taken when you punch out' }));
         if (state.odoRequired) right.appendChild(odoField('out'));
+        right.appendChild(outBox());
         right.appendChild(el('div', { class: 'at-row' }, [el('button', { class: 'at-btn out', type: 'button', id: 'at-out', disabled: !state.photo || state.busy || !odoOk(), onclick: punchOut, text: state.busy ? 'Punching out…' : 'Punch out' })]));
         left = photoPanel('out');
       } else {
@@ -280,13 +281,91 @@
     }).catch(function (e) { locFail(e, 'in'); })
       .then(function () { state.busy = false; render(); });
   }
+  // ── punch out (v11.47): km by GPS, 6:30–7:00 pm window, late reason, phone / GPS-off reason + km ──
+  // GET /attendance/punch-out-check says what to ask; the answers go with the punch out.
+  state.out = { type: '', reason: '', from: '', to: '', manualKm: '', manualReason: '' };
+  function loadOutCheck() {
+    return api('GET', '/attendance/punch-out-check').then(function (j) { state.outChk = j.data; return j.data; }).catch(function () { state.outChk = null; return null; });
+  }
+  function outMissing() {
+    var c = state.outChk, o = state.out;
+    if (!c) return '';
+    if (c.phase === 'LATE') {
+      if (!o.type) return 'Choose why you are punching out late.';
+      if (o.type === 'TRAVEL' && (!o.from.trim() || !o.to.trim())) return 'Enter where you are travelling from and to.';
+      if (o.type !== 'TRAVEL' && !o.reason.trim()) return 'Write the reason for punching out late.';
+    }
+    if (c.gaps && c.gaps.length && !o.manualReason.trim()) return 'Write why your location was off (phone / GPS off).';
+    return '';
+  }
+  function outBox() {
+    var c = state.outChk, o = state.out, box = el('div', { id: 'at-outbox' });
+    if (!c) return box;
+    var km = function (v) { return Number(v).toLocaleString('en-IN', { maximumFractionDigits: 1 }); };
+    box.appendChild(el('div', { class: 'at-msg info', id: 'at-gps-km' }, [
+      '📍 GPS today: ', el('b', { text: km(c.gpsKm) + ' km' }), ' (' + c.points + ' points)',
+      c.suggestedClosing != null ? ' · closing odometer should be about ' + km(c.suggestedClosing) + ' km' : '']));
+    if (c.phase === 'WINDOW') box.appendChild(el('div', { class: 'at-msg ok', id: 'at-out-window', text: '🕡 Punch-out time — please punch out before ' + ampm(c.outUntil) + '.' }));
+    if (c.phase === 'LATE') {
+      var f = el('div', { class: 'at-msg warn at-f', id: 'at-late-out' }, [el('b', { text: '⏰ It is after ' + ampm(c.outUntil) + ' — why are you punching out late? *' })]);
+      var seg = el('div', { class: 'at-row', style: 'flex-wrap:wrap;margin-top:.4rem' });
+      Object.keys(c.lateOutTypes || {}).forEach(function (k) {
+        seg.appendChild(el('button', { type: 'button', class: 'at-btn sm' + (o.type === k ? ' pri' : ''), 'data-late-type': k, text: (k === 'TRAVEL' ? '🚗 ' : k === 'WORK' ? '💼 ' : k === 'CUSTOMER' ? '🤝 ' : '📝 ') + c.lateOutTypes[k],
+          onclick: function () { o.type = k; var nb = outBox(); box.replaceWith(nb); } }));   // only this box — the camera keeps running
+      });
+      f.appendChild(seg);
+      if (o.type === 'TRAVEL') {
+        var fr = el('input', { id: 'at-travel-from', placeholder: 'Travelling from (e.g. Hosur)', value: o.from });
+        var to = el('input', { id: 'at-travel-to', placeholder: 'Travelling to (e.g. Coimbatore)', value: o.to });
+        fr.addEventListener('input', function () { o.from = fr.value; upd(); }); to.addEventListener('input', function () { o.to = to.value; upd(); });
+        f.appendChild(el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-top:.4rem' }, [fr, to]));
+      }
+      if (o.type) {
+        var rs = el('textarea', { id: 'at-late-reason', rows: 2, placeholder: o.type === 'TRAVEL' ? 'Purpose of the travel (optional)' : 'Reason *', value: o.reason });
+        rs.value = o.reason; rs.addEventListener('input', function () { o.reason = rs.value; upd(); });
+        f.appendChild(rs);
+      }
+      box.appendChild(f);
+    }
+    if (c.gaps && c.gaps.length) {
+      var g = el('div', { class: 'at-msg bad at-f', id: 'at-gps-off' }, [
+        el('b', { text: '📵 Your location was not recorded for ' + c.gapMinutes + ' min today: ' }),
+        c.gaps.map(function (x) { return ampm(x.from) + '–' + ampm(x.to); }).join(', '),
+        el('div', { style: 'font-size:.8rem;margin-top:.2rem', text: 'Was the phone switched off, the battery dead or GPS off? Write the reason, and the km you travelled in that time so it is added to your total.' })]);
+      var mk = el('input', { id: 'at-manual-km', type: 'number', min: '0', step: '0.1', inputmode: 'decimal', placeholder: 'Km travelled while GPS was off (e.g. 12)', value: o.manualKm });
+      var mr = el('textarea', { id: 'at-manual-reason', rows: 2, placeholder: 'Reason * (e.g. battery died between 2 and 3 pm)' });
+      mr.value = o.manualReason;
+      mk.addEventListener('input', function () { o.manualKm = mk.value; upd(); }); mr.addEventListener('input', function () { o.manualReason = mr.value; upd(); });
+      g.appendChild(mk); g.appendChild(mr);
+      box.appendChild(g);
+    }
+    function upd() { var b = punchBox.querySelector('#at-out'); if (b) b.disabled = !state.photo || state.busy || !odoOk() || !!outMissing(); }
+    setTimeout(upd, 0);
+    return box;
+  }
   function punchOut() {
     if (!state.photo) { toast('Take a photo first.', 'err'); return; }
     if (!odoOk()) { toast('Enter the closing odometer reading.', 'err'); return; }
-    if (!confirm('Punch out now?')) return;
+    // check again: it may have gone past 7 pm, or a new GPS gap may show
+    loadOutCheck().then(function () {
+      var miss = outMissing();
+      if (miss) { var ob = punchBox.querySelector('#at-outbox'); if (ob) ob.replaceWith(outBox()); toast(miss, 'err'); return; }
+      var c = state.outChk;
+      if (c && c.suggestedClosing != null && state.odo && Math.abs(Number(state.odo) - c.suggestedClosing) > Math.max(15, c.gpsKm * 0.3) &&
+          !confirm('Your closing odometer (' + state.odo + ' km) is far from what the GPS shows (about ' + c.suggestedClosing + ' km). Punch out anyway?')) return;
+      if (!confirm('Punch out now?')) return;
+      doPunchOut();
+    });
+  }
+  function doPunchOut() {
+    var o = state.out;
     state.busy = true; render();
-    getLocation().then(function (c) { return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo, odometer: state.odo || undefined }); })
-      .then(function (j) { toast(j.message || 'Punched out'); state.photo = null; var hadOdo = state.odo; state.odo = ''; if (!hadOdo) meter('close'); return load(); })
+    getLocation().then(function (c) {
+      return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo, odometer: state.odo || undefined,
+        lateOutType: o.type || undefined, lateOutReason: o.reason || undefined, travelFrom: o.from || undefined, travelTo: o.to || undefined,
+        manualKm: o.manualKm || undefined, manualKmReason: o.manualReason || undefined });
+    })
+      .then(function (j) { toast(j.message || 'Punched out'); state.photo = null; var hadOdo = state.odo; state.odo = ''; state.outChk = null; if (!hadOdo) meter('close'); return load(); })
       .catch(function (e) { locFail(e, 'out'); })
       .then(function () { state.busy = false; render(); });
   }
@@ -423,6 +502,7 @@
       state.record = j.data.record; state.win = j.data.window;
       state.odoRequired = !!j.data.odometerRequired; state.openingMeter = j.data.openingMeter; state.lastClosing = j.data.lastClosingMeter;
       if (state.record) { try { localStorage.setItem('crm_punched_in', new Date().toDateString()); } catch (e) {} }
+      if (state.record && state.record.checkIn && !state.record.checkOut) loadOutCheck().then(function () { if (!state.stream && !state.busy) render(); });
       if (!state.stream) render();
       loadHistory(); loadFuel();
     }).catch(function (e) { clear(punchBox).appendChild(el('div', { class: 'at-msg bad', text: e.message })); });

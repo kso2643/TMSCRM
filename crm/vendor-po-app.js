@@ -54,14 +54,14 @@
     requestAnimationFrame(function () { t.classList.add('in'); });
     setTimeout(function () { t.remove(); }, 4200);
   }
-  function pdfFetch(id, open) {
-    return fetch(API + '/api/purchase-orders/' + encodeURIComponent(id) + '/pdf', { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
+  function pdfFetch(id, open, kind) {
+    return fetch(API + '/api/purchase-orders/' + encodeURIComponent(id) + '/' + (kind || 'pdf'), { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
       if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Could not make the PDF'); });
       var cd = r.headers.get('Content-Disposition') || '', m = /filename="?([^";]+)"?/.exec(cd);
       return r.blob().then(function (b) {
         var u = URL.createObjectURL(b);
         if (open) { window.open(u, '_blank'); setTimeout(function () { URL.revokeObjectURL(u); }, 120000); return; }
-        var a = document.createElement('a'); a.href = u; a.download = m ? m[1] : 'purchase-order.pdf';
+        var a = document.createElement('a'); a.href = u; a.download = m ? m[1] : 'purchase-order.' + (kind || 'pdf');
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
       });
@@ -160,6 +160,7 @@
             el('td', { class: 'n' }, [
               el('button', { class: 'vd-btn sm', type: 'button', 'data-po-edit': o.poNumber, text: 'Edit', onclick: function () { opts.onOpen(o.id); } }), ' ',
               el('button', { class: 'vd-btn sm', type: 'button', 'data-po-pdf': o.poNumber, text: '⬇ PDF', onclick: function () { pdfFetch(o.id).catch(function (e) { toast(e.message, 'err'); }); } }), ' ',
+              el('button', { class: 'vd-btn sm', type: 'button', 'data-po-xlsx': o.poNumber, text: '⬇ Excel', onclick: function () { pdfFetch(o.id, false, 'xlsx').catch(function (e) { toast(e.message, 'err'); }); } }), ' ',
               me().role !== 'SUPER_ADMIN' ? null : el('button', { class: 'vd-btn sm red', type: 'button', 'data-po-del': o.poNumber, text: '✕', title: 'Delete', onclick: function () {
                 if (!confirm('Delete purchase order ' + o.poNumber + '?')) return;
                 api('DELETE', '/purchase-orders/' + encodeURIComponent(o.id)).then(function (r) { toast(r.message); load(); }).catch(function (e) { toast(e.message, 'err'); });
@@ -473,5 +474,5 @@
     } else render();
   }
 
-  window.VendorPO = { renderList: renderList, openEditor: openEditor, pdf: pdfFetch };
+  window.VendorPO = { renderList: renderList, openEditor: openEditor, pdf: pdfFetch, xlsx: function (id) { return pdfFetch(id, false, 'xlsx'); } };
 })();

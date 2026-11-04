@@ -67,7 +67,7 @@ class AuthController
     {
         $user = authenticate();
         $stmt = db()->prepare(
-            'SELECT id, name, email, role, phone, department, avatar, lastLoginAt, sessionTimeout, twoFactorEnabled
+            'SELECT id, name, email, role, phone, department, designation, avatar, lastLoginAt, sessionTimeout, twoFactorEnabled
              FROM `User` WHERE id = ? LIMIT 1'
         );
         $stmt->execute([$user['id']]);

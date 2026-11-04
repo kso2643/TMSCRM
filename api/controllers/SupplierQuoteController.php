@@ -40,6 +40,8 @@ class SupplierQuoteController
         ensure_schema(self::schema(), 'Supplier quotes');
         ensure_schema(['SupplierQuote' => ['create' => '', 'columns' => [
             'chosen' => 'TINYINT(1) NOT NULL DEFAULT 0', 'chosenById' => 'VARCHAR(30) NULL', 'chosenAt' => 'DATETIME NULL', 'chosenNote' => 'VARCHAR(500) NULL',
+            // our selling price to the customer for this supplier's offer (v11.47) — supplier price = cost
+            'customerPrice' => 'DECIMAL(14,2) NULL',
         ]]], 'Supplier choice');
     }
 
@@ -66,7 +68,7 @@ class SupplierQuoteController
             LEFT JOIN `User` u ON u.id=COALESCE(q.updatedById, q.askedById) LEFT JOIN `User` cu ON cu.id=q.chosenById WHERE q.batchId=? ORDER BY q.vendorName, q.askedAt');
         $s->execute([$bid]);
         return array_map(function ($q) {
-            foreach (['price', 'discount', 'netPrice'] as $k) if ($q[$k] !== null) $q[$k] = (float) $q[$k];
+            foreach (['price', 'discount', 'netPrice', 'customerPrice'] as $k) if ($q[$k] !== null) $q[$k] = (float) $q[$k];
             $q['chosen'] = !empty($q['chosen']);
             return $q;
         }, $s->fetchAll());
@@ -154,10 +156,12 @@ class SupplierQuoteController
         $status = strtoupper((string) ($b['status'] ?? ''));
         if (!in_array($status, ['ASKED', 'RECEIVED', 'NO_QUOTE'], true)) $status = $price !== null ? 'RECEIVED' : $q['status'];
         $lt = trim((string) ($b['leadTime'] ?? '')); if ($lt !== '' && is_numeric($lt)) $lt .= ' days';
-        db()->prepare('UPDATE `SupplierQuote` SET status=?, price=?, discount=?, netPrice=?, leadTime=?, validity=?, note=?, receivedAt=IF(?=\'RECEIVED\', COALESCE(receivedAt, ?), receivedAt), updatedById=?, updatedAt=? WHERE id=?')
-            ->execute([$status, $price, $disc, $net, $lt !== '' ? mb_substr($lt, 0, 60) : null, mb_substr(trim((string) ($b['validity'] ?? '')), 0, 60) ?: null,
+        // customer price: keep the old one when the field is not sent (e.g. "No quote")
+        $cust = array_key_exists('customerPrice', $b) ? $num($b['customerPrice'], 'customer price') : ($q['customerPrice'] !== null ? (float) $q['customerPrice'] : null);
+        db()->prepare('UPDATE `SupplierQuote` SET status=?, price=?, discount=?, netPrice=?, customerPrice=?, leadTime=?, validity=?, note=?, receivedAt=IF(?=\'RECEIVED\', COALESCE(receivedAt, ?), receivedAt), updatedById=?, updatedAt=? WHERE id=?')
+            ->execute([$status, $price, $disc, $net, $cust, $lt !== '' ? mb_substr($lt, 0, 60) : null, mb_substr(trim((string) ($b['validity'] ?? '')), 0, 60) ?: null,
                        trim((string) ($b['note'] ?? '')) ?: null, $status, now_sql(), $auth['id'], now_sql(), $qid]);
-        log_activity($auth['id'], 'SUPPLIER_PRICE_SAVED', 'SupplierQuote', $qid, ['vendor' => $q['vendorName'], 'price' => $price, 'discount' => $disc]);
+        log_activity($auth['id'], 'SUPPLIER_PRICE_SAVED', 'SupplierQuote', $qid, ['vendor' => $q['vendorName'], 'price' => $price, 'discount' => $disc, 'customerPrice' => $cust]);
         sendSuccess(['quotes' => self::quotes($q['batchId'])], 'Supplier price saved');
     }
 
@@ -190,9 +194,72 @@ class SupplierQuoteController
             $title = mb_substr(($on ? '✔ ' . $name . ' chose ' . $q['vendorName'] : '↺ ' . $name . ' cleared the supplier') . ' for ' . $item, 0, 255);
             $body = mb_substr(($q['requestNo'] ?? '') . ($on && $q['netPrice'] !== null ? ' · ₹' . number_format((float) $q['netPrice'], 2) . ' net' : '') . ($note ? ' · ' . $note : ''), 0, 500);
             $ins = db()->prepare('INSERT INTO `ChangeNotice` (id,userId,byId,title,body,link,createdAt) VALUES (?,?,?,?,?,?,?)');
-            foreach ($ids as $u) $ins->execute([gen_id(), $u, $auth['id'], $title, $body, '/price-requests/?q=' . rawurlencode((string) $q['requestNo']), now_sql()]);
+            $link = '/price-requests/?q=' . rawurlencode((string) $q['requestNo']);
+            $to->execute([$auth['id']]); $deciders = $to->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($ids as $u) {
+                // Supplier names and supplier prices are for the Super Admin / Admin only — the engineer is just told it is moving.
+                if (in_array($u, $deciders, true)) $ins->execute([gen_id(), $u, $auth['id'], $title, $body, $link, now_sql()]);
+                elseif ($on) $ins->execute([gen_id(), $u, $auth['id'], mb_substr('⏳ Supplier fixed for ' . $item . ' — price coming soon', 0, 255), (string) ($q['requestNo'] ?? ''), $link, now_sql()]);
+            }
         } catch (Throwable $e) { error_log('Supplier choice notice: ' . $e->getMessage()); }
         sendSuccess(['quotes' => self::quotes($q['batchId'])], $on ? $q['vendorName'] . ' chosen for ' . $item : 'Choice cleared');
+    }
+
+    // POST /api/price-requests/batch/:bid/raise-po  { supplier?: "name" }
+    // Approved items with a supplier (and no PO yet) → one purchase order per supplier, in the PO format
+    // (TMS / APJ letterhead), at the supplier price. Super Admin / Admin.
+    public function raisePo(string $bid): void
+    {
+        $auth = self::auth();
+        $b = request_body();
+        $only = mb_strtolower(trim((string) ($b['supplier'] ?? '')));
+        $s = db()->prepare("SELECT r.*, b.requestNo, b.firm, c.companyName FROM `PriceRequest` r JOIN `PriceRequestBatch` b ON b.id=r.batchId
+            LEFT JOIN `Customer` c ON c.id=b.customerId WHERE r.batchId=? ORDER BY r.sortOrder, r.id");
+        $s->execute([$bid]);
+        $rows = $s->fetchAll();
+        if (!$rows) sendError('Price request not found.', 404);
+        $poCtrl = new PurchaseOrderController();
+        $exists = db()->prepare('SELECT 1 FROM `PurchaseOrder` WHERE id=?');
+        $groups = [];
+        foreach ($rows as $r) {
+            if ($r['status'] !== 'APPROVED' || trim((string) $r['supplierName']) === '') continue;
+            if ($r['poId']) { $exists->execute([$r['poId']]); if ($exists->fetchColumn()) continue; }   // already on a PO
+            $k = mb_strtolower(trim((string) $r['supplierName']));
+            if ($only !== '' && $k !== $only) continue;
+            $groups[$k][] = $r;
+        }
+        if (!$groups) sendError($only !== '' ? 'Nothing left to order from that supplier.' : 'No approved items with a supplier are waiting for a PO. Approve the prices first.', 400);
+        $quote = db()->prepare('SELECT * FROM `SupplierQuote` WHERE requestId=? AND LOWER(vendorName)=? ORDER BY chosen DESC, updatedAt DESC LIMIT 1');
+        $vend = db()->prepare('SELECT * FROM `Vendor` WHERE LOWER(name)=? AND isActive=1 LIMIT 1');
+        $mark = db()->prepare('UPDATE `PriceRequest` SET poId=? WHERE id=?');
+        $made = [];
+        foreach ($groups as $k => $list) {
+            $vendor = null;
+            try { $vend->execute([$k]); $vendor = $vend->fetch() ?: null; } catch (PDOException $e) {}
+            $items = []; $qdate = null;
+            foreach ($list as $r) {
+                $q = null;
+                try { $quote->execute([$r['id'], $k]); $q = $quote->fetch() ?: null; } catch (PDOException $e) {}
+                // the supplier's own rate and discount when we have them; otherwise the supplier price saved on the item
+                $rate = $q && $q['price'] !== null ? (float) $q['price'] : ($r['supplierPrice'] !== null ? (float) $r['supplierPrice'] : null);
+                $disc = $q && $q['price'] !== null && $q['discount'] !== null ? (float) $q['discount'] : null;
+                if ($q && $q['receivedAt'] && (!$qdate || $q['receivedAt'] > $qdate)) $qdate = $q['receivedAt'];
+                $items[] = ['itemCode' => $r['itemCode'], 'description' => $r['productName'], 'brand' => $r['brand'], 'quantity' => $r['quantity'] !== null && (float) $r['quantity'] > 0 ? (float) $r['quantity'] : 1,
+                            'unit' => $r['unit'] ?: 'Nos', 'unitPrice' => $rate, 'discount' => $disc, 'delivery' => ($q['leadTime'] ?? null) ?: $r['approvedLeadTime'], 'customerName' => $r['companyName']];
+            }
+            $first = $list[0];
+            $po = $poCtrl->createRecord([
+                'company' => $first['firm'] ?: 'TMS', 'vendorId' => $vendor['id'] ?? null, 'vendorName' => $vendor['name'] ?? trim((string) $first['supplierName']),
+                'poDate' => date('Y-m-d'), 'quoteDate' => $qdate ? substr($qdate, 0, 10) : null,
+                'subject' => 'Purchase order against our ref ' . $first['requestNo'] . ($first['companyName'] ? ' — ' . $first['companyName'] : ''),
+                'gstPercent' => 18, 'paymentTerms' => '30 days', 'freight' => 'Door delivery', 'status' => 'DRAFT',
+                'signName' => $auth['name'] ?? '', 'items' => $items,
+            ], $auth);
+            foreach ($list as $r) $mark->execute([$po['id'], $r['id']]);
+            log_activity($auth['id'], 'PO_RAISED_FROM_PRICE_REQUEST', 'PriceRequestBatch', $bid, ['poNumber' => $po['poNumber'], 'vendor' => $po['vendorName'], 'items' => count($list)]);
+            $made[] = ['id' => $po['id'], 'poNumber' => $po['poNumber'], 'vendorName' => $po['vendorName'], 'items' => count($list), 'totalAmount' => (float) $po['totalAmount']];
+        }
+        sendSuccess(['orders' => $made], count($made) === 1 ? 'Purchase order ' . $made[0]['poNumber'] . ' raised to ' . $made[0]['vendorName'] : count($made) . ' purchase orders raised', 201);
     }
 
     // GET /api/price-requests/supplier-lookup?no=PR-2611-0005-JK

@@ -188,7 +188,8 @@ class LocationHistoryController
         $to = to_date_only(qp('to')) ?? date('Y-m-d');
         if ($to < $from) [$from, $to] = [$to, $from];
         $end = date('Y-m-d 00:00:00', strtotime($to . ' +1 day'));
-        $att = db()->prepare("SELECT a.id, a.userId, a.date, u.name, u.role FROM `Attendance` a JOIN `User` u ON u.id=a.userId
+        try { new AttendanceController(); } catch (Throwable $e) {}   // makes sure manualKm exists
+        $att = db()->prepare("SELECT a.id, a.userId, a.date, a.manualKm, u.name, u.role FROM `Attendance` a JOIN `User` u ON u.id=a.userId
                               WHERE a.date>=? AND a.date<? AND a.checkIn IS NOT NULL ORDER BY u.name, a.date");
         $att->execute([$from . ' 00:00:00', $end]);
         $pp = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
@@ -208,13 +209,14 @@ class LocationHistoryController
             $pts = $pp->fetchAll();
             $km = self::distanceKm($pts);
             $x = &$people[$a['userId']];
-            $x = $x ?? ['id' => $a['userId'], 'name' => $a['name'], 'role' => $a['role'], 'days' => 0, 'km' => 0.0, 'points' => 0, 'perDay' => []];
-            $x['days']++; $x['km'] += $km; $x['points'] += count($pts);
-            $x['perDay'][] = ['date' => substr($a['date'], 0, 10), 'km' => round($km, 2), 'points' => count($pts)];
+            $x = $x ?? ['id' => $a['userId'], 'name' => $a['name'], 'role' => $a['role'], 'days' => 0, 'km' => 0.0, 'manualKm' => 0.0, 'points' => 0, 'perDay' => []];
+            $mk = $a['manualKm'] !== null ? (float) $a['manualKm'] : 0.0;   // km typed at punch out for the time GPS was off
+            $x['days']++; $x['km'] += $km; $x['manualKm'] += $mk; $x['points'] += count($pts);
+            $x['perDay'][] = ['date' => substr($a['date'], 0, 10), 'km' => round($km, 2), 'manualKm' => $mk ?: null, 'points' => count($pts)];
             unset($x);
         }
         $out = array_values(array_map(function ($p) use ($odo, $off) {
-            $p['km'] = round($p['km'], 1);
+            $p['km'] = round($p['km'], 1); $p['manualKm'] = round($p['manualKm'], 1); $p['totalKm'] = round($p['km'] + $p['manualKm'], 1);
             $p['odometerKm'] = isset($odo[$p['id']]) ? round($odo[$p['id']], 1) : null;
             $p['locationOff'] = $off[$p['id']] ?? 0;
             return $p;

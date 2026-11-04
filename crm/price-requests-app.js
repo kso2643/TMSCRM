@@ -164,6 +164,9 @@
       '.pr-sugg button{display:block;width:100%;text-align:left;background:none;border:none;padding:.5rem .65rem;font-size:.84rem;cursor:pointer;color:inherit}',
       '.pr-sugg button:hover,.pr-sugg button:focus{background:#f1f5f9;outline:none}.dark .pr-sugg button:hover{background:#273449}',
       '.pr-sugg .s{display:block;font-size:.74rem;color:#64748b}',
+      '.pr-po{display:grid;gap:.5rem;margin-top:.75rem;padding:.75rem;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:.75rem}.dark .pr-po{background:#052e1a;border-color:#14532d}',
+      '.pr-po-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.5rem .6rem;background:#fff;border:1px solid #dcfce7;border-radius:.6rem}.dark .pr-po-row{background:#0f172a;border-color:#14532d}',
+      '.pr-po-chip{display:inline-flex;flex-wrap:wrap;gap:.3rem;align-items:center;padding:.2rem .45rem;border-radius:.5rem;background:#ecfdf5}.dark .pr-po-chip{background:#064e3b}',
       '.pr-chosen{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.45rem .6rem;border:1px solid #2563eb;border-radius:.5rem;background:#eff6ff;font-size:.88rem}',
       '.dark .pr-chosen{background:#172554}',
       '.pr-chosen button{background:none;border:none;color:#2563eb;font-weight:700;font-size:.78rem;cursor:pointer}',
@@ -579,6 +582,8 @@
       api('GET', q).then(function (r) {
         listHost.style.opacity = '';
         canRespond = r.data.canRespond; canApprove = !!r.data.canApprove;
+        // searching (or opened from an alert link) for a request that is already answered → show it under "All"
+        if (state.search && !r.data.batches.length && state.filter !== 'ALL' && r.data.counts.OPEN + r.data.counts.DONE > 0) { state.filter = 'ALL'; load(); return; }
         var newCount = r.data.counts.OPEN;
         if (newCount !== state.openCount) { state.openCount = newCount; var tab = ROOT.querySelector('.pr-tab[data-tab="requests"]'); if (tab) { var n = tab.querySelector('.n'); if (newCount) { if (!n) { n = el('span', { class: 'n' }); tab.appendChild(n); } n.textContent = String(newCount); } else if (n) n.remove(); } }
         drawBar(r.data);
@@ -787,6 +792,7 @@
       tbl.appendChild(tb);
       inner.appendChild(el('div', { class: 'pr-scroll' }, [tbl]));
       if (canRespond && !b.legacy) inner.appendChild(supplierPanel(b, drafts, fillBody));
+      if (canRespond && !b.legacy) { var pob = poBox(b); if (pob) inner.appendChild(pob); }
       var acts = el('div', { class: 'pr-ractions' });
       inner.appendChild(acts);
       function drawActions() {
@@ -850,6 +856,67 @@
     }
   }
 
+  // ── Admin: raise the purchase order to the supplier (v11.47) ─────────
+  // Approved items with a supplier → one PO per supplier at the supplier price, in the PO format
+  // (TMS / APJ letterhead). Download as PDF or Excel, or open it on the Vendors page to edit.
+  function fileDownload(path, fallback) {
+    return fetch(API + '/api' + path, { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
+      if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.message || 'Download failed'); });
+      var m = /filename="?([^";]+)"?/.exec(r.headers.get('Content-Disposition') || '');
+      return r.blob().then(function (bl) {
+        var u = URL.createObjectURL(bl), a = document.createElement('a'); a.href = u; a.download = m ? m[1] : fallback;
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+      });
+    });
+  }
+  function poBox(b) {
+    var ready = b.items.filter(function (it) { return it.status === 'APPROVED' && it.supplierName; });
+    if (!ready.length) return null;
+    var groups = {}, order = [];
+    ready.forEach(function (it) {
+      var k = it.supplierName.trim().toLowerCase();
+      if (!groups[k]) { groups[k] = { name: it.supplierName.trim(), items: [] }; order.push(k); }
+      groups[k].items.push(it);
+    });
+    var box = el('div', { class: 'pr-po', 'data-po-box': b.id });
+    box.appendChild(el('div', { class: 'pr-po-h' }, [el('b', { text: '📄 Purchase order to the supplier' }),
+      el('span', { class: 'pr-meta', text: ' — at the supplier price (cost). The customer gets the approved price on the quotation.' })]));
+    var waiting = 0;
+    order.forEach(function (k) {
+      var g = groups[k], cost = 0, sell = 0, pos = {};
+      g.items.forEach(function (it) {
+        var q = it.quantity != null ? Number(it.quantity) : 1;
+        if (it.supplierPrice != null) cost += it.supplierPrice * q;
+        if (it.approvedPrice != null) sell += it.approvedPrice * (1 - (it.approvedDiscount || 0) / 100) * q;
+        if (it.po) pos[it.po.id] = it.po;
+      });
+      var left = g.items.filter(function (it) { return !it.po; });
+      if (left.length) waiting++;
+      var row = el('div', { class: 'pr-po-row', 'data-po-supplier': g.name }, [
+        el('div', { style: 'min-width:12rem;flex:1' }, [el('b', { text: '🏭 ' + g.name }),
+          el('div', { class: 'pr-meta', text: g.items.length + ' item' + (g.items.length === 1 ? '' : 's') + ' · cost ' + money(cost) + ' · sale ' + money(sell) + (sell > 0 && cost > 0 ? ' · margin ' + Math.round((sell - cost) / sell * 1000) / 10 + '%' : '') })])
+      ]);
+      Object.keys(pos).forEach(function (id) {
+        var po = pos[id];
+        row.appendChild(el('span', { class: 'pr-po-chip', 'data-po-no': po.poNumber }, [el('b', { text: po.poNumber }),
+          el('button', { class: 'pr-btn sm', type: 'button', 'data-po-pdf': id, text: '⬇ PDF', onclick: function () { fileDownload('/purchase-orders/' + encodeURIComponent(id) + '/pdf', po.poNumber + '.pdf').catch(function (e) { toast(e.message, 'err'); }); } }),
+          el('button', { class: 'pr-btn sm', type: 'button', 'data-po-xlsx': id, text: '⬇ Excel', onclick: function () { fileDownload('/purchase-orders/' + encodeURIComponent(id) + '/xlsx', po.poNumber + '.xlsx').catch(function (e) { toast(e.message, 'err'); }); } }),
+          el('a', { class: 'pr-btn sm', href: '/vendors/#/po/' + encodeURIComponent(id), 'data-po-open': id, text: '✎ Open / edit' })]));
+      });
+      if (left.length) row.appendChild(el('button', { class: 'pr-btn grn sm', type: 'button', 'data-raise-po': g.name, text: '📄 Raise PO' + (Object.keys(pos).length ? ' for ' + left.length + ' more' : ''), onclick: function (e) {
+        var btn = e.target; btn.disabled = true; btn.textContent = 'Raising…';
+        api('POST', '/price-requests/batch/' + encodeURIComponent(b.id) + '/raise-po', { supplier: g.name }).then(function (r) { toast(r.message); if (state.reload) state.reload(); })
+          .catch(function (er) { toast(er.message, 'err'); btn.disabled = false; btn.textContent = '📄 Raise PO'; });
+      } }));
+      box.appendChild(row);
+    });
+    if (waiting > 1) box.appendChild(el('button', { class: 'pr-btn grn', type: 'button', 'data-raise-all': b.id, style: 'justify-self:end', text: '📄 Raise all ' + waiting + ' POs', onclick: function (e) {
+      e.target.disabled = true;
+      api('POST', '/price-requests/batch/' + encodeURIComponent(b.id) + '/raise-po', {}).then(function (r) { toast(r.message); if (state.reload) state.reload(); }).catch(function (er) { toast(er.message, 'err'); e.target.disabled = false; });
+    } }));
+    return box;
+  }
+
   // ── Admin: get the price from a supplier ────────────────────────────
   // Pick a vendor and the items → a ready message (copy / WhatsApp / e-mail).
   // Type the vendor's price, discount and lead time when they reply (editable);
@@ -890,7 +957,8 @@
           return el('span', { style: 'display:inline-flex;gap:.3rem;flex-wrap:wrap' }, [
             el('button', { class: 'pr-btn sm', type: 'button', 'data-use-supplier': q.id, title: 'Put this supplier and price in the answer', text: 'Use this supplier', onclick: function () {
               d.supplierName = q.vendorName; d.supplierPrice = q.netPrice != null ? q.netPrice : (q.price != null ? q.price : ''); if (q.leadTime) d.approvedLeadTime = q.leadTime;
-              d.touched = true; redraw(); toast(q.vendorName + ' filled in — enter our price and save');
+              if (q.customerPrice != null) d.approvedPrice = q.customerPrice;   // supplier price = cost, customer price = our price
+              d.touched = true; redraw(); toast(q.vendorName + ' filled in' + (q.customerPrice != null ? ' with the customer price' : ' — enter our price') + ' — save');
             } }),
             q.leadTime ? el('button', { class: 'pr-btn sm', type: 'button', title: 'Use this lead time in the answer', text: 'Use lead time', onclick: function () { d.approvedLeadTime = q.leadTime; d.touched = true; redraw(); } }) : null]);
         }

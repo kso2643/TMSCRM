@@ -184,27 +184,72 @@ public class AlertService extends Service {
     private void onFix(Location l) {
         if (l == null) return;
         long now = System.currentTimeMillis();
+        boolean isGps = LocationManager.GPS_PROVIDER.equals(l.getProvider());
+        // A real GPS fix in the last minute beats a network (tower / Wi-Fi) guess: skip the guess.
+        if (!isGps && lastGood != null && LocationManager.GPS_PROVIDER.equals(lastGood.getProvider()) && now - lastGood.getTime() < 60_000L) return;
         boolean good = l.hasAccuracy() && l.getAccuracy() <= 100;
         if (good) lastGood = l;
         Location use = good ? l : (now - lastSentAt > 5 * 60_000L ? (lastGood != null && now - lastGood.getTime() < 120_000L ? lastGood : l) : null);
         if (use == null) return;
         long since = now - lastSentAt;
         float moved = lastSent == null ? Float.MAX_VALUE : lastSent.distanceTo(use);
-        boolean send = since >= 120_000L || (since >= 30_000L && moved > Math.max(50f, use.getAccuracy()));
+        // Driving fast: a point every 15 s so bends in the road count towards the km.
+        boolean fast = use.hasSpeed() && use.getSpeed() > 8f;
+        boolean send = since >= 120_000L || (since >= 30_000L && moved > Math.max(50f, use.getAccuracy()))
+            || (fast && since >= 15_000L && moved > Math.max(100f, use.getAccuracy()));
         if (!send) return;
         lastSent = use; lastSentAt = now;
-        final String json;
+        final JSONObject point;
         try {
-            json = new JSONObject().put("lat", use.getLatitude()).put("lng", use.getLongitude()).put("accuracy", use.hasAccuracy() ? use.getAccuracy() : JSONObject.NULL).put("source", "app").toString();
+            point = new JSONObject().put("lat", use.getLatitude()).put("lng", use.getLongitude()).put("accuracy", use.hasAccuracy() ? use.getAccuracy() : JSONObject.NULL)
+                .put("at", use.getTime() > 0 ? use.getTime() : now).put("source", "app");
         } catch (Exception e) { return; }
         final String token = AlertNotifier.prefs(this).getString("token", "");
-        new Thread(() -> {
+        new Thread(() -> sendPoint(token, point), "crm-ping").start();
+    }
+
+    // Points that could not be sent (no network) are kept (up to 300) and sent, with their own time, once the network is back.
+    private static final Object QUEUE_LOCK = new Object();
+    private void sendPoint(String token, JSONObject point) {
+        SharedPreferences p = AlertNotifier.prefs(this);
+        try {
+            String[] r = http("POST", "/api/attendance/ping", token, point.toString(), null);
+            if ("400".equals(r[0]) && r[1].contains("Punch in")) { p.edit().putBoolean("tracking", false).putString("pingQueue", "[]").apply(); return; }   // punched out elsewhere
+            if (!r[0].startsWith("2")) { if (r[0].startsWith("5") || "0".equals(r[0])) queuePoint(point); return; }
+            p.edit().putLong("lastPingAt", System.currentTimeMillis()).apply();
+            flushQueue(token);
+        } catch (Exception e) { queuePoint(point); }
+    }
+    private void queuePoint(JSONObject point) {
+        synchronized (QUEUE_LOCK) {
+            SharedPreferences p = AlertNotifier.prefs(this);
             try {
-                String[] r = http("POST", "/api/attendance/ping", token, json, null);
-                if ("400".equals(r[0]) && r[1].contains("Punch in")) AlertNotifier.prefs(this).edit().putBoolean("tracking", false).apply();   // punched out elsewhere
-                AlertNotifier.prefs(this).edit().putLong("lastPingAt", System.currentTimeMillis()).apply();
+                JSONArray q = new JSONArray(p.getString("pingQueue", "[]"));
+                q.put(point);
+                JSONArray keep = new JSONArray();
+                for (int i = Math.max(0, q.length() - 300); i < q.length(); i++) keep.put(q.get(i));
+                p.edit().putString("pingQueue", keep.toString()).apply();
             } catch (Exception ignored) { }
-        }, "crm-ping").start();
+        }
+    }
+    private void flushQueue(String token) {
+        JSONArray q;
+        synchronized (QUEUE_LOCK) {
+            SharedPreferences p = AlertNotifier.prefs(this);
+            try { q = new JSONArray(p.getString("pingQueue", "[]")); } catch (Exception e) { q = new JSONArray(); }
+            if (q.length() == 0) return;
+            p.edit().putString("pingQueue", "[]").apply();
+        }
+        for (int i = 0; i < q.length(); i++) {
+            try {
+                String[] r = http("POST", "/api/attendance/ping", token, q.getJSONObject(i).toString(), null);
+                if ("400".equals(r[0])) continue;   // e.g. punched out since — drop it
+                if (!r[0].startsWith("2")) { for (int k = i; k < q.length(); k++) queuePoint(q.getJSONObject(k)); return; }
+            } catch (Exception e) {
+                try { for (int k = i; k < q.length(); k++) queuePoint(q.getJSONObject(k)); } catch (Exception ignored) { }
+                return;
+            }
+        }
     }
 
     private void locationOff() {

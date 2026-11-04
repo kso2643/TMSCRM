@@ -318,6 +318,38 @@
     return fetch(API + '/api' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + token(), 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.message || 'Request failed'); return j; }); });
   }
+  // Location points: each carries the time it was taken. With no network the point is kept on the device
+  // (up to 300) and sent with the next one that goes through — so the route and km stay complete (v11.47).
+  var PQ_KEY = 'crm_ping_queue';
+  function pqGet() { try { return JSON.parse(lsGet(PQ_KEY) || '[]') || []; } catch (e) { return []; } }
+  function sendPing(fix) {
+    var p = { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, at: fix.t || Date.now() };
+    function keep(x) { var q = pqGet(); q.push(x); lsSet(PQ_KEY, JSON.stringify(q.slice(-300))); }
+    return post('/attendance/ping', p).then(function () {
+      var q = pqGet(); if (!q.length) return;
+      lsSet(PQ_KEY, '[]');
+      (function next(i) { if (i >= q.length) return; post('/attendance/ping', q[i]).then(function () { next(i + 1); }, function (e) { if (!/Punch in/i.test(e.message || '')) { var rest = q.slice(i); var cur = pqGet(); lsSet(PQ_KEY, JSON.stringify(rest.concat(cur).slice(-300))); } }); })(0);
+    }, function (e) { if (!/Punch in|lat and lng/i.test((e && e.message) || '')) keep(p); });
+  }
+
+  // 6:30–7:00 pm: a banner on every page to punch out; after 7 pm it says the reason will be asked.
+  function punchOutReminder() {
+    if (!trk.punchedIn || /^\/attendance/.test(location.pathname)) { var o = tRoot && tRoot.querySelector('.outrem'); if (o) o.remove(); return; }
+    var d = new Date(), hm = d.getHours() * 60 + d.getMinutes();
+    if (hm < 18 * 60 + 30) return;
+    var late = hm >= 19 * 60, key = 'crm_outrem_' + d.toDateString() + (late ? '_late' : '');
+    if (lsGet(key)) return;
+    var r = tUi(); if (r.querySelector('.outrem')) return;
+    var ban = mkEl('div', 'ban outrem', late ? '⏰ It is after 7 pm and you are still punched in. Punch out — you will be asked the reason (working late / travelling).' : '🕡 It is punch-out time (6:30–7:00 pm). Please punch out with your closing odometer.');
+    ban.style.background = late ? '#b45309' : '#1e3a5f';
+    var go = mkEl('button', '', 'Punch out'); go.addEventListener('click', function () { location.href = '/attendance/'; });
+    var later = mkEl('button', '', 'Later'); later.style.background = 'transparent'; later.style.color = '#fff'; later.style.border = '1px solid rgba(255,255,255,.6)';
+    later.addEventListener('click', function () { lsSet(key, '1'); ban.remove(); });
+    ban.appendChild(go); ban.appendChild(later); r.appendChild(ban);
+  }
+  setInterval(punchOutReminder, 60000);
+  setTimeout(punchOutReminder, 5000);
+
   function getPos(timeout) {
     return new Promise(function (res, rej) {
       if (!navigator.geolocation) return rej({ code: 2, message: 'This device has no GPS / location support.' });
@@ -455,7 +487,7 @@
     var good = fix.accuracy <= 100 || since > 5 * 60000;
     if (!native && good && !/^\/attendance/.test(location.pathname) && (since > PING_MS || (since > 30000 && moved > Math.max(50, fix.accuracy)))) {
       trk.lastPingAt = Date.now(); trk.lastSent = fix;
-      post('/attendance/ping', { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy }).catch(function () {});
+      sendPing(fix);
     }
     // Same place?
     if (fix.accuracy > 300) return; // too vague to judge movement

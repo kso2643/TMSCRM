@@ -151,6 +151,7 @@ class QuotationController
     public function index(): void
     {
         $auth = authenticate();
+        self::ensureRevision();
         [$page, $limit, $offset] = paginate(20);
         $search     = qp('search', '');
         $status     = qp('status', '');
@@ -178,7 +179,7 @@ class QuotationController
         $total = (int)$s->fetchColumn();
 
         $s2 = db()->prepare(
-            "SELECT q.id,q.company,q.quotationNumber,q.status,q.totalAmount,q.approvalStatus,q.version,q.createdAt,q.updatedAt,
+            "SELECT q.id,q.company,q.quotationNumber,q.status,q.totalAmount,q.approvalStatus,q.version,q.createdAt,q.updatedAt,q.signName,q.revision,q.supersededById,
                     c.id AS c_id, c.companyName, c.contactPerson,
                     u.id AS u_id, u.name AS u_name,
                     (SELECT COUNT(*) FROM `QuotationItem` qi WHERE qi.quotationId=q.id) AS items_count
@@ -447,7 +448,44 @@ class QuotationController
         ensure_schema(['Quotation' => ['create' => '', 'columns' => [
             'baseNumber' => 'VARCHAR(80) NULL',
             'revision'   => 'INT NOT NULL DEFAULT 0',
+            'supersededById' => 'VARCHAR(30) NULL',   // set on the old quotation when a revised one is made from it
         ]]], 'Quotation revisions');
+    }
+
+    // POST /api/quotations/:id/revise — a revised quotation: a new copy numbered …-R1, -R2… (the original stays
+    // as it was, marked "revised"). Works on approved quotations too. Owner or Manager / Admin / Super Admin.
+    public function revise(string $id): void
+    {
+        $auth = authenticate();
+        self::ensureRevision();
+        $s = db()->prepare('SELECT * FROM `Quotation` WHERE id=? LIMIT 1'); $s->execute([$id]);
+        $q = $s->fetch();
+        if (!$q) sendError('Quotation not found.', 404);
+        if ($q['userId'] !== $auth['id'] && !is_admin_tier($auth['role'])) sendError('Only the person who made it or a Manager / Admin can revise this quotation.', 403);
+        $base = $q['baseNumber'] ?: preg_replace('/-R\d+$/', '', (string) $q['quotationNumber']);
+        $m = db()->prepare('SELECT COALESCE(MAX(revision),0) FROM `Quotation` WHERE baseNumber=? OR quotationNumber=?'); $m->execute([$base, $base]);
+        $rev = max((int) $m->fetchColumn(), (int) $q['revision']) + 1;
+        $chk = db()->prepare('SELECT 1 FROM `Quotation` WHERE quotationNumber=? LIMIT 1');
+        for (; ; $rev++) { $chk->execute([$base . '-R' . $rev]); if (!$chk->fetch()) break; }
+        $newId = gen_id(); $now = now_sql();
+        $row = $q;
+        foreach (['followStatus', 'followNote', 'followUpdatedAt', 'followUpdatedById', 'approvedById', 'approvedAt', 'supersededById'] as $k) unset($row[$k]);   // table defaults
+        $row = array_merge($row, ['id' => $newId, 'quotationNumber' => $base . '-R' . $rev, 'baseNumber' => $base, 'revision' => $rev, 'version' => 1,
+            'status' => 'DRAFT', 'approvalStatus' => 'PENDING', 'quotationDate' => date('Y-m-d'), 'createdAt' => $now, 'updatedAt' => $now]);
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare('INSERT INTO `Quotation` (' . implode(',', array_map(fn($k) => "`$k`", array_keys($row))) . ') VALUES (' . implode(',', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
+            $it = $pdo->prepare('SELECT * FROM `QuotationItem` WHERE quotationId=? ORDER BY sortOrder, id'); $it->execute([$id]);
+            foreach ($it->fetchAll() as $r) {
+                $r['id'] = gen_id(); $r['quotationId'] = $newId; $r['createdAt'] = $now;
+                $pdo->prepare('INSERT INTO `QuotationItem` (' . implode(',', array_map(fn($k) => "`$k`", array_keys($r))) . ') VALUES (' . implode(',', array_fill(0, count($r), '?')) . ')')->execute(array_values($r));
+            }
+            $pdo->prepare('UPDATE `Quotation` SET supersededById=?, updatedAt=? WHERE id=?')->execute([$newId, $now, $id]);
+            $pdo->commit();
+        } catch (Throwable $e) { $pdo->rollBack(); sendError('Could not make the revised quotation: ' . $e->getMessage(), 500); }
+        log_activity($auth['id'], 'QUOTATION_REVISED', 'Quotation', $newId, ['from' => $q['quotationNumber'], 'to' => $base . '-R' . $rev]);
+        $this->show($newId);
     }
 
     /** True when an item already on the quotation (same code / name) gets a different price or discount. */

@@ -1773,7 +1773,7 @@ body.theme-apj { background: #0a1628; }
   color: var(--muted, #64748b);
 }
 </style>
-<script src="/fuel-expense-app.js?v=20261105c" defer></script><script src="/attendance-all-app.js?v=20261105c" defer></script><script src="/appointments-reminder-app.js?v=20261105c" defer></script><script src="/crm-global.js?v=20261105c" defer></script><script src="/product-suggest.js?v=20261105c" defer></script><script src="/quote-notes.js?v=20261105c" defer></script><script src="/quote-firm.js?v=20261105c" defer></script><link rel="stylesheet" href="/motion.css?v=20261105c"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261105d" defer></script><script src="/attendance-all-app.js?v=20261105d" defer></script><script src="/appointments-reminder-app.js?v=20261105d" defer></script><script src="/crm-global.js?v=20261105d" defer></script><script src="/product-suggest.js?v=20261105d" defer></script><script src="/quote-notes.js?v=20261105d" defer></script><script src="/quote-firm.js?v=20261105d" defer></script><script src="/quote-extras.js?v=20261105d" defer></script><link rel="stylesheet" href="/motion.css?v=20261105d"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 <script>
 const API_BASE = 'https://api.apjtech.in/api';
@@ -2041,7 +2041,7 @@ function quotationServerToLocal(q) {
                         <label class="field">Company (Signatory)<input type="text" id="sign-company"
                                 value="Tulips Machining Solutions" /></label>
                         <label class="field">Authorised By (Name)<input type="text" id="sign-name"
-                                value="Keshav Prasath B S" /></label>
+                                value="" placeholder="Your name (filled in when you sign in)" /></label>
                         <label class="field">Designation<input type="text" id="sign-designation"
                                 value="Sales &amp; Application Engineer" /></label>
                     </div>
@@ -3883,7 +3883,7 @@ curY += 10;
             </div>
             <div class="field">
               <span class="field-label">Authorised By</span>
-              <input type="text" id="sign-name" value="M Uthaya Kumar" />
+              <input type="text" id="sign-name" value="" placeholder="Your name (filled in when you sign in)" />
             </div>
             <div class="field">
               <span class="field-label">Designation</span>

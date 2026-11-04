@@ -98,7 +98,8 @@
         d.people.forEach(function (p) {
           var tr = el('tr', { class: 'table-row cursor-pointer', 'data-km-user': p.id, title: 'Show each day' }, [
             el('td', { class: 'px-4 py-2 font-medium', text: p.name }),
-            el('td', { class: 'px-4 py-2 text-right font-semibold', text: p.km.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' }),
+            el('td', { class: 'px-4 py-2 text-right font-semibold' }, [p.km.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km',
+              p.manualKm ? el('div', { class: 'text-xs text-muted', 'data-manual-km': p.id, title: 'Km typed at punch out for the time the phone / GPS was off', text: '+ ' + p.manualKm.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km typed (GPS off)' }) : null]),
             el('td', { class: 'px-4 py-2 text-right', text: p.odometerKm != null ? p.odometerKm.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),
             el('td', { class: 'px-4 py-2 text-right', text: String(p.days) }),
             el('td', { class: 'px-4 py-2 text-right', text: p.days ? (p.km / p.days).toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),

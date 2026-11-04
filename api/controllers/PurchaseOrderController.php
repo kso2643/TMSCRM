@@ -229,7 +229,14 @@ $tail"],
     public function create(): void
     {
         $auth = $this->guard();
-        [$h, $items] = $this->clean(request_body());
+        $po = $this->createRecord(request_body(), $auth);
+        sendSuccess(['order' => $po], 'Purchase order ' . $po['poNumber'] . ' saved', 201);
+    }
+
+    /** Validates and saves a new PO (also used by "Raise PO" on a price request) → the saved PO with its lines. */
+    public function createRecord(array $body, array $auth): array
+    {
+        [$h, $items] = $this->clean($body);
         $id = gen_id();
         db()->beginTransaction();
         try {
@@ -245,7 +252,7 @@ $tail"],
             db()->commit();
         } catch (Throwable $e) { db()->rollBack(); sendError('Could not save the PO: ' . $e->getMessage(), 500); }
         log_activity($auth['id'], 'PO_CREATED', 'PurchaseOrder', $id, ['poNumber' => $h['poNumber'], 'vendor' => $h['vendorName']]);
-        sendSuccess(['order' => $this->load($id)], 'Purchase order ' . $h['poNumber'] . ' saved', 201);
+        return $this->load($id);
     }
 
     public function update(string $id): void
@@ -289,6 +296,80 @@ $tail"],
         header('Content-Type: application/pdf');
         header('Content-Disposition: ' . (qp('inline') === '1' ? 'inline' : 'attachment') . '; filename="' . $fn . '"');
         echo $pdf->output(); exit;
+    }
+
+    /** GET /api/purchase-orders/:id/xlsx — the same PO as an Excel sheet (letterhead, vendor, items, totals, terms). */
+    public function xlsx(string $id): void
+    {
+        $this->guard();
+        $p = $this->load($id);
+        $c = self::profile($p['company']);
+        $d = fn($x) => $x ? date('d-m-Y', strtotime($x)) : '';
+        $w = new StyledXlsxWriter();
+        $sh = $w->addSheet('Purchase order');
+        $w->portrait($sh);
+        $w->setWidths($sh, [6, 18, 40, 9, 8, 12, 8, 12, 14, 14]);
+        $L = 'J';  // last column
+        $row = function (array $cells, string $style = 'plain', ?float $h = null, bool $merge = false) use ($w, $sh, $L) {
+            $n = $w->addRow($sh, $cells, $style, $h);
+            $r = $w->rowCount($sh);
+            if ($merge) $w->merge($sh, 'A' . $r . ':' . $L . $r);
+            return $r;
+        };
+        $row([(string) $c['name']], 'title', 24, true);
+        foreach (array_filter(array_map('trim', explode("\n", (string) $c['address']))) as $l) $row([$l], 'plain', null, true);
+        $row([implode('  |  ', array_filter([$c['phone'] ? (stripos($c['phone'], 'phone') === false && stripos($c['phone'], 'mobile') === false ? 'Phone: ' : '') . $c['phone'] : '', $c['email'] ? 'E-Mail: ' . $c['email'] : '', $c['gstin'] ? 'GST No: ' . $c['gstin'] : '']))], 'plain', null, true);
+        $row([''], 'plain', 6, true);
+        $row(['PURCHASE ORDER'], 'subtitle', 22, true);
+        $row([''], 'plain', 6, true);
+        // vendor (A–E) | PO info (F–J)
+        $vend = array_values(array_filter([
+            'To (Vendor): ' . $p['vendorName'],
+            ...array_filter(array_map('trim', explode("\n", (string) $p['vendorAddress']))),
+            $p['vendorGstin'] ? 'GSTIN: ' . $p['vendorGstin'] : '', trim(($p['vendorPhone'] ? 'Ph: ' . $p['vendorPhone'] : '') . ($p['vendorEmail'] ? '  ' . $p['vendorEmail'] : '')),
+            $p['kindAttn'] ? 'Kind Attn: ' . $p['kindAttn'] : '',
+        ]));
+        $info = [['PO No.', $p['poNumber']], ['PO Date', $d($p['poDate'])], ['Your Quote Ref.', $p['quoteRef'] ?: '—'], ['Quote Date', $d($p['quoteDate']) ?: '—'], ['Expected Delivery', $d($p['requiredBy']) ?: '—']];
+        for ($i = 0; $i < max(count($vend), count($info)); $i++) {
+            $r = $row([$vend[$i] ?? '', '', '', '', '', $info[$i][0] ?? '', '', $info[$i][1] ?? ''], $i === 0 ? 'bold' : 'default');
+            $w->merge($sh, "A$r:E$r"); $w->merge($sh, "F$r:G$r"); $w->merge($sh, "H$r:J$r");
+        }
+        $row([''], 'plain', 6, true);
+        $row(['Sub: ' . ($p['subject'] ?: 'Purchase order for the items below')], 'section', 20, true);
+        $row(['Dear Sir / Madam, please supply the following items as per the terms below.'], 'plain', null, true);
+        $row(['S.No', 'Item Code', 'Description', 'Qty', 'Unit', 'Rate', 'Disc %', 'Net Rate', 'Amount', 'Exp. Delivery'], 'header', 22);
+        $first = $w->rowCount($sh) + 1;
+        foreach ($p['items'] as $n => $it) {
+            $desc = trim((string) ($it['description'] ?? '')) . (!empty($it['brand']) ? ' — Brand: ' . $it['brand'] : '') . (!empty($it['customerName']) ? ' (for ' . $it['customerName'] . ')' : '');
+            $r = $w->rowCount($sh) + 1;
+            $row([$n + 1, (string) ($it['itemCode'] ?? ''), ['v' => $desc, 's' => 'wrap'], ['v' => (float) $it['quantity'], 's' => 'num'], (string) ($it['unit'] ?? ''),
+                  $it['unitPrice'] === null ? '' : ['v' => (float) $it['unitPrice'], 's' => 'num'], $it['discount'] === null ? '' : ['v' => (float) $it['discount'], 's' => 'num'],
+                  $it['netPrice'] === null ? '' : ['v' => (float) $it['netPrice'], 's' => 'num'],
+                  $it['netPrice'] === null ? '' : ['f' => "D$r*H$r", 'v' => $it['totalPrice'], 's' => 'num'], (string) ($it['delivery'] ?? '')], 'default');
+        }
+        $last = $w->rowCount($sh);
+        $r = $row(['', '', 'Total Qty', ['f' => "SUM(D$first:D$last)", 'v' => array_sum(array_map(fn($i) => (float) $i['quantity'], $p['items'])), 's' => 'total'], '', '', '', 'Sub Total', ['f' => "SUM(I$first:I$last)", 'v' => (float) $p['subTotal'], 's' => 'total'], ''], 'totallbl');
+        $subRow = $r;
+        if ($p['gstPercent']) $r = $row(['', '', '', '', '', '', '', 'GST @ ' . rtrim(rtrim(number_format((float) $p['gstPercent'], 2), '0'), '.') . '%', ['f' => "ROUND(I$subRow*" . (float) $p['gstPercent'] . '/100,2)', 'v' => (float) $p['taxAmount'], 's' => 'total'], ''], 'totallbl');
+        $row(['', '', '', '', '', '', '', 'Grand Total', ['f' => $p['gstPercent'] ? "I$subRow+I$r" : "I$subRow", 'v' => (float) $p['totalAmount'], 's' => 'total'], ''], 'totallbl');
+        $row([''], 'plain', 6, true);
+        $row(['Terms & Conditions'], 'bold', null, true);
+        foreach ([['Payment', $p['paymentTerms']], ['Delivery', $p['deliveryTerms']], ['Freight', $p['freight']], ['Taxes', $p['taxes'] ?: ($p['gstPercent'] ? 'GST ' . (float) $p['gstPercent'] . '% extra' : null)], ['Deliver to', $p['deliveryAddress']], ['Note', $p['notes']]] as [$k, $v]) {
+            if (!$v) continue;
+            $row([$k . ': ' . str_replace("\n", ', ', (string) $v)], 'plain', null, true);
+        }
+        $row([''], 'plain', 10, true);
+        $r = $row(['', '', '', '', '', '', 'For ' . $c['name']], 'subtitle'); $w->merge($sh, "G$r:J$r");
+        $row([''], 'plain', 22, true);
+        $r = $row(['', '', '', '', '', '', (string) ($p['signName'] ?? '')], 'plain'); $w->merge($sh, "G$r:J$r");
+        $r = $row(['', '', '', '', '', '', (string) ($p['signDesignation'] ?: 'Authorised Signatory')], 'plain'); $w->merge($sh, "G$r:J$r");
+        $r = $row(['Please quote the PO number on your invoice and delivery challan.'], 'muted', null, true);
+        $bytes = $w->output();
+        $fn = preg_replace('/[^A-Za-z0-9]+/', '-', $p['poNumber']) . '-' . preg_replace('/[^A-Za-z0-9]+/', '-', $p['vendorName']) . '.xlsx';
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fn . '"');
+        echo $bytes; exit;
     }
 
     public function readPdf(): void

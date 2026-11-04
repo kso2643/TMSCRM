@@ -323,6 +323,7 @@ try {
             $method === 'POST'  && $c1 === 'checkin'                     => $ctrl->checkIn(),
             $method === 'POST'  && $c1 === 'checkout'                    => $ctrl->checkOut(),
             $method === 'POST'  && $c1 === 'ping'                        => $ctrl->ping(),
+            $method === 'GET'   && $c1 === 'punch-out-check'             => $ctrl->punchOutCheck(),
             $method === 'GET'   && $c1 === 'today'                       => $ctrl->today(),
             $method === 'GET'   && $c1 === 'day'                         => $ctrl->day(),
             $method === 'GET'   && $c1 === 'summary'                     => $ctrl->summary(),
@@ -460,6 +461,7 @@ try {
             $method === 'PUT'   && $c1 === 'supplier' && $c2 !== ''      => (new SupplierQuoteController())->update($c2),
             $method === 'DELETE'&& $c1 === 'supplier' && $c2 !== ''      => (new SupplierQuoteController())->delete($c2),
             $method === 'POST'  && $c1 === 'batch' && $c3 === 'remind' => $ctrl->remind($c2),
+            $method === 'POST'  && $c1 === 'batch' && $c3 === 'raise-po' => (new SupplierQuoteController())->raisePo($c2),
             $method === 'PATCH' && $c1 !== '' && $c2 === 'revise'      => $ctrl->revise($c1),
             $method === 'GET'   && $c1 === 'batches'                   => $ctrl->batches(),
             $method === 'GET'   && $c1 === 'template'                  => $ctrl->template(),
@@ -550,6 +552,7 @@ try {
             $method === 'POST'   && $c1 === 'read-pdf'          => $ctrl->readPdf(),
             $method === 'POST'   && $c1 === ''                  => $ctrl->create(),
             $method === 'GET'    && $c1 !== '' && $c2 === 'pdf' => $ctrl->pdf($c1),
+            $method === 'GET'    && $c1 !== '' && $c2 === 'xlsx' => $ctrl->xlsx($c1),
             $method === 'GET'    && $c1 !== '' && $c2 === ''    => $ctrl->show($c1),
             $method === 'PUT'    && $c1 !== '' && $c2 === ''    => $ctrl->update($c1),
             $method === 'DELETE' && $c1 !== '' && $c2 === ''    => $ctrl->delete($c1),
@@ -985,6 +988,7 @@ try {
             $method === 'DELETE'&& $c1 !== '' && $c2 === ''          => $ctrl->delete($c1),
             $method === 'GET'   && $c2 === 'pdf'                     => $ctrl->generatePdf($c1),
             $method === 'PATCH' && $c2 === 'approve'                 => $ctrl->approve($c1),
+            $method === 'POST'  && $c1 !== '' && $c2 === 'revise'    => $ctrl->revise($c1),
             default => sendError("Route /api/quotations/$c1/$c2 not found", 404),
         };
     }

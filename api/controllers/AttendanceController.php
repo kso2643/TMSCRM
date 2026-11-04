@@ -5,12 +5,22 @@ class AttendanceController
     // After 09:45 punching in is locked until an admin approves a request with a reason.
     public const ON_TIME_UNTIL = '09:30';
     public const GRACE_UNTIL   = '09:45';
+    // Punch-out window (v11.47): reminded at 18:30, expected by 19:00. Later → the reason (working late / travelling).
+    public const OUT_FROM  = '18:30';
+    public const OUT_UNTIL = '19:00';
+    // No location point for this long while punched in (field staff) = phone / GPS was off → reason + manual km.
+    public const GAP_MINUTES = 20;
+    public const LATE_OUT_TYPES = ['WORK' => 'Working late', 'TRAVEL' => 'Travelling', 'CUSTOMER' => 'At a customer', 'OTHER' => 'Other'];
 
     public function __construct()
     {
         ensure_schema([
             'Attendance' => ['create' => '', 'columns' => [
                 'checkInPhoto' => 'VARCHAR(120) NULL', 'checkOutPhoto' => 'VARCHAR(120) NULL', 'lateMinutes' => 'INT NULL', 'lateRequestId' => 'VARCHAR(30) NULL',
+                // punch out (v11.47): km by GPS, km typed for the time the phone / GPS was off, late punch-out reason
+                'gpsKm' => 'DECIMAL(8,2) NULL', 'manualKm' => 'DECIMAL(8,2) NULL', 'manualKmReason' => 'TEXT NULL', 'gpsGaps' => 'TEXT NULL',
+                'lateOutType' => 'VARCHAR(12) NULL', 'lateOutReason' => 'TEXT NULL', 'travelFrom' => 'VARCHAR(160) NULL', 'travelTo' => 'VARCHAR(160) NULL',
+                'outRemindedAt' => 'DATETIME NULL',
             ]],
             'PunchRequest' => ['create' => "CREATE TABLE IF NOT EXISTS `PunchRequest` (
   `id` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `date` DATE NOT NULL, `reason` TEXT NOT NULL,
@@ -21,7 +31,12 @@ class AttendanceController
         ], 'Attendance punch-in window');
     }
 
-    private static function nowTs(): int { return time(); }
+    /** Now. Test servers only (env CRM_TEST_CLOCK=1, never set on the live server) may pass "X-Test-Now: HH:MM". */
+    private static function nowTs(): int
+    {
+        if (getenv('CRM_TEST_CLOCK') === '1' && preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string) ($_SERVER['HTTP_X_TEST_NOW'] ?? ''))) return strtotime(date('Y-m-d') . ' ' . $_SERVER['HTTP_X_TEST_NOW']);
+        return time();
+    }
 
     /** Where now falls in today's punch-in window: ON_TIME | GRACE | LOCKED, plus today's late request. */
     private function window(string $userId): array
@@ -127,6 +142,27 @@ class AttendanceController
             $closing = FuelExpenseController::readMeter($b['odometer'] ?? '', 'closing');
             $fx = FuelExpenseController::checkClosing($record, $closing);
         }
+        // After 19:00: why so late — working late / travelling (from → to) / at a customer / other.
+        $chk = self::outCheck($auth['id'], $record);
+        $lateType = null; $lateReason = null; $tFrom = null; $tTo = null;
+        if ($chk['phase'] === 'LATE') {
+            $lateType = strtoupper(trim((string) ($b['lateOutType'] ?? '')));
+            if (!isset(self::LATE_OUT_TYPES[$lateType])) sendError('It is after ' . self::ampm(self::OUT_UNTIL) . ' — choose why you are punching out late (working late, travelling, at a customer or other).', 400);
+            $lateReason = trim((string) ($b['lateOutReason'] ?? ''));
+            $tFrom = mb_substr(trim((string) ($b['travelFrom'] ?? '')), 0, 160) ?: null; $tTo = mb_substr(trim((string) ($b['travelTo'] ?? '')), 0, 160) ?: null;
+            if ($lateType === 'TRAVEL' && (!$tFrom || !$tTo)) sendError('Travelling — enter where you are travelling from and to.', 400);
+            if ($lateType !== 'TRAVEL' && $lateReason === '') sendError('Write the reason for punching out late.', 400);
+            $lateReason = mb_substr($lateReason, 0, 1000) ?: null;
+        }
+        // Field staff: the phone / GPS was off for a while → the reason, and the km for that time can be typed.
+        $manualKm = null; $manualReason = null;
+        if ($chk['gaps']) {
+            $manualReason = trim((string) ($b['manualKmReason'] ?? ''));
+            if ($manualReason === '') sendError('Your location was not recorded for ' . $chk['gapMinutes'] . ' min today (phone or GPS off). Write the reason — and the km you travelled in that time, if any.', 400);
+            $mk = trim(str_replace(',', '', (string) ($b['manualKm'] ?? '')));
+            if ($mk !== '') { if (!is_numeric($mk) || (float) $mk < 0 || (float) $mk > 1500) sendError('Enter the km travelled while the GPS was off (0–1500).', 400); $manualKm = round((float) $mk, 2); }
+            $manualReason = mb_substr($manualReason, 0, 1000);
+        }
         // Photo is required at punch-out too.
         [$bin, $ext] = self::decodePhoto($b['photo'] ?? '', 'out');
         $outPhoto = self::savePhoto($record['id'] . '_out', $bin, $ext);
@@ -134,8 +170,10 @@ class AttendanceController
         LocationHistoryController::closeOpenBreaks($auth['id']);
 
         db()->prepare(
-            'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,checkOutPhoto=?,workingHours=?,updatedAt=? WHERE id=?'
-        )->execute([now_sql(), $lat, $lng, $outPhoto, $hours, now_sql(), $record['id']]);
+            'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,checkOutPhoto=?,workingHours=?,gpsKm=?,manualKm=?,manualKmReason=?,gpsGaps=?,lateOutType=?,lateOutReason=?,travelFrom=?,travelTo=?,updatedAt=? WHERE id=?'
+        )->execute([now_sql(), $lat, $lng, $outPhoto, $hours, $chk['gpsKm'], $manualKm, $manualReason, $chk['gaps'] ? json_encode($chk['gaps']) : null,
+                    $lateType, $lateReason, $tFrom, $tTo, now_sql(), $record['id']]);
+        if ($lateType) log_activity($auth['id'], 'LATE_PUNCH_OUT', 'Attendance', $record['id'], ['type' => $lateType, 'reason' => $lateReason, 'from' => $tFrom, 'to' => $tTo]);
 
         if ($closing !== null && $fx) FuelExpenseController::recordClosing($fx, $closing);
         $s2 = db()->prepare('SELECT * FROM `Attendance` WHERE id=? LIMIT 1'); $s2->execute([$record['id']]);
@@ -244,6 +282,7 @@ class AttendanceController
         $s = db()->prepare(
             "SELECT a.id,a.userId,a.date,a.checkIn,a.checkOut,a.workingHours,a.status,
                     a.checkInLat,a.checkInLng,a.checkOutLat,a.checkOutLng,a.checkInPhoto,a.checkOutPhoto,
+                    a.gpsKm,a.manualKm,a.manualKmReason,a.lateOutType,a.lateOutReason,a.travelFrom,a.travelTo,
                     u.name AS u_name, u.department
              FROM `Attendance` a LEFT JOIN `User` u ON u.id=a.userId
              $w ORDER BY a.date DESC, u.name ASC"
@@ -268,6 +307,12 @@ class AttendanceController
                 'checkOutLng'       => $r['checkOutLng'] !== null ? (float)$r['checkOutLng'] : null,
                 'checkInPhoto'      => !empty($r['checkInPhoto']),
                 'checkOutPhoto'     => !empty($r['checkOutPhoto']),
+                // v11.47: km by GPS + km typed for GPS-off time, and why they punched out after 7 pm
+                'gpsKm'             => $r['gpsKm'] !== null ? (float) $r['gpsKm'] : null,
+                'manualKm'          => $r['manualKm'] !== null ? (float) $r['manualKm'] : null,
+                'manualKmReason'    => $r['manualKmReason'],
+                'lateOut'           => $r['lateOutType'] ? ['type' => $r['lateOutType'], 'label' => self::LATE_OUT_TYPES[$r['lateOutType']] ?? $r['lateOutType'],
+                                        'reason' => $r['lateOutReason'], 'from' => $r['travelFrom'], 'to' => $r['travelTo']] : null,
             ];
         }
         krsort($grouped); // newest date first
@@ -453,6 +498,54 @@ class AttendanceController
         readfile($path); exit;
     }
 
+    private static function ampm(string $hm): string { return date('g:i a', strtotime('2000-01-01 ' . $hm)); }
+
+    /**
+     * Punch-out facts for today's record: the phase (EARLY before 18:30, WINDOW 18:30–19:00, LATE after),
+     * km by GPS so far, and — for field staff — the stretches with no location point for 20+ min (phone / GPS off).
+     */
+    public static function outCheck(string $uid, array $record): array
+    {
+        $now = date('H:i', self::nowTs());
+        $phase = $now < self::OUT_FROM ? 'EARLY' : ($now < self::OUT_UNTIL ? 'WINDOW' : 'LATE');
+        $p = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
+        $p->execute([$record['id']]);
+        $pts = $p->fetchAll();
+        $km = round(LocationHistoryController::distanceKm($pts), 2);
+        $field = FuelExpenseController::odometerRequired($uid);
+        $gaps = [];
+        if ($field) {
+            $times = [strtotime((string) $record['checkIn'])];
+            foreach ($pts as $q) $times[] = strtotime((string) $q['capturedAt']);
+            $times[] = self::nowTs();
+            sort($times);
+            for ($i = 1; $i < count($times); $i++) {
+                $min = (int) floor(($times[$i] - $times[$i - 1]) / 60);
+                if ($min >= self::GAP_MINUTES) $gaps[] = ['from' => date('H:i', $times[$i - 1]), 'to' => date('H:i', $times[$i]), 'minutes' => $min];
+            }
+        }
+        $off = 0;
+        try { $o = db()->prepare("SELECT COUNT(*) FROM `StationaryLog` WHERE userId=? AND eventType='LOCATION_OFF' AND detectedAt>=?"); $o->execute([$uid, substr((string) $record['checkIn'], 0, 10) . ' 00:00:00']); $off = (int) $o->fetchColumn(); } catch (PDOException $e) {}
+        $opening = null;
+        try { $f = db()->prepare('SELECT openingMeter FROM `FuelExpense` WHERE attendanceId=? LIMIT 1'); $f->execute([$record['id']]); $v = $f->fetchColumn(); $opening = $v !== false && $v !== null ? (float) $v : null; } catch (PDOException $e) {}
+        return ['now' => date('H:i:s', self::nowTs()), 'outFrom' => self::OUT_FROM, 'outUntil' => self::OUT_UNTIL, 'phase' => $phase,
+                'gpsKm' => $km, 'points' => count($pts), 'fieldStaff' => $field, 'gaps' => $gaps, 'gapMinutes' => array_sum(array_column($gaps, 'minutes')),
+                'locationOff' => $off, 'openingMeter' => $opening, 'suggestedClosing' => $opening !== null ? round($opening + $km, 1) : null,
+                'lateOutTypes' => self::LATE_OUT_TYPES];
+    }
+
+    // GET /api/attendance/punch-out-check — what the punch-out form has to ask (late reason, GPS-off reason / km)
+    public function punchOutCheck(): void
+    {
+        $auth = authenticate();
+        $s = db()->prepare('SELECT * FROM `Attendance` WHERE userId=? AND date>=? AND date<? LIMIT 1');
+        $s->execute([$auth['id'], start_of_day(), start_of_day_plus(1)]);
+        $r = $s->fetch();
+        if (!$r || !$r['checkIn']) sendError('No check-in found for today.', 400);
+        if ($r['checkOut']) sendError('Already checked out today.', 400);
+        sendSuccess(self::outCheck($auth['id'], $r));
+    }
+
     // POST /api/attendance/ping
     public function ping(): void
     {
@@ -468,9 +561,31 @@ class AttendanceController
         $rec = $s->fetch();
         if (!$rec) sendError('No active check-in session. Punch in first.', 400);
 
+        // A point the phone kept while it had no network is sent later with the time it was taken ("at", ms):
+        // stored at that time (between punch in and now), so the route and km stay complete.
+        $at = now_sql();
+        if (isset($b['at']) && is_numeric($b['at'])) {
+            $ts = (int) floor((float) $b['at'] / 1000);
+            $ci = db()->prepare('SELECT checkIn FROM `Attendance` WHERE id=?'); $ci->execute([$rec['id']]);
+            $in = strtotime((string) $ci->fetchColumn());
+            if ($ts >= $in && $ts <= time() + 60) $at = date('Y-m-d H:i:s', min($ts, time()));
+        }
+        $acc = isset($b['accuracy']) && is_numeric($b['accuracy']) ? (float) $b['accuracy'] : null;
+        if ($acc !== null && $acc > 2000) sendSuccess(['ping' => null], 'Location too vague — not recorded');   // a tower guess kilometres off
         $id = gen_id();
         db()->prepare('INSERT INTO `LocationPing` (id,attendanceId,lat,lng,accuracy,capturedAt) VALUES (?,?,?,?,?,?)')
-           ->execute([$id, $rec['id'], (float)$b['lat'], (float)$b['lng'], isset($b['accuracy'])?(float)$b['accuracy']:null, now_sql()]);
+           ->execute([$id, $rec['id'], (float)$b['lat'], (float)$b['lng'], $acc, $at]);
+        // 6:30 pm: remind once to punch out (shows as an alert on the phone too)
+        if (date('H:i', self::nowTs()) >= self::OUT_FROM) {
+            try {
+                $u = db()->prepare('UPDATE `Attendance` SET outRemindedAt=? WHERE id=? AND outRemindedAt IS NULL'); $u->execute([now_sql(), $rec['id']]);
+                if ($u->rowCount() === 1) {
+                    ChangeNotice::ensure();
+                    db()->prepare('INSERT INTO `ChangeNotice` (id,userId,byId,title,body,link,createdAt) VALUES (?,?,?,?,?,?,?)')
+                        ->execute([gen_id(), $auth['id'], $auth['id'], '🕡 Time to punch out', 'Please punch out between ' . self::ampm(self::OUT_FROM) . ' and ' . self::ampm(self::OUT_UNTIL) . ' with your closing odometer. Working late or travelling? You will be asked the reason.', '/attendance/', now_sql()]);
+                }
+            } catch (Throwable $e) { error_log('Punch-out reminder: ' . $e->getMessage()); }
+        }
         $s2 = db()->prepare('SELECT * FROM `LocationPing` WHERE id=? LIMIT 1'); $s2->execute([$id]);
         sendSuccess(['ping' => $s2->fetch()], 'Location recorded', 201);
     }
