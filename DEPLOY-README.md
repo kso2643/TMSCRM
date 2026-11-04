@@ -1,3 +1,22 @@
+# Update — 4 Nov (e): customer page → full Log meeting, Latest updates per customer, follow-up given to engineers
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
+- **New file:** `crm/customer-updates.js`.
+- **Database:** a follow-up engineers column is added to meetings automatically.
+
+1. **Customer page → Log meeting** now opens the **full Log meeting form** on Meetings & follow-ups, with that customer already chosen: summary, requirements, notes, photos / files / voice notes, next follow-up and **Follow-up by**. After saving it goes **back to the customer**.
+2. **Latest updates on every customer's page** (above the meeting history)
+   - Everything for that customer, newest first: meetings (with the summary), quotations, price requests, orders, invoices, trials, appointments and CEO Desk items.
+   - Each line shows who did it and when; click it to open it.
+   - Chips filter by module (Meetings 3, Orders 2…). A yellow bar shows the **next follow-up**.
+3. **Log meeting → Follow-up by**
+   - In the Next follow-up section, tick **one or more engineers** who will do the follow-up.
+   - Each gets an alert (and a phone notification): "📅 Follow-up assigned to you: Finesse Precision · 11 Nov 5:00 pm". Tapping it opens that meeting.
+   - It shows on their **follow-ups for today**, dashboard and alerts, and they can update the meeting (status, notes, next date).
+   - It can be changed later in the meeting pop-up. The meeting card shows "📅 Follow-up by …".
+
+---
+
 # Update — 4 Nov (d): copy PR numbers, stop pins + overall km, new UI right after login, order numbers (Android app 1.0.x)
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.

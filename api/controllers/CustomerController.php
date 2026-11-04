@@ -320,4 +320,61 @@ class CustomerController
         usort($rows, fn($a, $b) => [$b['customers'], $a['name']] <=> [$a['customers'], $b['name']]);
         sendSuccess(['engineers' => $rows, 'totals' => $tot, 'from' => $from, 'to' => date('Y-m-d', strtotime("$to -1 day"))]);
     }
+
+    // GET /api/customers/:id/updates — the latest activity for one customer from every module,
+    // newest first (meetings, follow-ups, quotations, price requests, orders, invoices, trials,
+    // appointments, CEO Desk), for the "Latest updates" card on the customer page.
+    public function updates(string $id): void
+    {
+        authenticate();
+        $c = db()->prepare('SELECT id, companyName FROM `Customer` WHERE id=? LIMIT 1'); $c->execute([$id]);
+        if (!$c->fetch()) sendError('Customer not found.', 404);
+        $out = []; $next = null;
+        $add = function ($type, $icon, $at, $title, $sub, $link, $by = null, $status = null) use (&$out) {
+            if (!$at) return;
+            $out[] = ['type' => $type, 'icon' => $icon, 'at' => $at, 'title' => $title, 'sub' => $sub, 'link' => $link, 'by' => $by, 'status' => $status];
+        };
+        $rows = function (string $sql, array $p) { try { $q = db()->prepare($sql); $q->execute($p); return $q->fetchAll(); } catch (Throwable $e) { return []; } };
+        $h = fn($v) => ucwords(strtolower(str_replace('_', ' ', (string) $v)));
+        foreach ($rows("SELECT m.id, m.meetingDate, m.createdAt, m.updatedAt, m.meetingType, m.status, m.summary, m.notes, m.nextFollowUp, m.followUpTime, u.name AS byName
+                        FROM `Meeting` m LEFT JOIN `User` u ON u.id=m.userId WHERE m.customerId=? ORDER BY m.meetingDate DESC LIMIT 25", [$id]) as $r) {
+            $txt = trim((string) ($r['summary'] ?: $r['notes']));
+            $add('MEETING', $r['meetingType'] === 'CALL' ? '📞' : '🤝', $r['meetingDate'], $h($r['meetingType']) . ' · ' . $h($r['status']),
+                 $txt !== '' ? mb_substr(preg_replace('/\s+/', ' ', $txt), 0, 220) : 'No notes', '/meetings/#m-' . $r['id'], $r['byName'], $r['status']);
+            if ($r['nextFollowUp'] && $r['nextFollowUp'] >= date('Y-m-d 00:00:00') && (!$next || $r['nextFollowUp'] < $next['at']))
+                $next = ['at' => $r['nextFollowUp'], 'time' => $r['followUpTime'], 'meetingId' => $r['id'], 'by' => $r['byName']];
+        }
+        foreach ($rows("SELECT q.id, q.company, q.quotationNumber, q.totalAmount, q.status, q.followStatus, q.createdAt, u.name AS byName FROM `Quotation` q LEFT JOIN `User` u ON u.id=q.userId
+                        WHERE q.customerId=? ORDER BY q.createdAt DESC LIMIT 15", [$id]) as $r)
+            $add('QUOTATION', '📄', $r['createdAt'], 'Quotation ' . $r['quotationNumber'],
+                 ($r['totalAmount'] !== null ? '₹' . number_format((float) $r['totalAmount'], 2) . ' · ' : '') . $h($r['followStatus'] ?: $r['status']), '/quotations/', $r['byName'], $r['company']);
+        foreach ($rows("SELECT b.id, b.requestNo, b.firm, b.createdAt, u.name AS byName,
+                               (SELECT COUNT(*) FROM `PriceRequest` r WHERE r.batchId=b.id) AS n,
+                               (SELECT COUNT(*) FROM `PriceRequest` r WHERE r.batchId=b.id AND r.status='PENDING') AS pending
+                        FROM `PriceRequestBatch` b LEFT JOIN `User` u ON u.id=b.requestedById WHERE b.customerId=? ORDER BY b.createdAt DESC LIMIT 15", [$id]) as $r)
+            $add('PRICE_REQUEST', '💰', $r['createdAt'], 'Price request ' . $r['requestNo'],
+                 $r['n'] . ' item' . ($r['n'] == 1 ? '' : 's') . ' · ' . ($r['pending'] ? $r['pending'] . ' waiting for price' : 'all answered'), '/price-requests/?q=' . rawurlencode($r['requestNo']), $r['byName'], $r['firm']);
+        foreach ($rows("SELECT o.id, o.orderNo, o.orderType, o.deliveryStatus, o.procurementStatus, o.orderValue, o.firm, o.createdAt, u.name AS byName
+                        FROM `CustomerOrder` o LEFT JOIN `User` u ON u.id=o.engineerId WHERE o.customerId=? ORDER BY o.createdAt DESC LIMIT 15", [$id]) as $r)
+            $add('ORDER', '📦', $r['createdAt'], 'Order ' . ($r['orderNo'] ?: '') . ' · ' . ($r['orderType'] === 'PO' ? 'PO' : 'Verbal'),
+                 'Delivery: ' . $h($r['deliveryStatus']) . ' · Procurement: ' . $h($r['procurementStatus']) . ($r['orderValue'] !== null ? ' · ₹' . number_format((float) $r['orderValue'], 2) : ''),
+                 '/orders/?q=' . rawurlencode((string) $r['orderNo']), $r['byName'], $r['firm']);
+        foreach ($rows("SELECT i.invoiceNo, i.amount, i.createdAt, o.orderNo, u.name AS byName FROM `OrderInvoice` i JOIN `CustomerOrder` o ON o.id=i.orderId LEFT JOIN `User` u ON u.id=i.createdById
+                        WHERE o.customerId=? ORDER BY i.createdAt DESC LIMIT 10", [$id]) as $r)
+            $add('INVOICE', '🧾', $r['createdAt'], 'Invoice ' . $r['invoiceNo'], 'Order ' . ($r['orderNo'] ?: '') . ($r['amount'] !== null ? ' · ₹' . number_format((float) $r['amount'], 2) : ''),
+                 '/orders/?q=' . rawurlencode((string) $r['orderNo']), $r['byName']);
+        foreach ($rows("SELECT t.trialNo, t.component, t.status, t.createdAt, t.updatedAt, u.name AS byName FROM `Trial` t LEFT JOIN `User` u ON u.id=t.requestedById
+                        WHERE t.customerId=? ORDER BY t.createdAt DESC LIMIT 10", [$id]) as $r)
+            $add('TRIAL', '🧪', $r['createdAt'], 'Trial ' . ($r['trialNo'] ?: '') . ($r['component'] ? ' · ' . $r['component'] : ''), $h($r['status']), '/trials/', $r['byName'], $r['status']);
+        foreach ($rows("SELECT a.title, a.appointmentDate, a.appointmentTime, a.status, a.visitStatus, u.name AS byName FROM `Appointment` a LEFT JOIN `User` u ON u.id=COALESCE(a.assignedToId, a.userId)
+                        WHERE a.customerId=? ORDER BY a.appointmentDate DESC LIMIT 10", [$id]) as $r)
+            $add('APPOINTMENT', '📅', substr((string) $r['appointmentDate'], 0, 10) . ' ' . ($r['appointmentTime'] ?: '00:00') . (strlen((string) $r['appointmentTime']) === 5 ? ':00' : ''),
+                 'Appointment · ' . ($r['title'] ?: 'Visit'), $h($r['visitStatus'] ?: $r['status']), '/appointments/', $r['byName']);
+        foreach ($rows("SELECT d.id, d.type, d.title, d.status, d.createdAt, u.name AS byName FROM `MdDeskItem` d LEFT JOIN `User` u ON u.id=d.fromId
+                        WHERE d.customerId=? ORDER BY d.createdAt DESC LIMIT 10", [$id]) as $r)
+            $add('CEO_DESK', '🗂', $r['createdAt'], 'CEO Desk · ' . $r['title'], $h($r['status']), '/md-desk/#' . $r['id'], $r['byName']);
+        usort($out, fn($a, $b) => strcmp((string) $b['at'], (string) $a['at']));
+        $counts = array_count_values(array_column($out, 'type'));
+        sendSuccess(['updates' => array_slice($out, 0, 40), 'counts' => $counts, 'nextFollowUp' => $next]);
+    }
 }

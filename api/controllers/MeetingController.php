@@ -15,6 +15,45 @@ class MeetingController
     private static function types(): array { return array_values(array_unique(array_merge(self::VALID_TYPES, OptionController::values('meeting_type')))); }
     private static function priorities(): array { return array_values(array_unique(array_merge(['LOW', 'MEDIUM', 'HIGH'], OptionController::values('meeting_priority')))); }
 
+    public function __construct()
+    {
+        // who does the next follow-up — one or more engineers (JSON list of user ids)
+        ensure_schema(['Meeting' => ['create' => '', 'columns' => ['followUpAssignees' => 'TEXT NULL']]], 'Meeting follow-up assignees');
+    }
+
+    /** Cleans a list of user ids (active users only). */
+    private static function cleanAssignees($raw): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(fn($x) => trim((string) $x), is_array($raw) ? $raw : [$raw]))));
+        if (!$ids) return [];
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $s = db()->prepare("SELECT id FROM `User` WHERE isActive=1 AND id IN ($in)"); $s->execute($ids);
+        $ok = array_flip($s->fetchAll(PDO::FETCH_COLUMN));
+        return array_values(array_filter($ids, fn($i) => isset($ok[$i])));
+    }
+
+    /** Saves the follow-up engineers and tells the newly added ones (alert + phone notification). */
+    private function setFollowUpAssignees(string $meetingId, array $ids, array $before, string $byId): void
+    {
+        db()->prepare('UPDATE `Meeting` SET followUpAssignees=? WHERE id=?')->execute([$ids ? json_encode($ids) : null, $meetingId]);
+        $new = array_values(array_diff($ids, $before, [$byId]));
+        if (!$new) return;
+        try {
+            $q = db()->prepare('SELECT m.nextFollowUp, m.followUpTime, c.companyName, u.name AS byName FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId LEFT JOIN `User` u ON u.id=? WHERE m.id=?');
+            $q->execute([$byId, $meetingId]); $m = $q->fetch() ?: [];
+            $when = !empty($m['nextFollowUp']) ? date('j M', strtotime($m['nextFollowUp'])) . (!empty($m['followUpTime']) ? ' ' . date('g:i a', strtotime($m['followUpTime'])) : '') : 'no date yet';
+            ChangeNotice::ensure();
+            $ins = db()->prepare('INSERT INTO `ChangeNotice` (id,userId,byId,title,body,link,createdAt) VALUES (?,?,?,?,?,?,?)');
+            $fa = db()->prepare('INSERT INTO `FollowUpAlert` (id,meetingId,userId,alertType,isRead,createdAt) VALUES (?,?,?,?,0,?)');
+            foreach ($new as $uid) {
+                $ins->execute([gen_id(), $uid, $byId, mb_substr('📅 Follow-up assigned to you: ' . ($m['companyName'] ?? 'customer') . ' · ' . $when, 0, 255),
+                               mb_substr('Assigned by ' . ($m['byName'] ?? 'someone') . '. Open it on Meetings & follow-ups.', 0, 500), '/meetings/#m-' . $meetingId, now_sql()]);
+                try { $fa->execute([gen_id(), $meetingId, $uid, 'TASK_ASSIGNED', now_sql()]); } catch (Throwable $e) {}
+            }
+            log_activity($byId, 'FOLLOWUP_ASSIGNED', 'Meeting', $meetingId, ['to' => $new]);
+        } catch (Throwable $e) { error_log('Follow-up assignee notice: ' . $e->getMessage()); }
+    }
+
     // GET /api/meetings/meta
     public function meta(): void
     {
@@ -36,6 +75,8 @@ class MeetingController
         if (qp('status'))                       { $where[] = 'm.status=?';      $params[] = qp('status'); }
         if (qp('type'))                         { $where[] = 'm.meetingType=?'; $params[] = qp('type'); }
         if (qp('assignedToMe') === 'true')      { $where[] = 'm.assignedToId=?';$params[] = $auth['id']; }
+        if (qp('followUpForMe') === 'true')     { $where[] = '(m.userId=? OR m.assignedToId=? OR m.followUpAssignees LIKE ?)'; array_push($params, $auth['id'], $auth['id'], '%"' . $auth['id'] . '"%'); }
+        if (qp('followUpBy'))                   { $where[] = 'm.followUpAssignees LIKE ?'; $params[] = '%"' . qp('followUpBy') . '"%'; }
         if (qp('overdueOnly') === 'true') {
             $where[] = 'm.nextFollowUp < ?';    $params[] = now_sql();
             $where[] = "m.status NOT IN ('CLOSED','LOST')";
@@ -81,8 +122,9 @@ class MeetingController
         $auth = authenticate();
         $isAdmin = is_admin_tier($auth['role']);
         $start = start_of_day(); $end = start_of_day_plus(1);
-        $extra = $isAdmin ? '' : 'AND m.userId=?';
-        $params = $isAdmin ? [$start,$end] : [$start,$end,$auth['id']];
+        // engineers: their own meetings, ones assigned to them, and follow-ups given to them
+        $extra = $isAdmin ? '' : 'AND (m.userId=? OR m.assignedToId=? OR m.followUpAssignees LIKE ?)';
+        $params = $isAdmin ? [$start,$end] : [$start,$end,$auth['id'],$auth['id'],'%"' . $auth['id'] . '"%'];
         $s = db()->prepare(
             "SELECT m.*, c.id AS c_id, c.companyName, c.contactPerson, c.contactNumber, c.lat AS c_lat, c.lng AS c_lng,
                     u.id AS u_id, u.name AS u_name
@@ -239,6 +281,7 @@ class MeetingController
 
         $assignedToId = ($b['assignedToId'] ?? null) ?: null;
         if ($assignedToId) $this->notifyAssignment($id, $assignedToId, $auth['id'], $customer['companyName']);
+        if (!empty($b['followUpAssignees'])) $this->setFollowUpAssignees($id, self::cleanAssignees($b['followUpAssignees']), [], $auth['id']);
 
         log_activity($auth['id'], 'MEETING_CREATED', 'Meeting', $id,
             ['customer' => $customer['companyName'], 'type' => $meetingType]);
@@ -256,7 +299,9 @@ class MeetingController
         $s->execute([$id]);
         $existing = $s->fetch();
         if (!$existing) sendError('Meeting not found.', 404);
-        if (!$isAdmin && $existing['userId'] !== $auth['id'])
+        $mine = $existing['userId'] === $auth['id'] || ($existing['assignedToId'] ?? null) === $auth['id']
+            || in_array($auth['id'], json_decode((string) ($existing['followUpAssignees'] ?? ''), true) ?: [], true);   // the follow-up was given to them
+        if (!$isAdmin && !$mine)
             sendError('Can only edit your own meetings.', 403);
 
         $sets = []; $params = [];
@@ -296,6 +341,10 @@ class MeetingController
                 $companyName = $cs->fetch()['companyName'] ?? null;
                 $this->notifyAssignment($id, $newAssignee, $auth['id'], $companyName);
             }
+        }
+        if (array_key_exists('followUpAssignees', $b)) {
+            $before = json_decode((string) ($existing['followUpAssignees'] ?? ''), true) ?: [];
+            $this->setFollowUpAssignees($id, self::cleanAssignees($b['followUpAssignees'] ?? []), $before, $auth['id']);
         }
 
         $this->show($id);
@@ -491,6 +540,13 @@ class MeetingController
         } catch (\Throwable $e) { /* non-fatal, don't block the request */ }
     }
 
+    private static function userName(string $id): ?string
+    {
+        static $names = [];
+        if (!array_key_exists($id, $names)) { $q = db()->prepare('SELECT name FROM `User` WHERE id=?'); $q->execute([$id]); $names[$id] = $q->fetchColumn() ?: null; }
+        return $names[$id];
+    }
+
     private function shape(array $row): array
     {
         foreach (['isGeoVerified','reminderSent'] as $k) {
@@ -505,6 +561,8 @@ class MeetingController
         ];
         $row['user']       = ['id' => $row['u_id'] ?? null, 'name' => $row['u_name'] ?? null];
         $row['assignedTo'] = ($row['a_id'] ?? null) ? ['id' => $row['a_id'], 'name' => $row['a_name']] : null;
+        $fa = json_decode((string) ($row['followUpAssignees'] ?? ''), true) ?: [];
+        $row['followUpAssignees'] = array_map(fn($u) => ['id' => $u, 'name' => self::userName($u)], $fa);
         foreach (['c_id','companyName','contactPerson','c_lat','c_lng','u_id','u_name','a_id','a_name'] as $k) unset($row[$k]);
         return $row;
     }

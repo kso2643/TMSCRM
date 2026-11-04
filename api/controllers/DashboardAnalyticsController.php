@@ -59,11 +59,14 @@ class DashboardController
         $uid = $auth['id'];
         $sod = start_of_day(); $eod = start_of_day_plus(1); $som = start_of_month();
         $db = db();
+        new MeetingController();   // follow-up assignees column
+        // my follow-ups: meetings I logged, meetings assigned to me, and follow-ups given to me
+        $mine = "(m.userId=? OR m.assignedToId=? OR m.followUpAssignees LIKE ?)"; $mp = [$uid, $uid, '%"' . $uid . '"%'];
 
-        $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` WHERE userId=? AND nextFollowUp>=? AND nextFollowUp<?"); $s->execute([$uid,$sod,$eod]); $myFollowUpsToday=(int)$s->fetchColumn();
+        $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` m WHERE $mine AND m.nextFollowUp>=? AND m.nextFollowUp<?"); $s->execute(array_merge($mp,[$sod,$eod])); $myFollowUpsToday=(int)$s->fetchColumn();
 
-        $s=$db->prepare("SELECT m.*,c.companyName,c.contactPerson,c.contactNumber FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId WHERE m.userId=? AND m.nextFollowUp<? AND m.status NOT IN ('CLOSED','LOST') ORDER BY m.nextFollowUp ASC LIMIT 10"); $s->execute([$uid,$sod]); $overdueList=self::withCustomer($s->fetchAll());
-        $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` WHERE userId=? AND nextFollowUp<? AND status NOT IN ('CLOSED','LOST')"); $s->execute([$uid,$sod]); $overdueTotal=(int)$s->fetchColumn();
+        $s=$db->prepare("SELECT m.*,c.companyName,c.contactPerson,c.contactNumber FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId WHERE $mine AND m.nextFollowUp<? AND m.status NOT IN ('CLOSED','LOST') ORDER BY m.nextFollowUp ASC LIMIT 10"); $s->execute(array_merge($mp,[$sod])); $overdueList=self::withCustomer($s->fetchAll());
+        $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` m WHERE $mine AND m.nextFollowUp<? AND m.status NOT IN ('CLOSED','LOST')"); $s->execute(array_merge($mp,[$sod])); $overdueTotal=(int)$s->fetchColumn();
 
         $s=$db->prepare("SELECT COUNT(*) FROM `Customer` WHERE createdById=? AND isActive=1"); $s->execute([$uid]); $myCustomers=(int)$s->fetchColumn();
         $s=$db->prepare("SELECT COUNT(*) FROM `Meeting` WHERE userId=? AND meetingDate>=?");   $s->execute([$uid,$som]); $meetingsThisMonth=(int)$s->fetchColumn();

@@ -224,7 +224,7 @@
   function mount(root) {
     injectCss();
     var all = [];
-    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '', brandF = '', firmF = '', searchQ = '';
+    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '', brandF = '', firmF = '', searchQ = (function () { try { return new URLSearchParams(location.search).get('q') || ''; } catch (e) { return ''; } })();
     var engineers = [];
     var expanded = {};    // orderId -> true while its row is open
     var presets = {};     // orderId -> delivery status picked from the dropdown that needs the materials panel

@@ -246,6 +246,7 @@ try {
             $method === 'GET'   && $c1 === 'export'                     => $exp->exportCustomers(),
             $method === 'GET'   && $c1 === ''                           => $ctrl->index(),
             $method === 'POST'  && $c1 === ''                           => $ctrl->create(),
+            $method === 'GET'   && $c1 !== '' && $c2 === 'updates'      => $ctrl->updates($c1),
             $method === 'GET'   && $c1 !== '' && $c2 === ''             => $ctrl->show($c1),
             $method === 'PUT'   && $c1 !== '' && $c2 === ''             => $ctrl->update($c1),
             $method === 'DELETE'&& $c1 !== ''                           => $ctrl->delete($c1),

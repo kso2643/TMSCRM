@@ -334,10 +334,18 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 .dark .meeting-summary { background: #0f172a; color: #e2e8f0; }
 .dark .mt-summary-box { background: #1e3a8a33; color: #e2e8f0; }
 .dark .mt-details-grid .readonly-field { background: #0f172a; }
+.fu-by{display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow-y:auto;padding:2px}
+.field-group .fu-chip,.fu-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:999px;padding:5px 10px;font-size:.8rem;font-weight:600;color:var(--dark);cursor:pointer;background:var(--white);text-transform:none;letter-spacing:0}
+.field-group .fu-chip input{width:auto;margin:0;padding:0;border:0}
+.fu-chip small{color:var(--muted);font-weight:500;font-size:.7rem}
+.field-group .fu-chip.on,.fu-chip.on{background:var(--blue-light);border-color:var(--blue);color:var(--blue-dark)}
+.fu-by-empty{font-size:.8rem;color:var(--muted)}
+.fu-by-meta b{color:#b45309 !important}
+.dark .fu-chip{background:#0f172a;border-color:#334155;color:#e2e8f0}.dark .fu-chip.on{background:#1e3a8a55}
 .today-fixed{padding:.55rem .75rem;border:1px solid #cbd5e1;border-radius:.5rem;background:#f1f5f9;color:#0f172a;font-weight:600;font-size:.9rem}
 .dark .today-fixed{background:#1e293b;border-color:#334155;color:#e2e8f0}
 </style>
-<script src="/fuel-expense-app.js?v=20261104f" defer></script><script src="/attendance-all-app.js?v=20261104f" defer></script><script src="/appointments-reminder-app.js?v=20261104f" defer></script><script src="/crm-global.js?v=20261104f" defer></script><link rel="stylesheet" href="/motion.css?v=20261104f"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261104g" defer></script><script src="/attendance-all-app.js?v=20261104g" defer></script><script src="/appointments-reminder-app.js?v=20261104g" defer></script><script src="/crm-global.js?v=20261104g" defer></script><link rel="stylesheet" href="/motion.css?v=20261104g"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 
 <div id="auth-gate" class="state-block" style="max-width:420px;margin:80px auto;">
@@ -640,6 +648,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     var metaBits = ['<span><b>By</b> ' + escapeHtml((m.user && m.user.name) || "—") + "</span>"];
     if (m.assignedTo && m.assignedTo.name) metaBits.push('<span><b>Assigned</b> ' + escapeHtml(m.assignedTo.name) + "</span>");
     if (m.updatedBy && m.updatedBy.name) metaBits.push('<span><b>Updated by</b> ' + escapeHtml(m.updatedBy.name) + "</span>");
+    if (m.followUpAssignees && m.followUpAssignees.length) metaBits.push('<span class="fu-by-meta"><b>📅 Follow-up by</b> ' + escapeHtml(m.followUpAssignees.map(function (u) { return u.name || ""; }).join(", ")) + "</span>");
 
     return (
       '<div class="meeting-card" role="button" tabindex="0" aria-label="Open meeting details" data-id="' + escapeHtml(m.id) + '">' +
@@ -815,6 +824,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
           '<div class="field-group"><label>Follow-up time</label><input type="time" id="edit-followup-time" value="' + escapeHtml(/^\d{2}:\d{2}$/.test(m.followUpTime || "") ? m.followUpTime : "") + '" /></div>' +
         "</div>" +
         '<div class="field-group"><label>Follow-up priority</label><select id="edit-priority"></select></div>' +
+        '<div class="field-group"><label>Follow-up by</label>' + fuPickerHtml("edit", m.followUpAssignees || []) + "</div>" +
         '<div class="field-group"><label>Notes</label><textarea id="edit-notes" placeholder="Add or update notes…">' + escapeHtml(m.notes || "") + "</textarea></div>" +
         '<div class="field-group"><label>Photos, files &amp; voice notes</label><div id="edit-att"></div></div>' +
         (extraFields ? '<div class="field-group"><label>More details</label><div class="mt-details-grid">' + extraFields + "</div></div>" : "") +
@@ -842,6 +852,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-close").addEventListener("click", closeDrawer);
     document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
     document.getElementById("drawer-save").addEventListener("click", function () { saveMeeting(m.id); });
+    fuWire("edit");
     mountAttachments(document.getElementById("edit-att"), { meetingId: m.id });
 
     enableAddNew();
@@ -880,6 +891,8 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     // string would fail to parse server-side (to_dt() expects a real value).
     if (dateVal) body.nextFollowUp = dateVal + (timeVal ? "T" + timeVal + ":00" : "T00:00:00");
     if (timeVal) body.followUpTime = timeVal;
+    var fuBy = fuPicked("edit");
+    if (fuBy) body.followUpAssignees = fuBy;
 
     saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     feedback.innerHTML = "";
@@ -1279,6 +1292,36 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
       list.map(function (v) { return '<option value="' + v + '"' + (v === selected ? " selected" : "") + ">" + humanize(v) + "</option>"; }).join("");
   }
 
+  /* v11.44 — "Follow-up by": the next follow-up can be given to one or more engineers. */
+  function fuPeople(extra) {
+    var me = state.currentUser || {};
+    var list = (state.users || []).filter(function (u) { return u.isActive !== false && u.isActive !== 0; });
+    // always offer yourself and anyone already on the follow-up (some people lists leave the viewer out)
+    var have = {}; list.forEach(function (u) { have[u.id] = true; });
+    [me].concat(extra || []).forEach(function (u) { if (u && u.id && !have[u.id]) { have[u.id] = true; list.push({ id: u.id, name: u.name || "—", role: u.role || "" }); } });
+    var rank = function (u) { return /SALES/.test(u.role || "") ? 0 : 1; };
+    return list.slice().sort(function (a, b) { return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name)); })
+      .map(function (u) { return { id: u.id, name: u.name + (u.id === me.id ? " (me)" : ""), role: u.role }; });
+  }
+  function fuPickerHtml(prefix, selected) {
+    var sel = {}; (selected || []).forEach(function (x) { sel[x.id || x] = true; });
+    var ppl = fuPeople((selected || []).filter(function (x) { return x && x.id; }));
+    if (!ppl.length) return '<div class="fu-by-empty">No people list available.</div>';
+    return '<div class="fu-by" id="' + prefix + '-fu-by" role="group" aria-label="Follow-up by">' + ppl.map(function (u) {
+      return '<label class="fu-chip' + (sel[u.id] ? " on" : "") + '"><input type="checkbox" value="' + escapeHtml(u.id) + '"' + (sel[u.id] ? " checked" : "") + ' />' +
+        escapeHtml(u.name) + (u.role ? '<small>' + escapeHtml(humanize(u.role)) + "</small>" : "") + "</label>";
+    }).join("") + "</div>";
+  }
+  function fuWire(prefix) {
+    var box = document.getElementById(prefix + "-fu-by");
+    if (!box) return;
+    box.addEventListener("change", function (e) { if (e.target && e.target.type === "checkbox") e.target.parentNode.classList.toggle("on", e.target.checked); });
+  }
+  function fuPicked(prefix) {
+    var box = document.getElementById(prefix + "-fu-by");
+    return box ? Array.prototype.map.call(box.querySelectorAll("input:checked"), function (i) { return i.value; }) : null;
+  }
+
   function openCreate() {
     createState.customer = null;
     var forFollowup = state.tab === "followups";
@@ -1324,6 +1367,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
           '<div class="field-group"><label for="new-fu-time">Time</label><input type="time" id="new-fu-time" value="' + (forFollowup ? "10:00" : "") + '" /></div>' +
         "</div>" +
         '<div class="field-group"><label for="new-priority">Follow-up priority</label><select id="new-priority">' + optionsHtml(VALID_PRIORITIES, "MEDIUM") + "</select></div>" +
+        '<div class="field-group"><label>Follow-up by <small style="text-transform:none;font-weight:500">(engineers who do the next follow-up — they get an alert)</small></label>' + fuPickerHtml("new", []) + "</div>" +
       "</div>" +
       '<div id="drawer-feedback"></div>' +
       '<div class="drawer-footer">' +
@@ -1335,6 +1379,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
     document.getElementById("drawer-save").addEventListener("click", function () { saveCreate(forFollowup); });
     mountAttachments(document.getElementById("new-att"), {});
+    fuWire("new");
     var q = document.getElementById("new-cust-q");
     q.addEventListener("input", function () {
       clearTimeout(createState.timer);
@@ -1412,6 +1457,8 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
       assignedToId: val("new-assign") || undefined,
       followUpPriority: val("new-priority") || "MEDIUM"
     };
+    var fuBy = fuPicked("new");
+    if (fuBy && fuBy.length) body.followUpAssignees = fuBy;
     if (val("new-fu-date")) body.nextFollowUp = val("new-fu-date") + "T" + (val("new-fu-time") || "00:00") + ":00";
     if (val("new-fu-time")) body.followUpTime = val("new-fu-time");
 
@@ -1428,7 +1475,8 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
           : '<div class="save-feedback ok">Saved' + (n ? " with " + n + " attachment" + (n === 1 ? "" : "s") : "") + (body.nextFollowUp ? " — you’ll get a reminder before the follow-up." : ".") + "</div>";
         state.totals = { meetings: null, followups: null };
         state.page = 1;
-        setTimeout(function () { closeDrawer(); fetchList().then(refreshOtherTabCount); }, failed.length ? 4000 : 700);
+        var back = (location.search.match(/[?&]back=customer\b/) && createState.customer) ? "/customers/detail/?id=" + encodeURIComponent(createState.customer.id) : "";
+        setTimeout(function () { if (back) { location.assign(back); return; } closeDrawer(); fetchList().then(refreshOtherTabCount); }, failed.length ? 4000 : 700);
       };
       if (!n || !meetingId) return done(null);
       return uploadPending(meetingId, function (i, total) {
@@ -1534,7 +1582,10 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
       api.users.list().then(function (res) {
         state.users = res.data.items;
         populateUserFilterOptions();
-      }).catch(function () { /* dropdowns just stay empty if this fails — list itself still works */ }),
+      }).catch(function () {
+        // engineers can't list users — the CEO Desk people list has everyone (for "Follow-up by")
+        return apiFetch("/md-desk/recipients").then(function (r) { state.users = (r.data && (r.data.allUsers || r.data.users)) || []; }).catch(function () {});
+      }),
       api.meetings.meta().then(function (res) {
         if (res.data.statuses && res.data.statuses.length) VALID_STATUSES = res.data.statuses;
         if (res.data.types && res.data.types.length) VALID_TYPES = res.data.types;
@@ -1545,7 +1596,25 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     Promise.all(startupTasks).then(function () {
       refreshOtherTabCount();
       // /meetings/#new (or ?new=1) opens the form straight away — handy for dashboard shortcuts.
-      if (/^#new\b/.test(location.hash) || /[?&]new=1\b/.test(location.search)) openCreate();
+      if (/^#new\b/.test(location.hash) || /[?&]new=1\b/.test(location.search)) {
+        openCreate();
+        // from a customer's page: that customer is already chosen
+        var cm = location.search.match(/[?&]customerId=([^&]+)/);
+        if (cm) apiFetch("/customers/" + encodeURIComponent(decodeURIComponent(cm[1]))).then(function (r) {
+          var c = r.data && (r.data.customer || r.data);
+          if (c && c.id && document.getElementById("cust-pick")) chooseCustomer(c);
+        }).catch(function () {});
+      }
+      // /meetings/#m-<id> (alerts, the customer's latest updates) opens that meeting
+      var hm = location.hash.match(/^#m-(.+)$/);
+      if (hm) {
+        var mid = decodeURIComponent(hm[1]);
+        if (findMeeting(mid)) openDrawer(mid);
+        else apiFetch("/meetings/" + encodeURIComponent(mid)).then(function (r) {
+          var mm = r.data && (r.data.meeting || r.data);
+          if (mm && mm.id) { state.lastItems = (state.lastItems || []).concat([mm]); openDrawer(mm.id); }
+        }).catch(function () {});
+      }
     });
   }
 
