@@ -477,6 +477,7 @@
       }
       prBtn.onclick = loadPr;
       prNo.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); loadPr(); } });
+      prNo.addEventListener('paste', function () { setTimeout(function () { if (/^\s*PR-\d{4}-\d{4}/i.test(prNo.value)) { prNo.value = prNo.value.trim(); loadPr(); } }, 0); });
       g.appendChild(field('Price request no. — fills the customer and all its items', el('div', {}, [el('div', { style: 'display:flex;gap:.4rem' }, [prNo, prBtn]), prInfo]), true));
       var cp = customerPicker(ctx, copyQuote); cp.querySelector('label').textContent = 'For customer (optional)';
       g.appendChild(cp);
@@ -914,6 +915,7 @@
     }
     go.onclick = show;
     no.addEventListener('keydown', function (e) { if (e.key === 'Enter') show(); });
+    no.addEventListener('paste', function () { setTimeout(function () { if (/^\s*PR-\d{4}-\d{4}/i.test(no.value)) { no.value = no.value.trim(); show(); } }, 0); });   // paste the copied number → items show at once
     host.appendChild(el('div', { class: 'md-card' }, [
       el('p', { style: 'margin:0 0 .5rem', text: 'Type a price request number to see all its items. Ask suppliers for the whole request or item by item, compare their prices, and choose the supplier to buy from — the admins are told and see it on the Price requests page.' }),
       el('div', { class: 'md-bar' }, [no, go]), info, panel]));

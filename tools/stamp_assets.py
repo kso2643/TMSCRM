@@ -18,3 +18,16 @@ for d, _, files in os.walk(root):
         if n != s:
             open(p, 'w', encoding='utf-8').write(n); changed += 1
 print(f'stamped {changed} pages with v={stamp}')
+
+# The service worker precaches /index.html (cache-first). Its revision must follow the file,
+# or browsers keep the old start page forever. Refresh it after stamping.
+import hashlib
+sw = os.path.join(root, 'sw.js')
+if os.path.exists(sw):
+    s = open(sw, encoding='utf-8').read()
+    for page in ['index.html']:
+        h = hashlib.md5(open(os.path.join(root, page), 'rb').read()).hexdigest()
+        s2 = re.sub(r'(\{url:"/' + re.escape(page) + r'",revision:")[0-9a-f]+(")', lambda m: m.group(1) + h + m.group(2), s)
+        if s2 != s:
+            s = s2; print(f'sw.js: /{page} revision → {h[:8]}')
+    open(sw, 'w', encoding='utf-8').write(s)

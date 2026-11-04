@@ -36,11 +36,35 @@ class OrderController
     ];
     private const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB
 
+    /** ORD-yymm-nnnn-XX: month of $when, next sequence that month, engineer's initials. */
+    private static function nextOrderNo(?string $engineerId, ?string $when = null): string
+    {
+        $prefix = 'ORD-' . date('ym', $when ? strtotime($when) : time()) . '-';
+        $s = db()->prepare('SELECT orderNo FROM `CustomerOrder` WHERE orderNo LIKE ?');
+        $s->execute([$prefix . '%']);
+        $max = 0;
+        foreach ($s->fetchAll(PDO::FETCH_COLUMN) as $no) $max = max($max, (int) substr($no, strlen($prefix), 4));
+        return $prefix . str_pad((string) ($max + 1), 4, '0', STR_PAD_LEFT) . '-' . user_initials($engineerId);
+    }
+
+    /** Orders saved before order numbers existed get one, oldest first, by the month they were created. */
+    private static function backfillNumbers(): void
+    {
+        try {
+            $n = (int) db()->query('SELECT COUNT(*) FROM `CustomerOrder` WHERE orderNo IS NULL')->fetchColumn();
+            if (!$n) return;
+            $rows = db()->query('SELECT id, engineerId, createdAt FROM `CustomerOrder` WHERE orderNo IS NULL ORDER BY createdAt, id')->fetchAll();
+            $u = db()->prepare('UPDATE `CustomerOrder` SET orderNo=? WHERE id=? AND orderNo IS NULL');
+            foreach ($rows as $r) $u->execute([self::nextOrderNo($r['engineerId'], $r['createdAt']), $r['id']]);
+        } catch (Throwable $e) { error_log('Order numbers backfill: ' . $e->getMessage()); }
+    }
+
     public function __construct()
     {
         // Safety net for "Internal server error" on /api/orders when one of the
         // orders migrations hasn't been run on the live DB — see SchemaGuard.php.
         ensure_schema(self::schema(), 'migration_orders_all.sql');
+        self::backfillNumbers();
         // Invoices raised against the order (one or more — part supplies get their own invoice)
         ensure_schema(['OrderInvoice' => ['create' => "CREATE TABLE IF NOT EXISTS `OrderInvoice` (
   `id` VARCHAR(30) NOT NULL, `orderId` VARCHAR(30) NOT NULL, `invoiceNo` VARCHAR(80) NOT NULL, `invoiceDate` DATE NULL,
@@ -138,6 +162,8 @@ class OrderController
                     'engineerId'             => 'VARCHAR(30) NULL',
                     'orderType'              => "VARCHAR(10) NOT NULL DEFAULT 'VERBAL'",
                     'firm'                   => 'VARCHAR(5) NULL',   // our company the order is for: TMS / APJ
+                    // ORD-yymm-nnnn-XX — like the price request numbers (XX = engineer's initials)
+                    'orderNo'                => 'VARCHAR(24) NULL',
                     'poDocumentOriginalName' => 'VARCHAR(255) NULL',
                     'poDocumentStoredName'   => 'VARCHAR(255) NULL',
                     'poDocumentMime'         => 'VARCHAR(100) NULL',
@@ -276,6 +302,7 @@ class OrderController
             'engineer'           => ['id' => $row['engineerId'], 'name' => $row['engineerName'], 'role' => $row['engineerRole']],
             'orderType'          => $row['orderType'],
             'firm'               => $row['firm'] ?? null,
+            'orderNo'            => $row['orderNo'] ?? null,
             'poDocument'         => $row['poDocumentStoredName'] ? [
                 'originalName' => $row['poDocumentOriginalName'],
                 'mime'         => $row['poDocumentMime'],
@@ -651,8 +678,8 @@ class OrderController
         if (qp('brand'))          { $where[] = 'EXISTS (SELECT 1 FROM `CustomerOrderItem` bi WHERE bi.orderId=o.id AND bi.brand=?)'; $params[] = qp('brand'); }
         if (qp('search')) {
             $like = '%' . qp('search') . '%';
-            $where[] = '(c.companyName LIKE ? OR c.contactPerson LIKE ?)';
-            $params[] = $like; $params[] = $like;
+            $where[] = '(c.companyName LIKE ? OR c.contactPerson LIKE ? OR o.orderNo LIKE ? OR o.poNumber LIKE ?)';
+            array_push($params, $like, $like, $like, $like);
         }
         $w = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
@@ -754,7 +781,7 @@ class OrderController
             $id, $customerId, $engineerId, $orderType, $poOriginal, $poStored, $poMime, $poSize,
             $verbalDetails, $orderDate, bp_trim($b, 'notes'), now_sql(), now_sql(),
         ]);
-        db()->prepare('UPDATE `CustomerOrder` SET firm=? WHERE id=?')->execute([$firm, $id]);
+        db()->prepare('UPDATE `CustomerOrder` SET firm=?, orderNo=? WHERE id=?')->execute([$firm, self::nextOrderNo($engineerId), $id]);
         if (($ov = self::orderValue($b)) !== null) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([$ov, $id]);
         if (($pn = mb_substr(trim((string) ($b['poNumber'] ?? '')), 0, 80)) !== '') db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([$pn, $id]);
         $this->replaceItems($id, $items);
@@ -1252,9 +1279,18 @@ class OrderController
     }
 
     /** Short readable order reference: ORD-YYMMDD-XXXX. */
+    /** The order's number (ORD-yymm-nnnn-XX); old date-based reference only if it has none yet. */
     public static function orderRef(array $row): string
     {
-        return 'ORD-' . date('ymd', strtotime($row['orderDate'])) . '-' . strtoupper(substr($row['id'], -4));
+        static $cache = [];
+        if (!empty($row['orderNo'])) return $row['orderNo'];
+        $id = (string) ($row['id'] ?? '');
+        if ($id !== '' && !array_key_exists($id, $cache)) {
+            try { $q = db()->prepare('SELECT orderNo FROM `CustomerOrder` WHERE id=?'); $q->execute([$id]); $cache[$id] = $q->fetchColumn() ?: null; }
+            catch (Throwable $e) { $cache[$id] = null; }
+        }
+        if ($id !== '' && $cache[$id]) return $cache[$id];
+        return 'ORD-' . date('ymd', strtotime($row['orderDate'] ?? 'now')) . '-' . strtoupper(substr($id, -4));
     }
 
     // GET /api/orders/:id/document

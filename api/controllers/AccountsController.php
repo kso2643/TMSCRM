@@ -411,10 +411,11 @@ class AccountsController
         self::auth();
         $q = '%' . trim((string) qp('q', '')) . '%';
         try {
-            $s = db()->prepare("SELECT o.id, o.orderNumber, o.orderDate, o.customerId, c.companyName, o.deliveryStatus,
+            new OrderController();   // makes sure order numbers exist (ORD-yymm-nnnn-XX)
+            $s = db()->prepare("SELECT o.id, o.orderNo AS orderNumber, o.orderDate, o.customerId, c.companyName, o.deliveryStatus,
                     (SELECT e.docNo FROM `AccEntry` e WHERE e.kind='INVOICE' AND e.orderId=o.id LIMIT 1) AS invoiceNo
                 FROM `CustomerOrder` o LEFT JOIN `Customer` c ON c.id=o.customerId
-                WHERE o.orderNumber LIKE ? OR c.companyName LIKE ? ORDER BY o.createdAt DESC LIMIT 15");
+                WHERE o.orderNo LIKE ? OR c.companyName LIKE ? ORDER BY o.createdAt DESC LIMIT 15");
             $s->execute([$q, $q]);
             $rows = $s->fetchAll();
         } catch (PDOException $e) { $rows = []; }

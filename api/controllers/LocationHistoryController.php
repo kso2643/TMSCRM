@@ -77,23 +77,75 @@ class LocationHistoryController
         return 2 * $r * asin(min(1, sqrt($a)));
     }
 
+    /** A stop is a stay of this many minutes or more in one place; it gets a pin on the map. */
+    public const STOP_MINUTES = 20;
+    /** Stays this long or longer add no distance (GPS drift while standing still is not travel). */
+    private const STAY_MINUTES = 10;
+    private const STAY_RADIUS = 150;   // metres from the centre of the stay
+
+    /** Usable fixes: real coordinates, not a vague tower / Wi-Fi guess (accuracy worse than 150 m). */
+    private static function usable(array $pts): array
+    {
+        return array_values(array_filter($pts, fn($p) => $p['lat'] !== null && $p['lng'] !== null
+            && !(isset($p['accuracy']) && $p['accuracy'] !== null && (float) $p['accuracy'] > 150)));
+    }
+
     /**
-     * Total path length in km. To stay close to the real road distance:
-     *  - vague fixes (accuracy worse than 150 m — tower / Wi-Fi guesses) are skipped
+     * Stays: consecutive points within STAY_RADIUS of the stay's (running) centre for at least
+     * $minMinutes. Each: [first index, last index, from, to, minutes, lat, lng, points].
+     */
+    private static function stays(array $pts, int $minMinutes): array
+    {
+        $out = []; $n = count($pts); $i = 0;
+        while ($i < $n) {
+            $lat = (float) $pts[$i]['lat']; $lng = (float) $pts[$i]['lng']; $k = 1; $j = $i;
+            while ($j + 1 < $n && self::meters($lat, $lng, (float) $pts[$j + 1]['lat'], (float) $pts[$j + 1]['lng']) <= self::STAY_RADIUS) {
+                $j++; $k++;
+                $lat += ((float) $pts[$j]['lat'] - $lat) / $k; $lng += ((float) $pts[$j]['lng'] - $lng) / $k;   // running centre
+            }
+            // points still arriving / already leaving (well away from the centre) are travel, not the stay
+            $a = $i; $z = $j;
+            $far = fn($q) => self::meters($lat, $lng, (float) $pts[$q]['lat'], (float) $pts[$q]['lng']) > max(60, (float) ($pts[$q]['accuracy'] ?? 0));
+            while ($a < $z && $far($a)) $a++;
+            while ($z > $a && $far($z)) $z--;
+            $mins = (strtotime($pts[$z]['capturedAt']) - strtotime($pts[$a]['capturedAt'])) / 60;
+            if ($z > $a && $mins >= $minMinutes) {
+                $cl = 0; $cg = 0; for ($q = $a; $q <= $z; $q++) { $cl += (float) $pts[$q]['lat']; $cg += (float) $pts[$q]['lng']; }
+                $c = $z - $a + 1;
+                $out[] = ['i' => $a, 'j' => $z, 'from' => $pts[$a]['capturedAt'], 'to' => $pts[$z]['capturedAt'], 'minutes' => (int) round($mins),
+                          'lat' => round($cl / $c, 6), 'lng' => round($cg / $c, 6), 'points' => $c];
+                $i = $z + 1;
+            } else $i++;
+        }
+        return $out;
+    }
+
+    /**
+     * Total path length in km, close to the real road distance:
+     *  - vague fixes (accuracy worse than 150 m) are skipped
+     *  - a stay of 10+ minutes in one place counts as one point (its centre) — standing still adds nothing;
+     *    the route into and out of the stay still counts, so tracking simply carries on once they move
      *  - GPS jitter is ignored: a point counts once it is more than max(25 m, its accuracy) from the last one
      *  - impossible jumps (faster than 150 km/h between two points) are dropped as glitches
      */
     public static function distanceKm(array $pts): float
     {
+        $pts = self::usable($pts);
+        $path = []; $k = 0;
+        foreach (self::stays($pts, self::STAY_MINUTES) as $st) {
+            for (; $k < $st['i']; $k++) $path[] = $pts[$k];
+            $path[] = ['lat' => $st['lat'], 'lng' => $st['lng'], 'accuracy' => 0, 'capturedAt' => $st['from'], 'until' => $st['to']];
+            $k = $st['j'] + 1;
+        }
+        for ($n = count($pts); $k < $n; $k++) $path[] = $pts[$k];
         $m = 0; $prev = null;
-        foreach ($pts as $p) {
-            if ($p['lat'] === null || $p['lng'] === null) continue;
+        foreach ($path as $p) {
             $acc = isset($p['accuracy']) && $p['accuracy'] !== null ? (float) $p['accuracy'] : 0;
-            if ($acc > 150) continue;
             if ($prev) {
                 $d = self::meters((float) $prev['lat'], (float) $prev['lng'], (float) $p['lat'], (float) $p['lng']);
                 if ($d < max(25, $acc)) continue; // jitter — keep the previous anchor
-                $secs = isset($p['capturedAt'], $prev['capturedAt']) ? max(1, strtotime($p['capturedAt']) - strtotime($prev['capturedAt'])) : null;
+                $t0 = $prev['until'] ?? $prev['capturedAt'] ?? null;
+                $secs = isset($p['capturedAt']) && $t0 ? max(1, strtotime($p['capturedAt']) - strtotime($t0)) : null;
                 if ($secs !== null && $d / $secs > 41.7) continue; // > 150 km/h: a glitch, not a drive
                 $m += $d;
             }
@@ -102,19 +154,13 @@ class LocationHistoryController
         return $m / 1000;
     }
 
-    /** Groups consecutive points within 150 m into stops lasting 10+ minutes. */
+    /** Stops of 20+ minutes in one place (pinned on the map), numbered in order. */
     private static function stops(array $pts): array
     {
-        $out = []; $i = 0; $n = count($pts);
-        while ($i < $n) {
-            $j = $i;
-            while ($j + 1 < $n && self::meters((float) $pts[$i]['lat'], (float) $pts[$i]['lng'], (float) $pts[$j + 1]['lat'], (float) $pts[$j + 1]['lng']) <= 150) $j++;
-            $mins = (strtotime($pts[$j]['capturedAt']) - strtotime($pts[$i]['capturedAt'])) / 60;
-            if ($mins >= 10) {
-                $out[] = ['from' => $pts[$i]['capturedAt'], 'to' => $pts[$j]['capturedAt'], 'minutes' => (int) round($mins),
-                          'lat' => (float) $pts[$i]['lat'], 'lng' => (float) $pts[$i]['lng']];
-            }
-            $i = $j + 1;
+        $out = [];
+        foreach (self::stays(self::usable($pts), self::STOP_MINUTES) as $n => $st) {
+            unset($st['i'], $st['j']);
+            $out[] = ['n' => $n + 1] + $st;
         }
         return $out;
     }
@@ -244,9 +290,10 @@ class LocationHistoryController
                 'checkInLat' => $att['checkInLat'] !== null ? (float) $att['checkInLat'] : null, 'checkInLng' => $att['checkInLng'] !== null ? (float) $att['checkInLng'] : null,
                 'checkOutLat' => $att['checkOutLat'] !== null ? (float) $att['checkOutLat'] : null, 'checkOutLng' => $att['checkOutLng'] !== null ? (float) $att['checkOutLng'] : null,
             ] : null,
-            'points' => $pts, 'breaks' => $breaks, 'events' => $events, 'stops' => self::stops($pts),
+            'points' => $pts, 'breaks' => $breaks, 'events' => $events, 'stops' => ($stops = self::stops($pts)),
             'stats' => [
                 'points' => count($pts), 'distanceKm' => round(self::distanceKm($pts), 2),
+                'stops' => count($stops), 'stoppedMinutes' => array_sum(array_column($stops, 'minutes')), 'stopMinutes' => self::STOP_MINUTES,
                 'firstPoint' => $pts ? $pts[0]['capturedAt'] : null, 'lastPoint' => $pts ? end($pts)['capturedAt'] : null,
                 'breakSeconds' => array_sum(array_column($breaks, 'seconds')),
             ],

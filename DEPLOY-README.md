@@ -1,3 +1,29 @@
+# Update — 4 Nov (d): copy PR numbers, stop pins + overall km, new UI right after login, order numbers (Android app 1.0.x)
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+- **Install the new Android app** (GitHub → Releases → `crm-apps`) on the engineers' phones.
+- **New file:** `crm/hard-nav.js`.
+- **Database:** an order number column is added automatically, and **existing orders get numbers** (oldest first, by the month they were created).
+
+1. **Copy the price request number**
+   - Every request on the Price requests page has a **⧉ Copy** button next to its number.
+   - On **CEO Desk → 💰 Price requests** (and Get price → Price request no.), **paste with Ctrl+V** — the items show at once, no button needed.
+2. **Location: stops pinned, overall km**
+   - Staying **20+ minutes** in one place is a **stop**: a numbered pin on the map, with the time they arrived and left and how long. The timeline shows "Stop 1 — 45 min…" and "Moving again".
+   - **Standing still adds no kilometres** (GPS drift while parked no longer counts). When they move on, the route counts again.
+   - The day shows **"Travelled (overall)"** and **"Stops (20+ min)"**; the kilometres table uses the same figures.
+   - **Android app:** when GPS is switched back on, the phone's GPS is used again straight away. Before, if GPS was off when tracking started, the phone only used rough network positions until the app was restarted.
+3. **The new UI opens straight after login (no refresh needed)**
+   - After login, and when moving between pages, every page now opens as a full page load, so the newest version always shows.
+   - The service worker no longer serves an old cached start page.
+   - Every page was opened as Super Admin and as a sales engineer with no script errors.
+4. **Order numbers like the price requests:** `ORD-2611-0005-JK` (month, number, engineer's initials).
+   - Shown in the **Orders list** (new first column, with ⧉ copy) and on the order pop-up.
+   - New **Search** box on the Orders page: order no., customer or PO no.
+   - The number is also used on the order PDF and in the reports, and **Accounts → link an order** finds orders by this number again. That search had been returning nothing because it used an old column that no longer exists.
+
+---
+
 # Update — 4 Nov (c): Quotations — heading fixed, number auto-generated, plain (empty) form
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No database change.

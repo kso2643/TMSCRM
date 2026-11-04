@@ -142,7 +142,9 @@ public class AlertService extends Service {
     private final LocationListener listener = new LocationListener() {
         @Override public void onLocationChanged(Location l) { onFix(l); }
         @Override public void onProviderDisabled(String provider) { if (LocationManager.GPS_PROVIDER.equals(provider)) locationOff(); }
-        @Override public void onProviderEnabled(String provider) { }
+        // GPS (or network location) switched back on → start using it again straight away; before,
+        // a provider that was off when tracking began was never asked again until the app restarted.
+        @Override public void onProviderEnabled(String provider) { if (trackingActive) requestProvider(provider); }
         @Override public void onStatusChanged(String provider, int status, Bundle extras) { }
     };
 
@@ -152,16 +154,26 @@ public class AlertService extends Service {
             || ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 
+    private void requestProvider(String provider) {
+        if (lm == null) return;
+        try {
+            long every = LocationManager.NETWORK_PROVIDER.equals(provider) ? 30_000L : 15_000L;
+            if (LocationManager.PASSIVE_PROVIDER.equals(provider) || lm.isProviderEnabled(provider))
+                lm.requestLocationUpdates(provider, every, 0f, listener, Looper.getMainLooper());   // re-requesting just replaces the old request
+        } catch (SecurityException | IllegalArgumentException ignored) { }
+    }
+
     private void startTracking() {
         if (trackingActive) return;
         lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         if (lm == null) return;
         try {
-            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 15_000L, 0f, listener, Looper.getMainLooper());
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 30_000L, 0f, listener, Looper.getMainLooper());
+            // passive first: it also keeps the listener registered so onProviderEnabled fires when GPS comes back
             lm.requestLocationUpdates(LocationManager.PASSIVE_PROVIDER, 15_000L, 0f, listener, Looper.getMainLooper());
             trackingActive = true;
-        } catch (SecurityException | IllegalArgumentException e) { trackingActive = false; }
+        } catch (SecurityException | IllegalArgumentException e) { trackingActive = false; return; }
+        requestProvider(LocationManager.GPS_PROVIDER);
+        requestProvider(LocationManager.NETWORK_PROVIDER);
     }
 
     private void stopTracking() {

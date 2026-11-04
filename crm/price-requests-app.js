@@ -105,6 +105,19 @@
     PARTIAL: ['Partly answered', '#2563eb'], DONE: ['Answered', '#0f766e']
   };
   function firmBadge(f) { return el('span', { class: 'pr-badge', 'data-firm-badge': f, style: '--c:' + (f === 'APJ' ? '#0f766e' : '#1d4ed8') + ';margin-right:.45rem', text: f }); }
+  // ⧉ copy the request number — paste it on CEO Desk → Price requests / Get price, or a quotation
+  function copyNo(no) {
+    var c = el('span', { class: 'pr-copy', role: 'button', tabindex: '0', title: 'Copy ' + no + ' — paste it on the CEO Desk or a quotation', 'aria-label': 'Copy ' + no, 'data-copy-no': no, text: '⧉ Copy' });
+    function go(e) {
+      e.preventDefault(); e.stopPropagation();
+      var done = function () { c.textContent = '✓ Copied'; c.classList.add('ok'); toast('Copied ' + no + ' — paste it on the CEO Desk (Ctrl+V)'); setTimeout(function () { c.textContent = '⧉ Copy'; c.classList.remove('ok'); }, 1800); };
+      var fallback = function () { var t = el('textarea', { style: 'position:fixed;opacity:0' }); t.value = no; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); done(); } catch (x) { prompt('Copy this number:', no); } t.remove(); };
+      try { if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(no).then(done, fallback); else fallback(); } catch (x) { fallback(); }
+    }
+    c.addEventListener('click', go);
+    c.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') go(e); });
+    return c;
+  }
   function badge(s) { var x = STATUS[s] || [s, '#64748b']; return el('span', { class: 'pr-badge', style: '--c:' + x[1], text: x[0] }); }
 
   /* ── styles ──────────────────────────────────────────────────────── */
@@ -202,6 +215,10 @@
       '.pr-scroll{overflow-x:auto}',
       '.pr-ans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem;min-width:220px}',
       '.pr-ans .full{grid-column:1/-1}',
+      '.pr-no{user-select:text;-webkit-user-select:text;cursor:text}',
+      '.pr-copy{display:inline-flex;align-items:center;margin-left:.45rem;padding:.12rem .5rem;border:1px solid #cbd5e1;border-radius:999px;font-size:.72rem;font-weight:600;color:#1e3a8a;background:#eff6ff;cursor:pointer;vertical-align:2px;white-space:nowrap}',
+      '.pr-copy:hover{background:#dbeafe}.pr-copy.ok{background:#dcfce7;border-color:#86efac;color:#166534}',
+      '.dark .pr-copy{background:#1e293b;border-color:#334155;color:#93c5fd}',
       '.pr-prop{grid-column:1/-1;background:#fffbeb;border:1px solid #fde68a;border-radius:.45rem;padding:.4rem .5rem;font-size:.76rem;color:#78350f;line-height:1.35}',
       '.dark .pr-prop{background:#422006;border-color:#854d0e;color:#fde68a}',
       '.pr-ans .lbl{grid-column:1/-1;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-top:.15rem}',
@@ -604,7 +621,8 @@
       if (open && !inner.firstChild) fillBody();
     } }, [
       el('div', {}, [
-        el('div', { class: 't' }, [b.firm ? firmBadge(b.firm) : null, (b.requestNo || 'Request') + ' · ' + (b.customer ? b.customer.companyName : 'No company')]),
+        el('div', { class: 't' }, [b.firm ? firmBadge(b.firm) : null, el('span', { class: 'pr-no', 'data-pr-no': b.requestNo || '' , text: b.requestNo || 'Request' }),
+          b.requestNo ? copyNo(b.requestNo) : null, ' · ' + (b.customer ? b.customer.companyName : 'No company')]),
         el('div', { class: 's', text: b.items.length + ' item' + (b.items.length === 1 ? '' : 's') + (isAdminTier ? ' · by ' + (b.requestedBy.name || '—') : '') + ' · ' + when(b.createdAt) + (b.value ? ' · target ' + money(b.value) : '') })
       ]),
       el('div', { style: 'display:flex;align-items:center;gap:.6rem' }, [

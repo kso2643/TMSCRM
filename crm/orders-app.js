@@ -82,6 +82,10 @@
     var st = document.createElement('style');
     st.id = 'orders-extra-css';
     st.textContent = [
+      '.ox-no{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8rem;font-weight:600;color:#1e3a8a;user-select:all}',
+      '.dark .ox-no{color:#93c5fd}',
+      '.ox-copy{margin-left:.3rem;border:1px solid #cbd5e1;background:#eff6ff;color:#1e3a8a;border-radius:6px;padding:0 .35rem;font-size:.75rem;line-height:1.4rem;cursor:pointer}',
+      '.ox-copy:hover{background:#dbeafe}.dark .ox-copy{background:#1e293b;border-color:#334155;color:#93c5fd}',
       '.ox-nowrap{white-space:nowrap}',
       /* locked header row + customer column: the list scrolls under them both ways */
       '.ox-scroll{max-height:calc(100vh - 230px);overflow:auto}',
@@ -220,7 +224,7 @@
   function mount(root) {
     injectCss();
     var all = [];
-    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '', brandF = '', firmF = '';
+    var from = '', to = '', engineerId = '', deliveryStatus = '', orderType = '', procurementStatus = '', proformaStatus = '', brandF = '', firmF = '', searchQ = '';
     var engineers = [];
     var expanded = {};    // orderId -> true while its row is open
     var presets = {};     // orderId -> delivery status picked from the dropdown that needs the materials panel
@@ -273,6 +277,7 @@
       if (proformaStatus) q.push('proformaStatus=' + proformaStatus);
       if (brandF) q.push('brand=' + encodeURIComponent(brandF));
       if (firmF) q.push('firm=' + firmF);
+      if (searchQ) q.push('search=' + encodeURIComponent(searchQ));
       q.push('limit=100');
       return q.join('&');
     }
@@ -347,7 +352,10 @@
       toI.value = to;
       toI.addEventListener('change', function () { to = toI.value; load(); });
 
-      [labelled('From', fromI), labelled('To', toI),
+      var srch = el('input', { type: 'search', class: INPUT, id: 'ox-search', placeholder: 'ORD-2611-0005, customer, PO no.', value: searchQ });
+      var st;
+      srch.addEventListener('input', function () { clearTimeout(st); st = setTimeout(function () { searchQ = srch.value.trim(); load(); }, 300); });
+      [labelled('Search', srch), labelled('From', fromI), labelled('To', toI),
        labelled('Sales engineer', sel('All engineers', engineers.map(function (e2) { return [e2.id, e2.name]; }), engineerId, function (v) { engineerId = v; })),
        labelled('Delivery', sel('All delivery statuses', DELIVERY_STATUSES, deliveryStatus, function (v) { deliveryStatus = v; })),
        labelled('Price / proforma', sel('All', PROFORMA_STATUSES, proformaStatus, function (v) { proformaStatus = v; })),
@@ -357,12 +365,23 @@
        labelled('Brand', sel('All brands', BRANDS.map(function (b) { return [b, b]; }), brandF, function (v) { brandF = v; })),
        el('div', { class: 'flex items-end' }, [el('button', {
          class: 'btn-secondary w-full', text: 'Clear filters',
-         onclick: function () { from = to = engineerId = deliveryStatus = orderType = procurementStatus = proformaStatus = brandF = firmF = ''; renderFilters(); load(); }
+         onclick: function () { from = to = engineerId = deliveryStatus = orderType = procurementStatus = proformaStatus = brandF = firmF = searchQ = ''; renderFilters(); load(); }
        })])
       ].forEach(function (n) { filters.appendChild(n); });
     }
 
     function stop(e) { e.stopPropagation(); }
+    // ⧉ copy the order number
+    function copyNoBtn(no) {
+      var b = el('button', { type: 'button', class: 'ox-copy', title: 'Copy ' + no, 'aria-label': 'Copy ' + no, 'data-copy-no': no, text: '⧉' });
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var done = function () { b.textContent = '✓'; setTimeout(function () { b.textContent = '⧉'; }, 1500); };
+        var fb = function () { var t = document.createElement('textarea'); t.value = no; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); done(); } catch (x) { prompt('Copy this number:', no); } t.remove(); };
+        try { if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(no).then(done, fb); else fb(); } catch (x) { fb(); }
+      });
+      return b;
+    }
 
     function proformaCell(o) {
       if (!canEditOrder(o)) {
@@ -422,7 +441,7 @@
     }
 
     function renderTable() {
-      var heads = ['', 'Customer', 'TMS / APJ', 'Sales engineer', 'Type', 'Brand', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Invoice', 'Materials', 'PDF'];
+      var heads = ['', 'Order no.', 'Customer', 'TMS / APJ', 'Sales engineer', 'Type', 'Brand', 'Order date', 'Expected date', 'Price / proforma', 'Procurement', 'Delivery', 'Invoice', 'Materials', 'PDF'];
       var tbody = el('tbody');
       if (!all.length) {
         tbody.appendChild(el('tr', {}, [el('td', {
@@ -435,6 +454,7 @@
           var supplied = o.itemCount ? (o.suppliedCount || 0) + ' / ' + o.itemCount + ' supplied' : '—';
           var tr = el('tr', { class: 'table-row cursor-pointer' + (open ? ' ox-open' : ''), 'aria-expanded': open ? 'true' : 'false' }, [
             el('td', { class: 'ox-pl py-3' }, [el('span', { class: 'ox-caret', text: '▸' })]),
+            el('td', { class: 'px-3 py-3 ox-nowrap', 'data-order-no': o.orderNo || '' }, o.orderNo ? [el('span', { class: 'ox-no', text: o.orderNo }), copyNoBtn(o.orderNo)] : [el('span', { class: 'text-muted', text: '—' })]),
             el('td', { class: 'px-3 py-3 font-medium ox-nowrap', text: (o.customer && o.customer.companyName) || '—' }),
             el('td', { class: 'px-3 py-3', 'data-order-firm-cell': o.id }, [o.firm ? el('span', { class: 'badge ' + (o.firm === 'APJ' ? 'badge-green' : 'badge-blue'), text: o.firm }) : el('span', { class: 'text-muted', text: '—' })]),
             el('td', { class: 'px-3 py-3 ox-nowrap' }, [el('span', { class: 'ox-eng', title: 'Show materials', text: (o.engineer && o.engineer.name) || '—' })]),
@@ -502,6 +522,7 @@
         card.appendChild(el('div', { class: 'flex items-start justify-between gap-3 mb-4 flex-wrap' }, [
           el('div', {}, [
             el('h2', { class: 'section-title mb-0', text: (order.customer && order.customer.companyName) || 'Order' }),
+            order.orderNo ? el('div', { class: 'flex items-center gap-1 mt-0.5', 'data-view-order-no': order.orderNo }, [el('span', { class: 'ox-no', style: 'font-size:.9rem', text: order.orderNo }), copyNoBtn(order.orderNo)]) : null,
             el('p', { class: 'text-xs text-muted mt-0.5', text: fmtDate(order.orderDate) + ' · ' + ((order.engineer && order.engineer.name) || '') + (order.poNumber ? ' · PO ' + order.poNumber : '') }),
             el('div', { class: 'flex items-center gap-2 flex-wrap mt-2' }, [
               order.firm ? el('span', { class: 'badge ' + (order.firm === 'APJ' ? 'badge-green' : 'badge-blue'), 'data-view-firm': order.firm, text: order.firm }) : el('span', { class: 'badge badge-red', text: 'TMS / APJ not set' }),

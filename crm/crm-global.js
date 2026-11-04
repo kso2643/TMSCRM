@@ -28,6 +28,12 @@
   if (window.__crmGlobal) return;
   window.__crmGlobal = true;
 
+  // ── 0. React page changes are always real page loads — see hard-nav.js (loaded first on the
+  //       React pages; added here too in case a page doesn't have it yet).
+  if (window.__next_f && !window.__crmHardNav) {
+    var hn = document.createElement('script'); hn.src = '/hard-nav.js'; document.head.appendChild(hn);
+  }
+
   var API = 'https://api.apjtech.in';
   var POLL_MS = 30000;
   var path = location.pathname;

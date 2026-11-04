@@ -4,7 +4,7 @@
    Super Admin / Admin / Manager pick a person and a date (a strip shows
    which days that month have tracking data) and see:
      - the route travelled (every location point), punch in / punch out
-     - stops of 10+ minutes in one place, tea / lunch breaks, stationary and
+     - stops of 20+ minutes in one place (numbered pins; standing still adds no km), tea / lunch breaks, stationary and
        location-off alerts
      - distance, points, hours, break time, and a slider to replay the day.
    Data: GET /api/route-log/users | days | history (LocationHistoryController).
@@ -72,7 +72,10 @@
       '.lh-ev .i{width:1.5rem;text-align:center;flex-shrink:0}',
       '.lh-play{display:flex;gap:.6rem;align-items:center;margin-top:.6rem}.lh-play input{flex:1}',
       '.lh-empty{display:flex;align-items:center;justify-content:center;height:560px;border:1px dashed #cbd5e1;border-radius:.75rem;color:#64748b;text-align:center;padding:1rem}',
-      '.lh-pin{width:16px;height:16px;border-radius:9999px;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}',
+      '.lh-stop{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#d97706;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;color:#fff;font:700 12px/1 system-ui,sans-serif}',
+      '.lh-stop span{transform:rotate(45deg)}',
+      '.lh-ev-stop{font-weight:600;color:#92400e}.dark .lh-ev-stop{color:#fcd34d}',
+            '.lh-pin{width:16px;height:16px;border-radius:9999px;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}',
       '.lh-emoji{font-size:20px;line-height:20px;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}'
     ].join('\n');
     document.head.appendChild(st);
@@ -243,7 +246,8 @@
           stat('Punch in', a ? tm(a.checkIn) : 'No punch-in'),
           stat('Punch out', a ? (a.checkOut ? tm(a.checkOut) : (a.checkIn ? 'Still working' : '—')) : '—'),
           stat('Time on duty', a && a.checkIn ? dur(hrs) : '—'),
-          stat('Distance', st.distanceKm + ' km'),
+          stat('Travelled (overall)', st.distanceKm + ' km'),
+          stat('Stops (' + (st.stopMinutes || 20) + '+ min)', st.stops ? st.stops + ' · ' + dur((st.stoppedMinutes || 0) * 60) : 'None'),
           stat('Location points', String(st.points)),
           stat('Break time', st.breakSeconds ? dur(st.breakSeconds) : 'None')
         ]),
@@ -253,7 +257,10 @@
       // timeline
       var evs = [];
       if (a && a.checkIn) evs.push({ at: a.checkIn, i: '🟢', text: 'Punched in', lat: a.checkInLat, lng: a.checkInLng });
-      (d.stops || []).forEach(function (s) { evs.push({ at: s.from, i: '⏸', text: 'Stopped ' + s.minutes + ' min (until ' + tm(s.to) + ')', lat: s.lat, lng: s.lng }); });
+      (d.stops || []).forEach(function (s) {
+        evs.push({ at: s.from, i: '📍', text: 'Stop ' + s.n + ' — ' + dur(s.minutes * 60) + ' in one place (' + tm(s.from) + ' – ' + tm(s.to) + ')', lat: s.lat, lng: s.lng, stop: s.n });
+        evs.push({ at: s.to, i: '▶', text: 'Moving again — tracking carries on', lat: s.lat, lng: s.lng });
+      });
       (d.breaks || []).forEach(function (b) { evs.push({ at: b.startedAt, i: b.type === 'LUNCH' ? '🍽' : '☕', text: (b.type === 'LUNCH' ? 'Lunch' : 'Tea') + ' break · ' + (b.endedAt ? dur(b.seconds) + ' (to ' + tm(b.endedAt) + ')' : 'not ended') + (b.trigger === 'AUTO' ? ' · after 30-min prompt' : ''), lat: b.lat, lng: b.lng }); });
       (d.events || []).forEach(function (e) {
         evs.push({ at: e.detectedAt, i: e.type === 'LOCATION_OFF' ? '📵' : '⚠', lat: e.lat, lng: e.lng,
@@ -264,7 +271,7 @@
       var tl = el('div', { class: 'lh-tl' });
       if (!evs.length) tl.appendChild(el('p', { class: 'text-sm text-muted', text: 'Nothing recorded on this day.' }));
       evs.forEach(function (e) {
-        tl.appendChild(el('div', { class: 'lh-ev', onclick: function () { if (map && e.lat != null) map.setView([e.lat, e.lng], 16); } }, [
+        tl.appendChild(el('div', { class: 'lh-ev' + (e.stop ? ' lh-ev-stop' : ''), onclick: function () { if (map && e.lat != null) map.setView([e.lat, e.lng], 16); } }, [
           el('span', { class: 't', text: tm(e.at) }), el('span', { class: 'i', text: e.i }), el('span', { text: e.text })
         ]));
       });
@@ -299,9 +306,13 @@
       }
       if (a && a.checkInLat != null) { L.marker([a.checkInLat, a.checkInLng], { icon: pin('#16a34a') }).bindPopup('Punched in ' + tm(a.checkIn)).addTo(layers); bounds.push([a.checkInLat, a.checkInLng]); }
       if (a && a.checkOutLat != null) { L.marker([a.checkOutLat, a.checkOutLng], { icon: pin('#dc2626') }).bindPopup('Punched out ' + tm(a.checkOut)).addTo(layers); bounds.push([a.checkOutLat, a.checkOutLng]); }
+      // stops of 20+ minutes: a numbered pin where they stayed
       (d.stops || []).forEach(function (s) {
-        L.circle([s.lat, s.lng], { radius: 60, color: '#d97706', fillColor: '#fbbf24', fillOpacity: .35, weight: 2 })
-          .bindPopup('Stopped ' + s.minutes + ' min<br>' + tm(s.from) + ' – ' + tm(s.to)).addTo(layers);
+        var txt = '<b>Stop ' + s.n + '</b> · ' + dur(s.minutes * 60) + '<br>' + tm(s.from) + ' – ' + tm(s.to);
+        L.circle([s.lat, s.lng], { radius: 60, color: '#d97706', fillColor: '#fbbf24', fillOpacity: .25, weight: 1.5 }).addTo(layers);
+        L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="lh-stop" data-stop-pin="' + s.n + '"><span>' + s.n + '</span></div>', iconSize: [26, 26], iconAnchor: [13, 26] }), zIndexOffset: 500 })
+          .bindPopup(txt).bindTooltip('Stop ' + s.n + ' · ' + dur(s.minutes * 60)).addTo(layers);
+        bounds.push([s.lat, s.lng]);
       });
       (d.breaks || []).forEach(function (b) {
         if (b.lat == null) return;
