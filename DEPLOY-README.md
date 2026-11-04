@@ -1,3 +1,30 @@
+# Update — 4/5 Nov (g): APJ suggestions readable, delete customer, editable theme, new login page, Engineer notes
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
+- **New files:** `crm/crm-theme.js`, `crm/login-style.js`, `crm/engineer-notes/index.html`, `crm/engineer-notes-app.js`, `crm/engineer-notes-content.js`, `api/controllers/LearnController.php`, and a new sidebar file `layout-f69612492f681b35.js` in `crm/_next/static/chunks/app/(dashboard)/` (the old one is kept).
+- **Database:** the new tables (LearnRead, QuizAttempt, MarketPrice, TechNews, LearnPlan) are created automatically.
+
+1. **APJ quotation: customer suggestions** now show the name in white on the dark APJ list, and the TMS list is darker too.
+2. **Customer page: 🗑 Delete customer** (next to "Back to list")
+   - Shown to Super Admin, Admin and Manager, and to the person who added the customer.
+   - It asks first. The customer is hidden, not wiped, so old visits, quotations and orders stay. It is written in the activity log.
+3. **Theme you can edit:** Admin → Notifications & branding → **🎨 Theme**
+   - Choose a colour preset or your own main and accent colours, the sidebar (light / brand colour / dark), the page background, the font, the text size, the corner style and the default light or dark mode. It previews live.
+   - **Use for me** changes it only for you. **Follow the company theme** goes back.
+   - **Save as company theme** (Super Admin / Admin) changes it for everyone.
+4. **New login page:** a colour panel with tool artwork and what the CRM does, a greeting and a cleaner sign-in card. The sample "Demo credentials" box is gone. It follows the theme colours and works on phones.
+5. **Engineer notes** (menu → Reports → Engineer notes; everyone)
+   - **📚 Learn:** 10 topics with drawings and tables. The topics are: what cutting tools are; materials (ISO P M K N S H); insert codes step by step; insert grades (which grade for which material); milling cutters; end mills; probes; how to take technical data; reading the customer's existing data (where to find it on the machine, the program and the old insert, with wear pictures); conversions (with calculators for rpm, feed, metal removal and inch/mm).
+   - Each topic has **✓ Mark as read** and **Quiz on this topic**.
+   - **📝 Daily quiz:** the engineer picks "I read from topic X to topic Y" (or ticks topics) and the number of questions. They get mixed multiple-choice questions with the right answer explained, plus number questions made fresh each time. Scores, streak and history are saved.
+   - **📈 News & prices:** a price board (carbide India and US, APT, cobalt, nickel, aluminium, copper, steel, USD/INR) with the trend and the date of each price, plus today's technical news.
+   - **👥 Team** (Admin / Manager): each engineer's topics read, quizzes taken and average score.
+   - **The midnight update:**
+     - The news and the USD/INR rate update on the first visit after 12:00 midnight.
+     - To update at exactly 12:00 even when nobody opens the page, add the **⏰ Midnight update link** (button on the News tab, Admin only) to the hosting panel's Cron Jobs at `0 0 * * *`.
+     - **Carbide, tungsten and metal prices have no free public source.** An Admin types them in on the News tab (✏ Update prices). The board shows the date of every price, so an old price is easy to spot.
+     - The news sources can be changed on the same tab.
+
 # Update — 4 Nov (f): chat files & voice notes, TMS/APJ in the numbers, day summary + engineer performance, joint visits
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.

@@ -84,6 +84,7 @@ require __DIR__ . '/controllers/TaskController.php';
 require __DIR__ . '/controllers/PriceRequestController.php';
 require __DIR__ . '/controllers/TrialController.php';
 require __DIR__ . '/controllers/AlertFeedController.php';
+require __DIR__ . '/controllers/LearnController.php';
 require __DIR__ . '/controllers/ChatController.php';
 require __DIR__ . '/controllers/VendorController.php';
 require __DIR__ . '/controllers/RegularItemController.php';
@@ -638,6 +639,8 @@ try {
             $method === 'PUT'    && $c1 === 'notifications' => $ctrl->saveNotifications(),
             $method === 'PUT'    && $c1 === 'my-notifications' => $ctrl->saveMine(),
             $method === 'PUT'    && $c1 === 'branding'      => $ctrl->saveBranding(),
+            $method === 'PUT'    && $c1 === 'theme'         => $ctrl->saveTheme(),
+            $method === 'PUT'    && $c1 === 'my-theme'      => $ctrl->saveMyTheme(),
             $method === 'POST'   && $c1 === 'logo'          => $ctrl->uploadLogo(),
             $method === 'DELETE' && $c1 === 'logo'          => $ctrl->deleteLogo(),
             default => sendError('Route not found', 404),
@@ -785,6 +788,23 @@ try {
             $method === 'GET'                         => $ctrl->inward($c1),
             $method === 'DELETE'                      => $ctrl->deleteInward($c1),
             default => sendError('Route not found', 404),
+        };
+    }
+    elseif ($c0 === 'learn') {
+        $ctrl = new LearnController();
+        match (true) {
+            $method === 'GET'  && $c1 === 'me'       => $ctrl->me(),
+            $method === 'POST' && $c1 === 'read'     => $ctrl->read(),
+            $method === 'POST' && $c1 === 'plan'     => $ctrl->plan(),
+            $method === 'POST' && $c1 === 'quiz'     => $ctrl->quiz(),
+            $method === 'GET'  && $c1 === 'team'     => $ctrl->team(),
+            $method === 'GET'  && $c1 === 'market'   => $ctrl->market(),
+            $method === 'PUT'  && $c1 === 'prices'   => $ctrl->savePrices(),
+            $method === 'PUT'  && $c1 === 'feeds'    => $ctrl->saveFeeds(),
+            $method === 'POST' && $c1 === 'refresh-due' => $ctrl->refreshDue(),
+            $method === 'GET'  && $c1 === 'cron'     => $ctrl->cron(),
+            $method === 'GET'  && $c1 === 'cron-key' => $ctrl->cronKey(),
+            default => sendError("Route /api/learn/$c1 not found", 404),
         };
     }
     elseif ($c0 === 'engineer-report') {

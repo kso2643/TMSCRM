@@ -67,11 +67,14 @@
     var notifyBox = admin ? el('div', { class: 'card overflow-hidden mb-5', id: 'ns-notify' }) : null;
     var mineBox = el('div', { class: 'card overflow-hidden mb-5', id: 'ns-mine' });
     var phoneBox = nativeApp() ? el('div', { class: 'card p-5 mb-5', id: 'ns-phone' }) : null;
-    [phoneBox, brandBox, notifyBox, mineBox].forEach(function (b) { if (b) root.appendChild(b); });
+    var themeBox = el('div', { class: 'card p-5 mb-5', id: 'ns-theme' });
+    [phoneBox, brandBox, themeBox, notifyBox, mineBox].forEach(function (b) { if (b) root.appendChild(b); });
     if (phoneBox) drawPhone(phoneBox);
     mineBox.appendChild(el('p', { class: 'px-5 py-4 text-sm text-muted', text: 'Loading…' }));
     api('GET', '/app-settings').then(function (j) {
       st.n = j.data.notifications || {}; st.b = j.data.branding || {}; st.mine = j.data.mine || {};
+      st.theme = j.data.theme || {}; st.myTheme = j.data.myTheme || {};
+      drawTheme(themeBox, admin);
       if (admin) { drawBrand(brandBox); drawNotify(notifyBox); }
       drawMine(mineBox);
     }).catch(function (e) { mineBox.innerHTML = ''; mineBox.appendChild(el('p', { class: 'px-5 py-4 text-sm text-red-600', text: e.message })); });
@@ -204,6 +207,68 @@
     var m2 = el('span', { 'data-ns-msg': '1', class: 'text-sm' });
     box.appendChild(el('div', { class: 'mt-3 flex gap-3' }, [msg, m2]));
     box.appendChild(el('p', { class: 'text-xs text-muted mt-3', text: 'Android app: the name and icon under the app on the phone’s home screen are set when the app is built — send the logo and name to have the app rebuilt with them. Everything inside the app (sidebar, login, notifications) follows this setting straight away.' }));
+  }
+
+  // ── 🎨 Theme (v11.46): company theme (Admins) and my own ──────────────
+  function drawTheme(box, admin) {
+    var T = window.CRMTheme;
+    box.innerHTML = '';
+    if (!T) { box.appendChild(el('p', { class: 'text-sm text-muted', text: 'Loading the theme editor… refresh the page if this stays.' })); setTimeout(function () { if (window.CRMTheme) drawTheme(box, admin); }, 1500); return; }
+    var hasMine = Object.keys(st.myTheme || {}).length > 0;
+    var cur = JSON.parse(JSON.stringify(hasMine ? st.myTheme : (st.theme || {})));
+    var msg = el('span', { class: 'text-sm', 'data-th-msg': '1' });
+    function changed() { T.preview(cur); drawControls(); }
+    var controls = el('div', { id: 'ns-theme-controls' });
+    function chip(label, on, click, attrs) { var b = el('button', Object.assign({ type: 'button', class: on ? 'btn-primary btn-sm' : 'btn-secondary btn-sm', text: label, onclick: click }, attrs || {})); return b; }
+    function row(label, kids) { return el('div', { class: 'mb-4' }, [el('p', { class: 'label mb-1', text: label }), el('div', { class: 'flex flex-wrap gap-2 items-center' }, kids)]); }
+    function drawControls() {
+      controls.innerHTML = '';
+      var pre = T.PRESETS[cur.preset] || T.PRESETS.navy;
+      controls.appendChild(row('Colour theme', Object.keys(T.PRESETS).map(function (k) {
+        var p = T.PRESETS[k], on = (cur.preset || 'navy') === k && !cur.primary;
+        return el('button', { type: 'button', 'data-th-preset': k, title: p.label, onclick: function () { cur.preset = k; delete cur.primary; delete cur.accent; changed(); },
+          style: 'display:flex;align-items:center;gap:6px;border:2px solid ' + (on ? p.primary : '#e2e8f0') + ';border-radius:10px;padding:5px 9px;background:#fff;cursor:pointer;font-size:.8rem;font-weight:600;color:#0f172a' },
+          [el('span', { style: 'width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,' + p.primary + ' 60%,' + p.accent + ' 60%)' }), p.label]);
+      })));
+      var pc = el('input', { type: 'color', id: 'ns-th-primary', value: cur.primary || pre.primary, style: 'width:44px;height:34px;border:0;background:none;cursor:pointer' });
+      var ac = el('input', { type: 'color', id: 'ns-th-accent', value: cur.accent || pre.accent, style: 'width:44px;height:34px;border:0;background:none;cursor:pointer' });
+      pc.addEventListener('input', function () { cur.primary = pc.value; T.preview(cur); });
+      pc.addEventListener('change', changed);
+      ac.addEventListener('input', function () { cur.accent = ac.value; T.preview(cur); });
+      controls.appendChild(row('Or your own colours', [el('label', { class: 'flex items-center gap-1 text-sm' }, [pc, 'Main colour']), el('label', { class: 'flex items-center gap-1 text-sm' }, [ac, 'Accent'])]));
+      controls.appendChild(row('Sidebar', [['light', 'Light'], ['brand', 'Main colour'], ['dark', 'Dark']].map(function (o) { return chip(o[1], (cur.sidebar || 'light') === o[0], function () { cur.sidebar = o[0] === 'light' ? undefined : o[0]; changed(); }, { 'data-th-sidebar': o[0] }); })));
+      controls.appendChild(row('Page background', [['soft', 'Soft grey'], ['white', 'White'], ['tint', 'Light tint of the main colour']].map(function (o) { return chip(o[1], (cur.background || 'soft') === o[0], function () { cur.background = o[0] === 'soft' ? undefined : o[0]; changed(); }, { 'data-th-bg': o[0] }); })));
+      var font = el('select', { class: 'input', id: 'ns-th-font', style: 'max-width:220px' }, T.FONTS.map(function (f) { return el('option', { value: f, text: f + (f === 'Inter' ? ' (default)' : '') }); }));
+      font.value = cur.font || 'Inter';
+      font.onchange = function () { cur.font = font.value === 'Inter' ? undefined : font.value; changed(); };
+      var size = el('select', { class: 'input', id: 'ns-th-size', style: 'max-width:160px' }, [[14, 'Small'], [15, 'Compact'], [16, 'Normal'], [17, 'Large'], [18, 'Extra large']].map(function (o) { return el('option', { value: String(o[0]), text: o[1] }); }));
+      size.value = String(cur.size || 16);
+      size.onchange = function () { cur.size = +size.value === 16 ? undefined : +size.value; changed(); };
+      controls.appendChild(row('Font and text size', [font, size]));
+      controls.appendChild(row('Corners', [['sharp', 'Sharp'], ['normal', 'Normal'], ['round', 'Round']].map(function (o) { return chip(o[1], (cur.radius || 'normal') === o[0], function () { cur.radius = o[0] === 'normal' ? undefined : o[0]; changed(); }, { 'data-th-radius': o[0] }); })));
+      controls.appendChild(row('Default mode', [['light', '☀ Light'], ['dark', '☾ Dark']].map(function (o) { return chip(o[1], (cur.mode || 'light') === o[0], function () { cur.mode = o[0]; changed(); try { localStorage.setItem('crm_theme', o[0]); } catch (e) {} document.documentElement.classList.toggle('dark', o[0] === 'dark'); }, { 'data-th-mode': o[0] }); })));
+    }
+    drawControls();
+    function clean() { var o = {}; Object.keys(cur).forEach(function (k) { if (cur[k] != null && cur[k] !== '') o[k] = cur[k]; }); return o; }
+    var btns = [
+      el('button', { class: 'btn-primary', type: 'button', id: 'ns-th-mine', text: 'Use for me', onclick: function () {
+        api('PUT', '/app-settings/my-theme', { theme: clean() }).then(function (j) { st.myTheme = j.data.myTheme || {}; T.setMine(st.myTheme); flash(msg, j.message || 'Saved'); }).catch(function (e) { flash(msg, e.message, true); });
+      } }),
+      hasMine ? el('button', { class: 'btn-secondary', type: 'button', id: 'ns-th-follow', text: 'Follow the company theme', onclick: function () {
+        api('PUT', '/app-settings/my-theme', { theme: null }).then(function (j) { st.myTheme = {}; T.setMine({}); drawTheme(box, admin); flash(box.querySelector('[data-th-msg]'), j.message); }).catch(function (e) { flash(msg, e.message, true); });
+      } }) : null,
+      admin ? el('button', { class: 'btn-secondary', type: 'button', id: 'ns-th-company', text: 'Save as company theme (everyone)', onclick: function () {
+        if (!confirm('Use this look for everyone who has not picked their own?')) return;
+        api('PUT', '/app-settings/theme', { theme: clean() }).then(function (j) { st.theme = j.data.theme || {}; T.setCompany(st.theme); flash(msg, j.message || 'Saved'); }).catch(function (e) { flash(msg, e.message, true); });
+      } }) : null,
+      el('button', { class: 'btn-secondary', type: 'button', id: 'ns-th-reset', text: 'Undo changes', onclick: function () { T.apply(); drawTheme(box, admin); } })
+    ];
+    box.appendChild(el('div', { class: 'flex items-start justify-between gap-3 flex-wrap mb-3' }, [
+      el('div', {}, [el('h2', { class: 'section-title mb-0', text: '🎨 Theme' }),
+        el('p', { class: 'text-sm text-muted mt-1', text: 'Change the colours, sidebar, background, font, text size and corners — the page changes as you pick, so you can see it before saving. ' +
+          (hasMine ? 'You are using your own theme.' : 'You are using the company theme.') + (admin ? ' “Save as company theme” sets it for everyone who has not picked their own.' : '') })])]));
+    box.appendChild(controls);
+    box.appendChild(el('div', { class: 'flex flex-wrap gap-2 items-center' }, btns.concat([msg])));
   }
 
   // ── notifications ─────────────────────────────────────────────────────

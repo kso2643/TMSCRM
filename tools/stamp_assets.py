@@ -19,6 +19,25 @@ for d, _, files in os.walk(root):
             open(p, 'w', encoding='utf-8').write(n); changed += 1
 print(f'stamped {changed} pages with v={stamp}')
 
+# Theme boot (v11.46): the saved theme CSS goes on the page before it draws (see crm-theme.js).
+BOOT = ('<script data-crm-theme-boot>try{var c=localStorage.getItem("crm_theme_css");if(c){var s=document.createElement("style");'
+        's.id="crm-theme-css";s.textContent=c;document.head.appendChild(s)}var f=localStorage.getItem("crm_theme_font");if(f){var l='
+        'document.createElement("link");l.id="crm-theme-font";l.rel="stylesheet";l.href="https://fonts.googleapis.com/css2?family="+'
+        'encodeURIComponent(f)+":wght@400;500;600;700&display=swap";document.head.appendChild(l)}}catch(e){}</script>')
+booted = 0
+for d, _, files in os.walk(root):
+    if '/_next' in d: continue
+    for f in files:
+        if not f.endswith('.html') or 'OLD' in f: continue
+        p = os.path.join(d, f)
+        s = open(p, encoding='utf-8').read()
+        if 'data-crm-theme-boot' in s or '<head>' not in s: continue
+        i = s.index('<head>') + len('<head>')
+        if s[i:i+8] == '<script>' and 'location.replace' in s[i:i+300]: i = s.index('</script>', i) + len('</script>')   # after the start page's instant redirect
+        s = s[:i] + BOOT + s[i:]
+        open(p, 'w', encoding='utf-8').write(s); booted += 1
+if booted: print(f'theme boot added to {booted} pages')
+
 # The service worker precaches /index.html (cache-first). Its revision must follow the file,
 # or browsers keep the old start page forever. Refresh it after stamping.
 import hashlib

@@ -62,12 +62,50 @@ class AppSettingsController
         return ['name' => $b['name'] ?? null, 'short' => $b['short'] ?? null, 'logo' => $f ? '/api/app-settings/logo?v=' . filemtime($f) : null];
     }
 
+    // ── Theme (v11.46): the company's look (Admins) and each person's own choice ──
+    private const FONTS = ['Inter', 'Poppins', 'Roboto', 'Nunito', 'Open Sans', 'Lato', 'Montserrat'];
+    private static function cleanTheme(array $t): array
+    {
+        $hex = fn($v) => preg_match('/^#[0-9a-fA-F]{6}$/', (string) $v) ? strtolower($v) : null;
+        $pick = fn($v, array $ok) => in_array($v, $ok, true) ? $v : null;
+        $out = array_filter([
+            'preset' => preg_match('/^[a-z0-9-]{1,20}$/', (string) ($t['preset'] ?? '')) ? $t['preset'] : null,
+            'primary' => $hex($t['primary'] ?? null), 'accent' => $hex($t['accent'] ?? null),
+            'sidebar' => $pick($t['sidebar'] ?? null, ['light', 'brand', 'dark']),
+            'background' => $pick($t['background'] ?? null, ['soft', 'white', 'tint']),
+            'font' => $pick($t['font'] ?? null, self::FONTS),
+            'size' => in_array((int) ($t['size'] ?? 0), [14, 15, 16, 17, 18], true) ? (int) $t['size'] : null,
+            'radius' => $pick($t['radius'] ?? null, ['sharp', 'normal', 'round']),
+            'mode' => $pick($t['mode'] ?? null, ['light', 'dark']),
+        ], fn($v) => $v !== null);
+        return $out;
+    }
+    // PUT /api/app-settings/theme   (company theme — Super Admin / Admin)
+    public function saveTheme(): void
+    {
+        $auth = self::admin();
+        $t = self::cleanTheme((array) (request_body()['theme'] ?? []));
+        self::put('theme', $t, $auth['id']);
+        log_activity($auth['id'], 'THEME_SAVED', 'AppSetting', 'theme', $t);
+        sendSuccess(['theme' => (object) $t], 'Company theme saved — everyone sees it on their next page');
+    }
+    // PUT /api/app-settings/my-theme  (anyone — {theme:{…}} or {theme:null} to follow the company theme)
+    public function saveMyTheme(): void
+    {
+        $auth = authenticate();
+        $raw = request_body()['theme'] ?? null;
+        $t = is_array($raw) ? self::cleanTheme($raw) : [];
+        self::put('th:' . $auth['id'], $t, $auth['id']);
+        sendSuccess(['myTheme' => (object) $t], $t ? 'Your theme is saved' : 'You now follow the company theme');
+    }
+
     // GET /api/app-settings
     public function index(): void
     {
         $auth = authenticate();
         sendSuccess(['notifications' => (object) self::get('notifications'), 'mine' => (object) self::get('nu:' . $auth['id']),
-            'branding' => self::branding(), 'sounds' => self::SOUNDS]);
+            'branding' => self::branding(), 'sounds' => self::SOUNDS,
+            'theme' => (object) self::get('theme'), 'myTheme' => (object) self::get('th:' . $auth['id']), 'fonts' => self::FONTS]);
     }
 
     // PUT /api/app-settings/my-notifications   (Page access "Notifications & sounds" decides who may save)
@@ -90,7 +128,7 @@ class AppSettingsController
     // GET /api/app-settings/public
     public function publicInfo(): void
     {
-        sendSuccess(['branding' => self::branding()]);
+        sendSuccess(['branding' => self::branding(), 'theme' => (object) self::get('theme')]);
     }
 
     // PUT /api/app-settings/notifications

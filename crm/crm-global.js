@@ -46,6 +46,15 @@
     sc.src = '/crm-brand.js' + (v ? '?v=' + v[1] : '');
     (document.head || document.documentElement).appendChild(sc);
   })();
+  // Theme (Admin → Notifications & branding → 🎨 Theme) — on every page, the login page too.
+  (function loadTheme() {
+    if (window.CRMTheme || /^\/trial-sheet(\/|$)/.test(path)) return;
+    var me = document.currentScript || document.querySelector('script[src*="crm-global.js"]');
+    var v = me && /[?&]v=([^&]+)/.exec(me.getAttribute('src') || '');
+    var sc = document.createElement('script');
+    sc.src = '/crm-theme.js' + (v ? '?v=' + v[1] : '');
+    (document.head || document.documentElement).appendChild(sc);
+  })();
   // ── Downloads inside the Android app ───────────────────────────────
   // The app can't save "blob:" files the normal way. Every way a page makes a file — a link with
   // "download", jsPDF / FileSaver saves (they click a link that is never put on the page), window.open
@@ -162,7 +171,7 @@
   // app and as the newer hand-coded page. A React link would open the old one
   // (and a refresh the new one), so on React pages any click on such a link is
   // turned into a normal page load.
-  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/users|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue|projects|tooled-up|machine-accessories|documents|sales-report|internal-meetings|mom|admin\/categories|admin\/notifications|engineer-performance)\/?$/;
+  var HARD_PAGES = /^\/(meetings|alerts|admin\/reports|admin\/users|admin\/location-history|orders|trials|tasks|appointments|fuel-expense|hr|payroll(\/[a-z-]+)?|quotations|cpr|price-requests|leaves|stock|chat|vendors|attendance|md-desk|accounts|catalogue|projects|tooled-up|machine-accessories|documents|sales-report|internal-meetings|mom|admin\/categories|admin\/notifications|engineer-performance|engineer-notes)\/?$/;
   function hardLinks() {
     if (!window.__next_f) return; // only the compiled React pages need this
     document.addEventListener('click', function (e) {

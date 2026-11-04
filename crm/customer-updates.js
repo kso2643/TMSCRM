@@ -134,7 +134,40 @@
     if (loadingFor !== id) load(id);
   }
 
-  var mo = new MutationObserver(function () { ensure(); });
-  function start() { ensure(); mo.observe(document.body, { childList: true, subtree: true }); }
+  // ── 3. 🗑 Delete customer (Super Admin / Admin / Manager, or whoever added the customer) ──
+  function me() { try { return JSON.parse(localStorage.getItem('crm_user') || 'null') || {}; } catch (e) { return {}; } }
+  var custInfo = null, custInfoFor = '';
+  function ensureDelete() {
+    if (!onPage() || document.getElementById('cu-del')) return;
+    var id = custId(); if (!id) return;
+    var back = Array.prototype.filter.call(document.querySelectorAll('a,button'), function (x) { return /^Back to list$/i.test((x.textContent || '').trim()); })[0];
+    if (!back) return;
+    var u = me(), admin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER'].indexOf(u.role) !== -1;
+    if (!admin) {   // others: only the person who added it
+      if (custInfoFor !== id) {
+        custInfoFor = id;
+        fetch(API + '/api/customers/' + encodeURIComponent(id), { headers: { Authorization: 'Bearer ' + token() } }).then(function (r) { return r.json(); })
+          .then(function (j) { custInfo = (j.data && (j.data.customer || j.data)) || {}; ensureDelete(); }).catch(function () {});
+        return;
+      }
+      if (!custInfo || (custInfo.createdById || (custInfo.createdBy && custInfo.createdBy.id)) !== u.id) return;
+    }
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'cu-del'; b.textContent = '🗑 Delete customer';
+    b.style.cssText = 'margin-left:12px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:8px;padding:4px 10px;font-size:.8rem;font-weight:600;cursor:pointer';
+    b.onclick = function () {
+      var name = (document.querySelector('h1') || {}).textContent || 'this customer';
+      if (!confirm('Delete ' + name.trim() + '?\n\nThe customer is removed from the lists. Their meetings, quotations and orders stay on record.')) return;
+      b.disabled = true; b.textContent = 'Deleting…';
+      fetch(API + '/api/customers/' + encodeURIComponent(id), { method: 'DELETE', headers: { Authorization: 'Bearer ' + token() } })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.success === false) throw new Error(j.message || 'Could not delete'); }); })
+        .then(function () { location.assign('/customers/'); })
+        .catch(function (e) { alert(e.message); b.disabled = false; b.textContent = '🗑 Delete customer'; });
+    };
+    back.parentNode.insertBefore(b, back.nextSibling);
+  }
+
+  var mo = new MutationObserver(function () { ensure(); ensureDelete(); });
+  function start() { ensure(); ensureDelete(); mo.observe(document.body, { childList: true, subtree: true }); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

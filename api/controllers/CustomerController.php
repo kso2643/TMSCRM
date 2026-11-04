@@ -181,6 +181,12 @@ class CustomerController
     public function delete(string $id): void
     {
         $auth = authenticate();
+        // Super Admin / Admin / Manager, or the person who added the customer (v11.46)
+        $c = db()->prepare('SELECT createdById, companyName FROM `Customer` WHERE id=? AND isActive=1'); $c->execute([$id]);
+        $row = $c->fetch();
+        if (!$row) sendError('Customer not found.', 404);
+        if (!is_admin_tier($auth['role']) && ($row['createdById'] ?? null) !== $auth['id']) sendError('Only an admin or the person who added this customer can delete it.', 403);
+        log_activity($auth['id'], 'CUSTOMER_DELETED', 'Customer', $id, ['customer' => $row['companyName']]);
         $s = db()->prepare('UPDATE `Customer` SET isActive=0,updatedAt=? WHERE id=?');
         if (!$s->execute([now_sql(), $id]) || $s->rowCount() === 0) sendError('Customer not found.', 404);
         sendSuccess([], 'Customer deleted');
