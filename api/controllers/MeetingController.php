@@ -18,7 +18,9 @@ class MeetingController
     public function __construct()
     {
         // who does the next follow-up — one or more engineers (JSON list of user ids)
-        ensure_schema(['Meeting' => ['create' => '', 'columns' => ['followUpAssignees' => 'TEXT NULL']]], 'Meeting follow-up assignees');
+        ensure_schema(['Meeting' => ['create' => '', 'columns' => ['followUpAssignees' => 'TEXT NULL',
+            // joint visit (v11.45): went together with colleagues (user ids) and / or others (e.g. a supplier's rep)
+            'jointVisit' => 'TINYINT(1) NOT NULL DEFAULT 0', 'jointWith' => 'TEXT NULL', 'jointOthers' => 'VARCHAR(255) NULL']]], 'Meeting follow-up assignees');
     }
 
     /** Cleans a list of user ids (active users only). */
@@ -30,6 +32,23 @@ class MeetingController
         $s = db()->prepare("SELECT id FROM `User` WHERE isActive=1 AND id IN ($in)"); $s->execute($ids);
         $ok = array_flip($s->fetchAll(PDO::FETCH_COLUMN));
         return array_values(array_filter($ids, fn($i) => isset($ok[$i])));
+    }
+
+    /** Joint visit fields from a request body (only the keys that were sent). */
+    private static function jointFields(array $b, string $me): array
+    {
+        $out = [];
+        if (array_key_exists('jointVisit', $b)) $out['jointVisit'] = !empty($b['jointVisit']) ? 1 : 0;
+        if (array_key_exists('jointWith', $b)) { $ids = array_values(array_diff(self::cleanAssignees($b['jointWith'] ?? []), [$me])); $out['jointWith'] = $ids ? json_encode($ids) : null; }
+        if (array_key_exists('jointOthers', $b)) $out['jointOthers'] = mb_substr(trim((string) $b['jointOthers']), 0, 255) ?: null;
+        if (isset($out['jointVisit']) && !$out['jointVisit']) { $out['jointWith'] = null; $out['jointOthers'] = null; }
+        elseif ((isset($out['jointWith']) && $out['jointWith']) || (isset($out['jointOthers']) && $out['jointOthers'])) $out['jointVisit'] = 1;
+        return $out;
+    }
+    private static function saveJoint(string $id, array $j): void
+    {
+        if (!$j) return;
+        db()->prepare('UPDATE `Meeting` SET ' . implode(',', array_map(fn($k) => "`$k`=?", array_keys($j))) . ' WHERE id=?')->execute(array_merge(array_values($j), [$id]));
     }
 
     /** Saves the follow-up engineers and tells the newly added ones (alert + phone notification). */
@@ -282,6 +301,7 @@ class MeetingController
         $assignedToId = ($b['assignedToId'] ?? null) ?: null;
         if ($assignedToId) $this->notifyAssignment($id, $assignedToId, $auth['id'], $customer['companyName']);
         if (!empty($b['followUpAssignees'])) $this->setFollowUpAssignees($id, self::cleanAssignees($b['followUpAssignees']), [], $auth['id']);
+        self::saveJoint($id, self::jointFields($b, $auth['id']));
 
         log_activity($auth['id'], 'MEETING_CREATED', 'Meeting', $id,
             ['customer' => $customer['companyName'], 'type' => $meetingType]);
@@ -342,6 +362,7 @@ class MeetingController
                 $this->notifyAssignment($id, $newAssignee, $auth['id'], $companyName);
             }
         }
+        self::saveJoint($id, self::jointFields($b, $existing['userId']));
         if (array_key_exists('followUpAssignees', $b)) {
             $before = json_decode((string) ($existing['followUpAssignees'] ?? ''), true) ?: [];
             $this->setFollowUpAssignees($id, self::cleanAssignees($b['followUpAssignees'] ?? []), $before, $auth['id']);
@@ -563,6 +584,9 @@ class MeetingController
         $row['assignedTo'] = ($row['a_id'] ?? null) ? ['id' => $row['a_id'], 'name' => $row['a_name']] : null;
         $fa = json_decode((string) ($row['followUpAssignees'] ?? ''), true) ?: [];
         $row['followUpAssignees'] = array_map(fn($u) => ['id' => $u, 'name' => self::userName($u)], $fa);
+        $row['jointVisit'] = !empty($row['jointVisit']);
+        $jw = json_decode((string) ($row['jointWith'] ?? ''), true) ?: [];
+        $row['jointWith'] = array_map(fn($u) => ['id' => $u, 'name' => self::userName($u)], $jw);
         foreach (['c_id','companyName','contactPerson','c_lat','c_lng','u_id','u_name','a_id','a_name'] as $k) unset($row[$k]);
         return $row;
     }

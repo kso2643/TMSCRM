@@ -477,7 +477,7 @@
       }
       prBtn.onclick = loadPr;
       prNo.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); loadPr(); } });
-      prNo.addEventListener('paste', function () { setTimeout(function () { if (/^\s*PR-\d{4}-\d{4}/i.test(prNo.value)) { prNo.value = prNo.value.trim(); loadPr(); } }, 0); });
+      prNo.addEventListener('paste', function () { setTimeout(function () { if (/^\s*((TMS|APJ)-)?PR-\d{4}-\d{4}/i.test(prNo.value)) { prNo.value = prNo.value.trim(); loadPr(); } }, 0); });
       g.appendChild(field('Price request no. — fills the customer and all its items', el('div', {}, [el('div', { style: 'display:flex;gap:.4rem' }, [prNo, prBtn]), prInfo]), true));
       var cp = customerPicker(ctx, copyQuote); cp.querySelector('label').textContent = 'For customer (optional)';
       g.appendChild(cp);
@@ -906,7 +906,7 @@
           firmBadge(b.firm),
           el('span', { 'data-pr-firm-set': '' }, [el('span', { style: 'font-size:.8rem;margin-right:.3rem', text: b.firm ? 'Change:' : '⚠ TMS / APJ:' }),
             firmPicker(b.firm || '', function (f) {
-              api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/firm', { firm: f }).then(function (r) { toast(r.message || 'Saved'); show(); }).catch(function (e) { toast(e.message, 'err'); });
+              api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/firm', { firm: f }).then(function (r) { toast(r.message || 'Saved'); if (r.data && r.data.requestNo) no.value = r.data.requestNo; show(); }).catch(function (e) { toast(e.message, 'err'); });   // the number follows the company
             }, 'data-pr-firm')]),
           el('span', { text: (b.companyName || 'No customer') + ' · asked by ' + (b.engineerName || '—') + ' · ' + String(b.createdAt || '').slice(0, 10) }),
           el('a', { href: '/price-requests/?q=' + encodeURIComponent(b.requestNo), text: 'Open on the Price requests page →' })]));
@@ -915,7 +915,7 @@
     }
     go.onclick = show;
     no.addEventListener('keydown', function (e) { if (e.key === 'Enter') show(); });
-    no.addEventListener('paste', function () { setTimeout(function () { if (/^\s*PR-\d{4}-\d{4}/i.test(no.value)) { no.value = no.value.trim(); show(); } }, 0); });   // paste the copied number → items show at once
+    no.addEventListener('paste', function () { setTimeout(function () { if (/^\s*((TMS|APJ)-)?PR-\d{4}-\d{4}/i.test(no.value)) { no.value = no.value.trim(); show(); } }, 0); });   // paste the copied number → items show at once
     host.appendChild(el('div', { class: 'md-card' }, [
       el('p', { style: 'margin:0 0 .5rem', text: 'Type a price request number to see all its items. Ask suppliers for the whole request or item by item, compare their prices, and choose the supplier to buy from — the admins are told and see it on the Price requests page.' }),
       el('div', { class: 'md-bar' }, [no, go]), info, panel]));

@@ -155,7 +155,7 @@ class LocationHistoryController
     }
 
     /** Stops of 20+ minutes in one place (pinned on the map), numbered in order. */
-    private static function stops(array $pts): array
+    public static function stops(array $pts): array
     {
         $out = [];
         foreach (self::stays(self::usable($pts), self::STOP_MINUTES) as $n => $st) {

@@ -1,3 +1,46 @@
+# Update — 4 Nov (f): chat files & voice notes, TMS/APJ in the numbers, day summary + engineer performance, joint visits
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
+- **New files:** `crm/engineer-performance/index.html`, `crm/engineer-performance-app.js`, `crm/visit-update.js`, and a new sidebar file in `crm/_next/static/chunks/app/(dashboard)/` (the old one is kept).
+- **Database:** chat attachment columns and joint-visit columns are added automatically.
+- **Chat files** are saved in `api/uploads/chat/`.
+
+1. **Chat: attach anything**
+   - **📎** sends any file: photos, audio, video, PDF, Excel, Word… (up to 25 MB, several at once). Anything typed in the box goes as the caption.
+   - **🎤** records a voice note (tap ■ to send, ✕ to cancel).
+   - Photos show in the chat (tap to open big), and audio and video play right there. Other files show as a card that downloads.
+   - You can also drag files onto the conversation. **Ctrl+V of a screenshot sends it as a photo.**
+   - Alerts say "🎤 Voice / audio · …", "📷 Photo · …" or "📎 File · …".
+   - Files open only for the two people in the conversation. Web pages and other non-media files are only ever downloaded, never opened in the browser.
+2. **Numbers start with TMS / APJ**
+   - **Price requests:** `TMS-PR-2611-0005-JK` / `APJ-PR-…`.
+   - **Orders:** `TMS-ORD-2611-0003-JK` / `APJ-ORD-…`.
+   - Each company counts on its own. The forms show the number as you pick TMS or APJ.
+   - **Changing the company gives the next number in that company's series** (CEO Desk and quotations follow the new number).
+   - Quotations already start with TMS/ or APJ/.
+   - Records saved before this keep their numbers until their company is changed.
+3. **Engineer performance → 📋 Day summary** (Super Admin / Admin / Manager; menu: next to Location history; works on phones)
+   - Pick a day. Team totals at the top: present, planned, visits and joint visits, km, orders and value, quotations, price requests.
+   - Then one card per engineer: punch in / out, late minutes, hours, km.
+   - Tap a card for **Plan for the day** (appointments, follow-ups due, done or not) against **Done — where he went**: each visit with time, customer, type, minutes there, joint with whom and the summary, plus orders, and stops of 20+ min with a map link.
+4. **Joint visit**
+   - **On the visit page (after check-in):** a new **📝 Visit update** card. Joint visit? *No — alone* / *Yes — joint visit*; tick the colleagues who came and type anyone else (e.g. "Sandvik rep"); write what happened; **Save visit update**.
+   - The same choice is in **Log meeting** and the meeting pop-up.
+   - The meeting card shows "👥 Joint visit with …".
+   - Joint visits count for the colleagues too in the report.
+5. **Engineer performance → 📈 Performance report**
+   - Choose the dates (this month, last month, last 7 days or your own). All engineers side by side; click one for the detailed report:
+     - **Where he went:** every visit by day, with customer, place, time, minutes there and joint.
+     - **How far and how long:** GPS km, odometer km, km per day, stops, days and hours worked.
+     - **Visits:** per day, customers visited, joint visits.
+     - **Follow-ups:** done / due, overdue.
+     - **Orders:** count and **value** (TMS / APJ), invoiced amount.
+     - **Quotations and value**, price requests and trials.
+     - Plus a **day-by-day** table, the order and quotation lists, and the most visited customers.
+   - **⬇ Excel / ⬇ PDF** for one engineer (day by day with a summary line) or for the team.
+
+---
+
 # Update — 4 Nov (e): customer page → full Log meeting, Latest updates per customer, follow-up given to engineers
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.

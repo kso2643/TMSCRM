@@ -56,6 +56,17 @@
       '.ch-send{display:flex;gap:.5rem;padding:.7rem;border-top:1px solid #e2e8f0}.dark .ch-send{border-color:#334155}',
       '.ch-send textarea{flex:1;resize:none;height:44px;border:1px solid #cbd5e1;border-radius:.6rem;padding:.55rem .7rem;font:inherit;font-size:.88rem;background:#fff;color:inherit}.dark .ch-send textarea{background:#0f172a;border-color:#334155}',
       '.ch-btn{border:0;border-radius:.6rem;background:#1e3a8a;color:#fff;font-weight:600;padding:0 1rem;cursor:pointer}.ch-btn:disabled{opacity:.5}',
+      '.ch-icon{border:1px solid #cbd5e1;background:#fff;border-radius:.6rem;min-width:44px;padding:0 .55rem;font-size:1.05rem;cursor:pointer;color:inherit;white-space:nowrap}.dark .ch-icon{background:#0f172a;border-color:#334155}',
+      '.ch-icon.rec{background:#dc2626;border-color:#dc2626;color:#fff;font-size:.82rem;font-weight:700;animation:chpulse 1.2s infinite}@keyframes chpulse{50%{opacity:.75}}',
+      '.ch-att{display:flex;flex-direction:column;gap:.35rem;margin-bottom:.25rem}',
+      '.ch-img{max-width:260px;max-height:260px;border-radius:.55rem;cursor:zoom-in;display:block;background:#e2e8f0;min-height:60px;min-width:80px;object-fit:cover}',
+      '.ch-audio{width:260px;max-width:100%;height:40px}.ch-video{max-width:300px;max-height:240px;border-radius:.55rem;background:#000}',
+      '.ch-file{display:flex;align-items:center;gap:.45rem;border:1px solid rgba(148,163,184,.5);background:rgba(255,255,255,.12);border-radius:.55rem;padding:.4rem .55rem;color:inherit;cursor:pointer;text-align:left;max-width:280px;font:inherit}',
+      '.ch-m:not(.mine) .ch-file{background:#f8fafc}.dark .ch-m:not(.mine) .ch-file{background:#0f172a}',
+      '.ch-fi{font-size:1.1rem}.ch-fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem;font-weight:600}.ch-fs{font-size:.72rem;opacity:.75;white-space:nowrap}',
+      '.ch-msgs.drop{outline:3px dashed #3b82f6;outline-offset:-8px}',
+      '.ch-up{opacity:.7;font-style:italic}',
+      '@media(max-width:820px){.ch-img{max-width:200px}.ch-icon{min-width:40px}}',
       '.ch-empty{margin:auto;color:#64748b;text-align:center;padding:2rem;font-size:.9rem}',
       '.ch-back{display:none;border:0;background:none;font-size:1.1rem;cursor:pointer;color:inherit}@media(max-width:820px){.ch-back{display:inline}}'
     ].join('\n');
@@ -88,8 +99,85 @@
     });
   }
 
+  // ── attachments (v11.45): any file; photos, audio and video play right in the chat ──
+  function fmtSize(b) { b = +b || 0; return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; }
+  var blobCache = {};
+  function fileBlob(id) {
+    if (!blobCache[id]) blobCache[id] = fetch(API + '/api/chat/file/' + encodeURIComponent(id), { headers: { Authorization: 'Bearer ' + (token() || '') } })
+      .then(function (r) { if (!r.ok) throw new Error('Could not load the file (' + r.status + ')'); return r.blob(); })
+      .then(function (b) { return URL.createObjectURL(b); });
+    return blobCache[id];
+  }
+  function saveFile(m) {
+    fileBlob(m.id).then(function (u) { var a = document.createElement('a'); a.href = u; a.download = m.fileName || 'file'; document.body.appendChild(a); a.click(); a.remove(); })
+      .catch(function (e) { alert(e.message); });
+  }
+  function attachment(m) {
+    var k = m.fileKind || 'FILE', box = el('div', { class: 'ch-att ch-att-' + k.toLowerCase(), 'data-att': m.id });
+    if (k === 'IMAGE') {
+      var img = el('img', { alt: m.fileName || 'Photo', class: 'ch-img' });
+      img.onclick = function () { fileBlob(m.id).then(function (u) { window.open(u, '_blank'); }); };
+      fileBlob(m.id).then(function (u) { img.src = u; }).catch(function () { img.alt = '⚠ ' + (m.fileName || 'photo'); });
+      box.appendChild(img);
+    } else if (k === 'AUDIO' || k === 'VIDEO') {
+      var media = el(k === 'AUDIO' ? 'audio' : 'video', { controls: 'controls', preload: 'metadata', class: k === 'AUDIO' ? 'ch-audio' : 'ch-video' });
+      fileBlob(m.id).then(function (u) { media.src = u; }).catch(function () {});
+      box.appendChild(media);
+    }
+    box.appendChild(el('button', { type: 'button', class: 'ch-file', title: 'Download ' + (m.fileName || ''), onclick: function () { saveFile(m); } },
+      [el('span', { class: 'ch-fi', text: k === 'AUDIO' ? '🎤' : k === 'VIDEO' ? '🎬' : k === 'IMAGE' ? '📷' : '📎' }),
+       el('span', { class: 'ch-fn', text: m.fileName || 'file' }), el('span', { class: 'ch-fs', text: fmtSize(m.fileSize) + ' ⬇' })]));
+    return box;
+  }
   function bubble(m) {
-    return el('div', { class: 'ch-m' + (m.mine ? ' mine' : ''), 'data-msg': m.id }, [m.body, el('small', { text: time(m.createdAt) + (m.mine && m.readAt ? ' · seen' : '') })]);
+    return el('div', { class: 'ch-m' + (m.mine ? ' mine' : '') + (m.fileKind ? ' has-file' : ''), 'data-msg': m.id }, [
+      m.fileKind ? attachment(m) : null, m.body || null,
+      el('small', { text: time(m.createdAt) + (m.mine && m.readAt ? ' · seen' : '') })]);
+  }
+  function sendFiles(u, files, caption, msgs, done) {
+    var list = Array.prototype.slice.call(files || []);
+    if (!list.length) return Promise.resolve();
+    return list.reduce(function (p, f, i) {
+      return p.then(function () {
+        if (f.size > 25 * 1024 * 1024) { alert(f.name + ' is larger than 25 MB.'); return; }
+        var fd = new FormData(); fd.append('toId', u.id); fd.append('file', f, f.name); if (i === 0 && caption) fd.append('body', caption);
+        var tmp = el('div', { class: 'ch-m mine ch-up' }, ['⏫ Sending ' + f.name + '…']); msgs.appendChild(tmp); msgs.scrollTop = msgs.scrollHeight;
+        return fetch(API + '/api/chat/send-file', { method: 'POST', headers: { Authorization: 'Bearer ' + (token() || '') }, body: fd })
+          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.success === false) throw new Error(j.message || 'Could not send ' + f.name); return j; }); })
+          .then(function (j) { tmp.remove(); var e = msgs.querySelector('.ch-empty'); if (e) e.remove(); msgs.appendChild(bubble(j.data.message)); msgs.scrollTop = msgs.scrollHeight; lastAt = j.data.message.createdAt; })
+          .catch(function (e) { tmp.textContent = '⚠ ' + e.message; });
+      });
+    }, Promise.resolve()).then(function () { loadUsers(); if (done) done(); });
+  }
+  // 🎤 voice note: tap to record, tap ■ to send (or ✕ to cancel)
+  function recorder(u, msgs, bar) {
+    var btn = el('button', { type: 'button', class: 'ch-icon', id: 'ch-rec', title: 'Record a voice note', 'aria-label': 'Record a voice note', text: '🎤' });
+    var st = null;
+    function reset() { if (st && st.t) clearInterval(st.t); st = null; btn.textContent = '🎤'; btn.classList.remove('rec'); var c = bar.querySelector('.ch-rec-x'); if (c) c.remove(); }
+    btn.onclick = function () {
+      if (st) { st.keep = true; st.rec.stop(); return; }
+      if (!navigator.mediaDevices || !window.MediaRecorder) { alert('This browser cannot record audio. Attach an audio file with 📎 instead.'); return; }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        var type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].filter(function (t) { return MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); })[0] || '';
+        var rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined), chunks = [], t0 = Date.now();
+        st = { rec: rec, keep: false };
+        rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = function () {
+          stream.getTracks().forEach(function (x) { x.stop(); });
+          var keep = st && st.keep; reset();
+          if (!keep || !chunks.length) return;
+          var mt = (chunks[0].type || type || 'audio/webm').split(';')[0], ext = /mp4/.test(mt) ? 'm4a' : /ogg/.test(mt) ? 'ogg' : 'weba';
+          var d = new Date(), name = 'voice-note-' + d.toISOString().slice(0, 19).replace(/[-:T]/g, '') + '.' + ext;
+          sendFiles(u, [new File(chunks, name, { type: mt })], '', msgs);
+        };
+        rec.start(250);
+        btn.classList.add('rec');
+        st.t = setInterval(function () { var s2 = Math.round((Date.now() - t0) / 1000); btn.textContent = '■ ' + Math.floor(s2 / 60) + ':' + ('0' + s2 % 60).slice(-2); }, 500);
+        btn.textContent = '■ 0:00';
+        bar.insertBefore(el('button', { type: 'button', class: 'ch-icon ch-rec-x', title: 'Cancel recording', text: '✕', onclick: function () { if (st) { st.keep = false; st.rec.stop(); } } }), btn);
+      }).catch(function () { alert('Allow the microphone to record a voice note.'); });
+    };
+    return btn;
   }
 
   function openThread(u) {
@@ -113,7 +201,16 @@
     main.appendChild(el('div', { class: 'ch-head' }, [el('button', { class: 'ch-back', text: '←', 'aria-label': 'Back', onclick: function () { wrap.classList.remove('open'); } }),
       el('span', { class: 'ch-av', text: (u.name || '?').charAt(0).toUpperCase() }), el('span', {}, [u.name, el('div', { style: 'font-weight:400;font-size:.75rem;color:#64748b', text: roleLabel(u.role) })])]));
     main.appendChild(msgs);
-    main.appendChild(el('div', { class: 'ch-send' }, [ta, btn]));
+    var fileIn = el('input', { type: 'file', multiple: 'multiple', id: 'ch-file-in', style: 'display:none' });
+    var bar = el('div', { class: 'ch-send' });
+    fileIn.onchange = function () { var cap = ta.value.trim(); sendFiles(u, fileIn.files, cap, msgs, function () { if (cap) ta.value = ''; }); fileIn.value = ''; };
+    var attachBtn = el('button', { type: 'button', class: 'ch-icon', id: 'ch-attach', title: 'Attach files — photo, audio, video, PDF, Excel, anything', 'aria-label': 'Attach files', text: '📎', onclick: function () { fileIn.click(); } });
+    [attachBtn, recorder(u, msgs, bar), ta, btn, fileIn].forEach(function (x) { bar.appendChild(x); });
+    main.appendChild(bar);
+    // drop files on the conversation to send them
+    msgs.addEventListener('dragover', function (e) { e.preventDefault(); msgs.classList.add('drop'); });
+    msgs.addEventListener('dragleave', function () { msgs.classList.remove('drop'); });
+    msgs.addEventListener('drop', function (e) { e.preventDefault(); msgs.classList.remove('drop'); if (e.dataTransfer && e.dataTransfer.files.length) sendFiles(u, e.dataTransfer.files, '', msgs); });
     api('GET', '/chat/thread/' + encodeURIComponent(u.id)).then(function (j) {
       clear(msgs);
       var list = j.data.messages || [];

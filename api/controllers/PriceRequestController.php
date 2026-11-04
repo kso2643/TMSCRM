@@ -365,9 +365,10 @@ $tail",
     }
 
     /** PR-<yymm>-<sequence>-<engineer's initials>, e.g. PR-2611-0005-JK (the sequence runs on for the month). */
-    private function nextRequestNo(?string $engineerId = null): string
+    /** TMS-PR-yymm-nnnn-XX / APJ-PR-… (each company counts on its own); PR-… when no company yet. */
+    private function nextRequestNo(?string $engineerId = null, ?string $firm = null): string
     {
-        $prefix = 'PR-' . date('ym') . '-';
+        $prefix = (in_array($firm, ['TMS', 'APJ'], true) ? $firm . '-' : '') . 'PR-' . date('ym') . '-';
         $s = db()->prepare("SELECT requestNo FROM `PriceRequestBatch` WHERE requestNo LIKE ?");
         $s->execute([$prefix . '%']);
         $max = 0;
@@ -502,7 +503,7 @@ $tail",
         $pdo->beginTransaction();
         try {
             $bid = gen_id();
-            $no = $this->nextRequestNo($auth['id']);
+            $no = $this->nextRequestNo($auth['id'], $firm);
             $pdo->prepare('INSERT INTO `PriceRequestBatch` (id, requestNo, requestedById, customerId, notes, source, firm, createdAt) VALUES (?,?,?,?,?,?,?,?)')
                 ->execute([$bid, $no, $auth['id'], $customerId, bp_trim($b, 'notes'), ($b['source'] ?? '') === 'EXCEL' ? 'EXCEL' : 'FORM', $firm, now_sql()]);
             $ins = $pdo->prepare('INSERT INTO `PriceRequest` (id,requestedById,customerId,productId,itemCode,productName,quantity,listPrice,requestedPrice,notes,status,
@@ -569,9 +570,23 @@ $tail",
         $bt = $s->fetch();
         if (!$bt) sendError('Price request not found.', 404);
         if (!is_admin_tier($auth['role']) && $bt['requestedById'] !== $auth['id']) sendError('Only the engineer who asked or an admin can change this.', 403);
-        db()->prepare('UPDATE `PriceRequestBatch` SET firm=? WHERE id=?')->execute([$firm, $bid]);
-        log_activity($auth['id'], 'PRICE_REQUEST_FIRM', 'PriceRequestBatch', $bid, ['firm' => $firm]);
-        sendSuccess(['firm' => $firm], ($bt['requestNo'] ?: 'Request') . ' is for ' . $firm);
+        // the number follows the company: TMS-PR-… / APJ-PR-… (a new number in that company's series)
+        $no = $bt['requestNo'];
+        if ($no && strpos($no, $firm . '-') !== 0) {
+            $no = $this->nextRequestNo($bt['requestedById'], $firm);
+            try { db()->prepare('UPDATE `Quotation` SET priceRequestNo=? WHERE priceRequestNo=?')->execute([$no, $bt['requestNo']]); } catch (Throwable $e) {}
+        }
+        db()->prepare('UPDATE `PriceRequestBatch` SET firm=?, requestNo=? WHERE id=?')->execute([$firm, $no, $bid]);
+        log_activity($auth['id'], 'PRICE_REQUEST_FIRM', 'PriceRequestBatch', $bid, ['firm' => $firm, 'from' => $bt['requestNo'], 'to' => $no]);
+        sendSuccess(['firm' => $firm, 'requestNo' => $no, 'previousNo' => $bt['requestNo']], $no !== $bt['requestNo'] ? 'Now ' . $no . ' (was ' . $bt['requestNo'] . ') — for ' . $firm : ($no ?: 'Request') . ' is for ' . $firm);
+    }
+
+    // GET /api/price-requests/next-number?firm=TMS|APJ — the number the next request will get (shown in the form)
+    public function nextNumber(): void
+    {
+        $auth = authenticate();
+        $firm = strtoupper((string) qp('firm', ''));
+        sendSuccess(['requestNo' => $this->nextRequestNo($auth['id'], in_array($firm, ['TMS', 'APJ'], true) ? $firm : null)]);
     }
 
     // GET /api/price-requests/batches?status=OPEN|DONE|ALL&requestedById=&search=
@@ -894,7 +909,7 @@ $tail",
         $all = (bool) qp('all');
         $s = db()->prepare('SELECT id FROM `PriceRequestBatch` WHERE UPPER(requestNo)=?'); $s->execute([$no]);
         $bid = $s->fetchColumn();
-        if (!$bid && $all && preg_match('/^PR-\d{4}-\d{4}$/', $no)) {   // typed without the engineer's initials
+        if (!$bid && $all && preg_match('/^((TMS|APJ)-)?PR-\d{4}-\d{4}$/', $no)) {   // typed without the engineer's initials
             $s = db()->prepare('SELECT id FROM `PriceRequestBatch` WHERE UPPER(requestNo) LIKE ? ORDER BY createdAt DESC LIMIT 1'); $s->execute([$no . '-%']);
             $bid = $s->fetchColumn();
         }

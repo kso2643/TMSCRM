@@ -106,6 +106,7 @@ require __DIR__ . '/controllers/DashboardAnalyticsController.php';
 require __DIR__ . '/controllers/MiscControllers.php';    // Category, Leave, Activity
 require __DIR__ . '/controllers/ExportController.php';
 require __DIR__ . '/controllers/ReportsController.php';   // extends ExportController — must come after it
+require __DIR__ . '/controllers/EngineerReportController.php';   // extends ExportController too
 require __DIR__ . '/controllers/BackupController.php';
 require __DIR__ . '/controllers/LocationHistoryController.php';
 require __DIR__ . '/controllers/CprController.php';
@@ -395,6 +396,7 @@ try {
         match (true) {
             $method === 'POST'  && $c1 === 'po-match'                          => $ctrl->poMatch(),
             $method === 'GET'   && $c1 === 'meta'                          => $ctrl->meta(),
+            $method === 'GET'   && $c1 === 'next-number'                   => $ctrl->nextNumber(),
             $method === 'GET'   && $c1 === 'engineers'                     => $ctrl->engineers(),
             $method === 'GET'   && $c1 === 'stock-check'                   => $ctrl->stockCheck(),
             $method === 'GET'   && $c1 !== '' && $c2 === 'pdf'             => $ctrl->pdf($c1),
@@ -448,6 +450,7 @@ try {
         $ctrl = new PriceRequestController();
         match (true) {
             $method === 'GET'   && $c1 === 'existing-price'                => $ctrl->existingPrice(),
+            $method === 'GET'   && $c1 === 'next-number'                   => $ctrl->nextNumber(),
             $method === 'GET'   && $c1 === 'by-no' && $c2 !== ''       => $ctrl->byNumber($c2),
             $method === 'GET'   && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->index($c2),
             $method === 'POST'  && $c1 === 'batch' && $c3 === 'supplier' => (new SupplierQuoteController())->ask($c2),
@@ -784,6 +787,14 @@ try {
             default => sendError('Route not found', 404),
         };
     }
+    elseif ($c0 === 'engineer-report') {
+        $ctrl = new EngineerReportController();
+        match (true) {
+            $method === 'GET' && $c1 === 'day'         => $ctrl->day(),
+            $method === 'GET' && $c1 === 'performance' => $ctrl->performance(),
+            default => sendError("Route /api/engineer-report/$c1 not found", 404),
+        };
+    }
     elseif ($c0 === 'chat') {
         $ctrl = new ChatController();
         match (true) {
@@ -791,6 +802,8 @@ try {
             $method === 'GET'  && $c1 === 'unread'               => $ctrl->unread(),
             $method === 'GET'  && $c1 === 'thread' && $c2 !== '' => $ctrl->thread($c2),
             $method === 'POST' && $c1 === 'send'                 => $ctrl->send(),
+            $method === 'POST' && $c1 === 'send-file'            => $ctrl->sendFile(),
+            $method === 'GET'  && $c1 === 'file' && $c2 !== ''   => $ctrl->file($c2),
             default => sendError("Route /api/chat/$c1 not found", 404),
         };
     }

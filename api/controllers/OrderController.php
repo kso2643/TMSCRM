@@ -36,10 +36,11 @@ class OrderController
     ];
     private const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB
 
-    /** ORD-yymm-nnnn-XX: month of $when, next sequence that month, engineer's initials. */
-    private static function nextOrderNo(?string $engineerId, ?string $when = null): string
+    /** TMS-ORD-yymm-nnnn-XX / APJ-ORD-… (each company counts on its own; ORD-… with no company):
+     *  month of $when, next sequence that month, engineer's initials. */
+    private static function nextOrderNo(?string $engineerId, ?string $when = null, ?string $firm = null): string
     {
-        $prefix = 'ORD-' . date('ym', $when ? strtotime($when) : time()) . '-';
+        $prefix = (in_array($firm, ['TMS', 'APJ'], true) ? $firm . '-' : '') . 'ORD-' . date('ym', $when ? strtotime($when) : time()) . '-';
         $s = db()->prepare('SELECT orderNo FROM `CustomerOrder` WHERE orderNo LIKE ?');
         $s->execute([$prefix . '%']);
         $max = 0;
@@ -53,10 +54,19 @@ class OrderController
         try {
             $n = (int) db()->query('SELECT COUNT(*) FROM `CustomerOrder` WHERE orderNo IS NULL')->fetchColumn();
             if (!$n) return;
-            $rows = db()->query('SELECT id, engineerId, createdAt FROM `CustomerOrder` WHERE orderNo IS NULL ORDER BY createdAt, id')->fetchAll();
+            $rows = db()->query('SELECT id, engineerId, createdAt, firm FROM `CustomerOrder` WHERE orderNo IS NULL ORDER BY createdAt, id')->fetchAll();
             $u = db()->prepare('UPDATE `CustomerOrder` SET orderNo=? WHERE id=? AND orderNo IS NULL');
-            foreach ($rows as $r) $u->execute([self::nextOrderNo($r['engineerId'], $r['createdAt']), $r['id']]);
+            foreach ($rows as $r) $u->execute([self::nextOrderNo($r['engineerId'], $r['createdAt'], $r['firm'] ?? null), $r['id']]);
         } catch (Throwable $e) { error_log('Order numbers backfill: ' . $e->getMessage()); }
+    }
+
+    // GET /api/orders/next-number?firm=TMS|APJ — the number the next order will get (shown in the form)
+    public function nextNumber(): void
+    {
+        $auth = authenticate();
+        $firm = strtoupper((string) qp('firm', ''));
+        $eng = trim((string) qp('engineerId', '')) ?: $auth['id'];
+        sendSuccess(['orderNo' => self::nextOrderNo($eng, null, in_array($firm, ['TMS', 'APJ'], true) ? $firm : null)]);
     }
 
     public function __construct()
@@ -781,7 +791,7 @@ class OrderController
             $id, $customerId, $engineerId, $orderType, $poOriginal, $poStored, $poMime, $poSize,
             $verbalDetails, $orderDate, bp_trim($b, 'notes'), now_sql(), now_sql(),
         ]);
-        db()->prepare('UPDATE `CustomerOrder` SET firm=?, orderNo=? WHERE id=?')->execute([$firm, self::nextOrderNo($engineerId), $id]);
+        db()->prepare('UPDATE `CustomerOrder` SET firm=?, orderNo=? WHERE id=?')->execute([$firm, self::nextOrderNo($engineerId, null, $firm), $id]);
         if (($ov = self::orderValue($b)) !== null) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([$ov, $id]);
         if (($pn = mb_substr(trim((string) ($b['poNumber'] ?? '')), 0, 80)) !== '') db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([$pn, $id]);
         $this->replaceItems($id, $items);
@@ -844,6 +854,9 @@ class OrderController
             $firm = strtoupper(trim((string) $b['firm']));
             if (!in_array($firm, ['TMS', 'APJ'], true)) sendError('Choose TMS or APJ.', 400);
             db()->prepare('UPDATE `CustomerOrder` SET firm=? WHERE id=?')->execute([$firm, $id]);
+            // the number follows the company: TMS-ORD-… / APJ-ORD-…
+            if (!empty($row['orderNo']) && strpos($row['orderNo'], $firm . '-') !== 0)
+                db()->prepare('UPDATE `CustomerOrder` SET orderNo=? WHERE id=?')->execute([self::nextOrderNo($row['engineerId'], null, $firm), $id]);
         }
         if (bp_has($b, 'poNumber')) db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([mb_substr(trim((string) $b['poNumber']), 0, 80) ?: null, $id]);
 

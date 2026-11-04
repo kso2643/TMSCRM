@@ -334,17 +334,24 @@
     notes.addEventListener('input', function () { F.notes = notes.value; });
     // Which of our companies the price is for (TMS / APJ) — required
     var firmBox = el('div', { class: 'pr-firm', role: 'radiogroup', 'aria-label': 'Our company' });
+    var noHint = el('div', { class: 'pr-meta', id: 'pr-next-no', style: 'margin-top:.4rem' });
+    function showNextNo() {   // the number follows the company: TMS-PR-… / APJ-PR-…
+      api('GET', '/price-requests/next-number' + (F.firm ? '?firm=' + F.firm : '')).then(function (r) {
+        clear(noHint).appendChild(el('span', {}, ['Request no.: ', el('b', { 'data-next-no': r.data.requestNo, text: r.data.requestNo }), F.firm ? ' (given when you send it)' : ' — choose TMS or APJ: the number starts with it']));
+      }).catch(function () {});
+    }
     function drawFirm() {
       clear(firmBox);
       [['TMS', 'TMS'], ['APJ', 'APJ']].forEach(function (f) {
         firmBox.appendChild(el('button', { type: 'button', role: 'radio', 'aria-checked': F.firm === f[0] ? 'true' : 'false', class: 'pr-chip' + (F.firm === f[0] ? ' on' : ''), 'data-firm': f[0], text: f[1],
           onclick: function () { F.firm = f[0]; drawFirm(); } }));
       });
+      showNextNo();
     }
     drawFirm();
     body.appendChild(el('div', { class: 'pr-card' }, [
       el('h2', {}, ['1. Company']),
-      el('div', { class: 'pr-f', style: 'margin-bottom:.6rem' }, [el('label', {}, ['Our company — TMS or APJ ', el('span', { class: 'req', text: '*' })]), firmBox]),
+      el('div', { class: 'pr-f', style: 'margin-bottom:.6rem' }, [el('label', {}, ['Our company — TMS or APJ ', el('span', { class: 'req', text: '*' })]), firmBox, noHint]),
       el('div', { class: 'pr-row2' }, [
         el('div', { class: 'pr-f' }, [el('label', { for: 'pr-company' }, ['Company ', el('span', { class: 'req', text: '*' })]), compHost]),
         el('div', { class: 'pr-f' }, [el('label', { for: 'pr-notes', text: 'Note for the whole request' }), notes])
@@ -678,7 +685,7 @@
       if (!b.legacy && (isAdminTier || (b.requestedBy && b.requestedBy.id === me().id))) {
         inner.appendChild(el('div', { class: 'pr-meta', 'data-firm-set': b.id, style: 'display:flex;gap:.35rem;align-items:center;margin:.2rem 0 .6rem' }, [b.firm ? 'Our company:' : '⚠ Choose our company:'].concat(['TMS', 'APJ'].map(function (f) {
           return el('button', { type: 'button', class: 'pr-chip' + (b.firm === f ? ' on' : ''), 'data-set-firm': f, text: f, onclick: function () {
-            api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/firm', { firm: f }).then(function (j) { toast(j.message); b.firm = f; reload(); }).catch(function (e) { toast(e.message, 'err'); });
+            api('PATCH', '/price-requests/batch/' + encodeURIComponent(b.id) + '/firm', { firm: f }).then(function (j) { toast(j.message); b.firm = f; if (j.data && j.data.requestNo) b.requestNo = j.data.requestNo; reload(); }).catch(function (e) { toast(e.message, 'err'); });
           } });
         }))));
       }

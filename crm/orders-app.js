@@ -1419,6 +1419,23 @@
             onclick: function () { state.firm = f; render(); } }));
         });
         wrap.appendChild(el('div', {}, [el('span', { class: 'text-xs text-muted' }, ['Our company — TMS or APJ ', el('span', { style: 'color:#dc2626', text: '*' })]), el('div', { class: 'mt-1' }, [firmRow])]));
+        // the order number follows the company: TMS-ORD-… / APJ-ORD-…
+        var noLine = el('div', { class: 'text-xs text-muted', id: 'ox-next-no', style: 'margin-top:-.25rem' });
+        if (!isCreate && order.orderNo) {
+          noLine.appendChild(el('span', {}, ['Order no.: ', el('b', { text: order.orderNo }),
+            state.firm && order.orderNo.indexOf(state.firm + '-') !== 0 ? ' → a new ' + state.firm + '-ORD-… number when you save' : '']));
+        } else if (isCreate) {
+          var key = (state.firm || '') + '|' + (state.engineerId || '');
+          if (state._noKey !== key) {
+            state._noKey = key; state._no = '';
+            api('GET', '/orders/next-number?firm=' + (state.firm || '') + '&engineerId=' + encodeURIComponent(state.engineerId || '')).then(function (r) {
+              if (state._noKey !== key) return; state._no = r.data.orderNo;
+              var n = document.getElementById('ox-next-no'); if (n) { n.innerHTML = ''; n.appendChild(el('span', {}, ['Order no.: ', el('b', { 'data-next-order-no': state._no, text: state._no }), state.firm ? ' (given when you save)' : ' — choose TMS or APJ: the number starts with it'])); }
+            }).catch(function () {});
+          }
+          if (state._no) noLine.appendChild(el('span', {}, ['Order no.: ', el('b', { 'data-next-order-no': state._no, text: state._no }), state.firm ? ' (given when you save)' : ' — choose TMS or APJ: the number starts with it']));
+        }
+        wrap.appendChild(noLine);
 
         if (state.orderType === 'PO') {
           var fileLabel = state.file ? state.file.name : (order && order.poDocument ? order.poDocument.originalName + ' (current)' : 'No file chosen');

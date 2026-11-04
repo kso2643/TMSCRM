@@ -339,13 +339,19 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
 .field-group .fu-chip input{width:auto;margin:0;padding:0;border:0}
 .fu-chip small{color:var(--muted);font-weight:500;font-size:.7rem}
 .field-group .fu-chip.on,.fu-chip.on{background:var(--blue-light);border-color:var(--blue);color:var(--blue-dark)}
+.joint-yn{display:flex;gap:6px;flex-wrap:wrap}
+.field-group .joint-btn{border:1px solid var(--border);background:var(--white);border-radius:8px;padding:7px 12px;font-size:.82rem;font-weight:600;color:var(--dark);cursor:pointer;width:auto}
+.field-group .joint-btn.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.joint-more{display:flex;flex-direction:column;gap:6px;margin-top:6px}.joint-more[hidden]{display:none}
+.joint-l{font-size:.74rem;color:var(--muted)}
+.joint-meta b{color:#7c3aed !important}
 .fu-by-empty{font-size:.8rem;color:var(--muted)}
 .fu-by-meta b{color:#b45309 !important}
 .dark .fu-chip{background:#0f172a;border-color:#334155;color:#e2e8f0}.dark .fu-chip.on{background:#1e3a8a55}
 .today-fixed{padding:.55rem .75rem;border:1px solid #cbd5e1;border-radius:.5rem;background:#f1f5f9;color:#0f172a;font-weight:600;font-size:.9rem}
 .dark .today-fixed{background:#1e293b;border-color:#334155;color:#e2e8f0}
 </style>
-<script src="/fuel-expense-app.js?v=20261104g" defer></script><script src="/attendance-all-app.js?v=20261104g" defer></script><script src="/appointments-reminder-app.js?v=20261104g" defer></script><script src="/crm-global.js?v=20261104g" defer></script><link rel="stylesheet" href="/motion.css?v=20261104g"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
+<script src="/fuel-expense-app.js?v=20261104i" defer></script><script src="/attendance-all-app.js?v=20261104i" defer></script><script src="/appointments-reminder-app.js?v=20261104i" defer></script><script src="/crm-global.js?v=20261104i" defer></script><link rel="stylesheet" href="/motion.css?v=20261104i"/><script>try{if(window.innerWidth>=1024&&localStorage.getItem('crm_token'))document.documentElement.classList.add('crm-docked-early')}catch(e){}</script></head>
 <body>
 
 <div id="auth-gate" class="state-block" style="max-width:420px;margin:80px auto;">
@@ -648,6 +654,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     var metaBits = ['<span><b>By</b> ' + escapeHtml((m.user && m.user.name) || "—") + "</span>"];
     if (m.assignedTo && m.assignedTo.name) metaBits.push('<span><b>Assigned</b> ' + escapeHtml(m.assignedTo.name) + "</span>");
     if (m.updatedBy && m.updatedBy.name) metaBits.push('<span><b>Updated by</b> ' + escapeHtml(m.updatedBy.name) + "</span>");
+    if (m.jointVisit) metaBits.push('<span class="joint-meta"><b>👥 Joint visit</b> ' + escapeHtml((m.jointWith || []).map(function (u) { return u.name || ""; }).concat(m.jointOthers ? [m.jointOthers] : []).join(", ") || "yes") + "</span>");
     if (m.followUpAssignees && m.followUpAssignees.length) metaBits.push('<span class="fu-by-meta"><b>📅 Follow-up by</b> ' + escapeHtml(m.followUpAssignees.map(function (u) { return u.name || ""; }).join(", ")) + "</span>");
 
     return (
@@ -825,6 +832,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
         "</div>" +
         '<div class="field-group"><label>Follow-up priority</label><select id="edit-priority"></select></div>' +
         '<div class="field-group"><label>Follow-up by</label>' + fuPickerHtml("edit", m.followUpAssignees || []) + "</div>" +
+        jointHtml("edit", m) +
         '<div class="field-group"><label>Notes</label><textarea id="edit-notes" placeholder="Add or update notes…">' + escapeHtml(m.notes || "") + "</textarea></div>" +
         '<div class="field-group"><label>Photos, files &amp; voice notes</label><div id="edit-att"></div></div>' +
         (extraFields ? '<div class="field-group"><label>More details</label><div class="mt-details-grid">' + extraFields + "</div></div>" : "") +
@@ -853,6 +861,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-cancel").addEventListener("click", closeDrawer);
     document.getElementById("drawer-save").addEventListener("click", function () { saveMeeting(m.id); });
     fuWire("edit");
+    jointWire("edit");
     mountAttachments(document.getElementById("edit-att"), { meetingId: m.id });
 
     enableAddNew();
@@ -893,6 +902,8 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     if (timeVal) body.followUpTime = timeVal;
     var fuBy = fuPicked("edit");
     if (fuBy) body.followUpAssignees = fuBy;
+    var jv = jointValue("edit");
+    if (jv) Object.assign(body, jv);
 
     saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     feedback.innerHTML = "";
@@ -1317,6 +1328,31 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     if (!box) return;
     box.addEventListener("change", function (e) { if (e.target && e.target.type === "checkbox") e.target.parentNode.classList.toggle("on", e.target.checked); });
   }
+  // Joint visit: Yes / No, then the colleagues who came and anyone else (e.g. a supplier's rep)
+  function jointHtml(prefix, m) {
+    var on = !!(m && m.jointVisit);
+    return '<div class="field-group joint-box" id="' + prefix + '-joint"><label>Joint visit?</label>' +
+      '<div class="joint-yn"><button type="button" class="joint-btn' + (on ? '' : ' on') + '" data-joint="0">No — alone</button><button type="button" class="joint-btn' + (on ? ' on' : '') + '" data-joint="1">Yes — joint visit</button></div>' +
+      '<div class="joint-more"' + (on ? '' : ' hidden') + '><span class="joint-l">Went with (colleagues)</span>' + fuPickerHtml(prefix + "j", (m && m.jointWith) || []) +
+      '<input type="text" id="' + prefix + '-joint-others" placeholder="Others — e.g. Sandvik rep Mr. Kumar (optional)" value="' + escapeHtml((m && m.jointOthers) || "") + '" /></div></div>';
+  }
+  function jointWire(prefix) {
+    var box = document.getElementById(prefix + "-joint");
+    if (!box) return;
+    fuWire(prefix + "j");
+    box.querySelectorAll(".joint-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        box.querySelectorAll(".joint-btn").forEach(function (x) { x.classList.toggle("on", x === b); });
+        box.querySelector(".joint-more").hidden = b.getAttribute("data-joint") !== "1";
+      });
+    });
+  }
+  function jointValue(prefix) {
+    var box = document.getElementById(prefix + "-joint");
+    if (!box) return null;
+    var on = !!box.querySelector('.joint-btn.on[data-joint="1"]');
+    return { jointVisit: on, jointWith: on ? (fuPicked(prefix + "j") || []) : [], jointOthers: on ? (document.getElementById(prefix + "-joint-others").value || "").trim() : "" };
+  }
   function fuPicked(prefix) {
     var box = document.getElementById(prefix + "-fu-by");
     return box ? Array.prototype.map.call(box.querySelectorAll("input:checked"), function (i) { return i.value; }) : null;
@@ -1357,6 +1393,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
                 return '<option value="' + escapeHtml(u.id) + '">' + escapeHtml(u.name) + (u.role ? " · " + humanize(u.role) : "") + "</option>";
               }).join("") + "</select></div>"
           : "") +
+        jointHtml("new", null) +
         '<div class="field-group"><label for="new-summary">Discussion summary</label><textarea id="new-summary" placeholder="What was discussed?"></textarea></div>' +
         '<div class="field-group"><label for="new-req">Customer requirements</label><textarea id="new-req" placeholder="Tools, quantities, specs…" style="min-height:54px"></textarea></div>' +
         '<div class="field-group"><label for="new-notes">Notes</label><textarea id="new-notes" placeholder="Anything else" style="min-height:54px"></textarea></div>' +
@@ -1380,6 +1417,7 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     document.getElementById("drawer-save").addEventListener("click", function () { saveCreate(forFollowup); });
     mountAttachments(document.getElementById("new-att"), {});
     fuWire("new");
+    jointWire("new");
     var q = document.getElementById("new-cust-q");
     q.addEventListener("input", function () {
       clearTimeout(createState.timer);
@@ -1459,6 +1497,8 @@ h1.page-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -.01em; }
     };
     var fuBy = fuPicked("new");
     if (fuBy && fuBy.length) body.followUpAssignees = fuBy;
+    var jv = jointValue("new");
+    if (jv && jv.jointVisit) { if (!jv.jointWith.length && !jv.jointOthers) { feedback.innerHTML = '<div class="save-feedback err">Joint visit: tick who went with you, or type the others.</div>'; return; } Object.assign(body, jv); }
     if (val("new-fu-date")) body.nextFollowUp = val("new-fu-date") + "T" + (val("new-fu-time") || "00:00") + ":00";
     if (val("new-fu-time")) body.followUpTime = val("new-fu-time");
 

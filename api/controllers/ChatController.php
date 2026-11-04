@@ -25,7 +25,72 @@ class ChatController
   PRIMARY KEY (`id`),
   KEY `ChatMessage_to_idx` (`toId`, `readAt`),
   KEY `ChatMessage_pair_idx` (`fromId`, `toId`, `createdAt`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"]], 'Chat messages');
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+            // attachments (v11.45): any file — photo, audio / voice note, video, PDF, Excel…
+            'columns' => ['fileName' => 'VARCHAR(255) NULL', 'storedName' => 'VARCHAR(80) NULL', 'fileMime' => 'VARCHAR(120) NULL',
+                          'fileSize' => 'INT NULL', 'fileKind' => 'VARCHAR(10) NULL']]], 'Chat messages');
+    }
+
+    /** Shown inline only for these; everything else is sent as a plain download. */
+    private const INLINE = [
+        'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp',
+        'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'aac' => 'audio/aac', 'wav' => 'audio/wav', 'ogg' => 'audio/ogg', 'oga' => 'audio/ogg', 'weba' => 'audio/webm', 'opus' => 'audio/ogg',
+        'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mov' => 'video/quicktime', '3gp' => 'video/3gpp', 'pdf' => 'application/pdf',
+    ];
+    private static function kindOf(string $ext, string $mime): string
+    {
+        if (preg_match('/^image\//', $mime) && isset(self::INLINE[$ext])) return 'IMAGE';
+        if (preg_match('/^audio\//', $mime) || in_array($ext, ['mp3', 'm4a', 'aac', 'wav', 'oga', 'weba', 'opus'], true)) return 'AUDIO';
+        if (preg_match('/^video\//', $mime) || in_array($ext, ['mp4', 'mov', '3gp'], true)) return 'VIDEO';
+        return 'FILE';
+    }
+
+    // POST /api/chat/send-file (multipart: toId, file, body?) — any file up to 25 MB
+    public function sendFile(): void
+    {
+        $auth = authenticate();
+        $to = $this->user((string) ($_POST['toId'] ?? ''));
+        if (!$to) sendError('Choose who to send the file to.', 400);
+        if (!$this->allowed($auth, $to)) sendError('You can only message the admin team.', 403);
+        $f = $_FILES['file'] ?? null;
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK) sendError('No file received (check the size — up to 25 MB).', 400);
+        if ($f['size'] > 25 * 1024 * 1024) sendError('The file is larger than 25 MB.', 400);
+        $name = preg_replace('/[^\w.\- ()\[\]]+/u', '_', (string) $f['name']) ?: 'file';
+        $ext = strtolower(preg_replace('/[^a-z0-9]/i', '', pathinfo($name, PATHINFO_EXTENSION))) ?: 'bin';
+        $mime = (string) ($f['type'] ?? '');
+        if (function_exists('finfo_open')) { $fi = finfo_open(FILEINFO_MIME_TYPE); $det = $fi ? finfo_file($fi, $f['tmp_name']) : false; if ($det) $mime = $det; }
+        $dir = UPLOADS_PATH . '/chat';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) sendError('Could not save the file on the server.', 500);
+        $id = gen_id(); $stored = $id . '.' . substr($ext, 0, 8);
+        if (!move_uploaded_file($f['tmp_name'], "$dir/$stored") && !rename($f['tmp_name'], "$dir/$stored")) sendError('Could not save the file on the server.', 500);
+        $kind = self::kindOf($ext, $mime);
+        $body = mb_substr(trim((string) ($_POST['body'] ?? '')), 0, 4000);
+        $now = now_sql();
+        db()->prepare('INSERT INTO `ChatMessage` (id,fromId,toId,body,createdAt,fileName,storedName,fileMime,fileSize,fileKind) VALUES (?,?,?,?,?,?,?,?,?,?)')
+            ->execute([$id, $auth['id'], $to['id'], $body, $now, mb_substr($name, 0, 255), $stored, mb_substr($mime, 0, 120), (int) $f['size'], $kind]);
+        sendSuccess(['message' => ['id' => $id, 'fromId' => $auth['id'], 'toId' => $to['id'], 'body' => $body, 'createdAt' => $now, 'readAt' => null, 'mine' => true,
+            'fileName' => mb_substr($name, 0, 255), 'fileMime' => $mime, 'fileSize' => (int) $f['size'], 'fileKind' => $kind]], 'Sent', 201);
+    }
+
+    // GET /api/chat/file/:id[?download=1] — sender or recipient only
+    public function file(string $id): void
+    {
+        $auth = authenticate();
+        $s = db()->prepare('SELECT * FROM `ChatMessage` WHERE id=? LIMIT 1'); $s->execute([$id]);
+        $m = $s->fetch();
+        if (!$m || !$m['storedName'] || ($m['fromId'] !== $auth['id'] && $m['toId'] !== $auth['id'])) sendError('File not found.', 404);
+        $path = UPLOADS_PATH . '/chat/' . basename($m['storedName']);
+        if (!is_file($path)) sendError('The file is missing on the server.', 404);
+        $ext = strtolower(pathinfo($m['storedName'], PATHINFO_EXTENSION));
+        $inline = isset(self::INLINE[$ext]) && !qp('download');
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: ' . ($inline ? self::INLINE[$ext] : 'application/octet-stream'));
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Length: ' . filesize($path));
+        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . str_replace('"', '', $m['fileName']) . '"; filename*=UTF-8\'\'' . rawurlencode($m['fileName']));
+        header('Cache-Control: private, max-age=86400');
+        readfile($path);
+        exit;
     }
 
     private static function canStart(array $auth): bool { return is_admin_tier($auth['role']); }
@@ -61,7 +126,7 @@ class ChatController
                             FROM `ChatMessage` WHERE fromId=? OR toId=? GROUP BY other");
         $s->execute([$me, $me, $me, $me]);
         foreach ($s->fetchAll() as $r) $talked[$r['other']] = $r;
-        $last = db()->prepare('SELECT body, fromId FROM `ChatMessage` WHERE (fromId=? AND toId=?) OR (fromId=? AND toId=?) ORDER BY createdAt DESC LIMIT 1');
+        $last = db()->prepare('SELECT IF(storedName IS NOT NULL AND body=\'\', CONCAT(\'📎 \', fileName), body) AS body, fromId FROM `ChatMessage` WHERE (fromId=? AND toId=?) OR (fromId=? AND toId=?) ORDER BY createdAt DESC LIMIT 1');
         $out = [];
         foreach ($all as $u) {
             if ($u['id'] === $me) continue;
@@ -83,7 +148,7 @@ class ChatController
         $other = $this->user($userId);
         if (!$other || !$this->allowed($auth, $other)) sendError('You can’t chat with this user.', 403);
         $after = to_dt(qp('after'));
-        $sql = 'SELECT id, fromId, toId, body, createdAt, readAt FROM `ChatMessage`
+        $sql = 'SELECT id, fromId, toId, body, createdAt, readAt, fileName, fileMime, fileSize, fileKind FROM `ChatMessage`
                 WHERE ((fromId=? AND toId=?) OR (fromId=? AND toId=?))' . ($after ? ' AND createdAt>?' : '') . ' ORDER BY createdAt ASC, id ASC';
         $p = [$auth['id'], $userId, $userId, $auth['id']];
         if ($after) $p[] = $after;
