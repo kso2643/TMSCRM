@@ -55,7 +55,7 @@ class EngineerReportController extends ExportController
             return $d;
         };
         // attendance, km, stops
-        $att = self::rows('SELECT id, date, checkIn, checkOut, lateMinutes FROM `Attendance` WHERE userId=? AND date>=? AND date<? AND checkIn IS NOT NULL ORDER BY date', [$uid, $from, $end]);
+        $att = self::rows('SELECT id, date, checkIn, checkOut, lateMinutes, checkInLat, checkInLng, checkOutLat, checkOutLng FROM `Attendance` WHERE userId=? AND date>=? AND date<? AND checkIn IS NOT NULL ORDER BY date', [$uid, $from, $end]);
         $pp = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
         $stopsAll = [];
         foreach ($att as $a) {
@@ -64,7 +64,7 @@ class EngineerReportController extends ExportController
             $st = LocationHistoryController::stops($pts);
             $days[$d]['checkIn'] = $a['checkIn']; $days[$d]['checkOut'] = $a['checkOut'];
             $days[$d]['hours'] = self::hrs($a['checkIn'], $a['checkOut']);
-            $days[$d]['km'] = round(LocationHistoryController::distanceKm($pts), 2);
+            $days[$d]['km'] = round(LocationHistoryController::distanceKm($pts, $a), 2);
             $days[$d]['stops'] = count($st);
             $days[$d]['late'] = $a['lateMinutes'] !== null ? (int) $a['lateMinutes'] : null;
             foreach ($st as $x) $stopsAll[] = $x + ['date' => $d];

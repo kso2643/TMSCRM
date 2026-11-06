@@ -1,3 +1,29 @@
+# Update — 6 Nov: PO with our delivery address + customer GSTIN; location history by pins (customers reached, km per leg); punch-out grace till 7:30 pm
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
+- **Database:** new columns are added automatically: customer and customer GSTIN on purchase orders, and GSTIN on customers.
+
+1. **Purchase order: our delivery address and the customer's GSTIN**
+   - Every PO has a **DELIVER TO** box: our company name, address and GSTIN from the letterhead (TMS or APJ). You can change it in the PO; **↺ Our address** puts ours back.
+   - A **CUSTOMER** box shows the customer the material is for, with their GSTIN.
+   - A PO raised from a price request fills both in by itself.
+   - In the PO editor, type to find the customer; their GSTIN comes in if it is known.
+   - A GSTIN typed on a PO is checked (15 characters, like 33ABCDE1234F1Z5) and **remembered on the customer** for next time.
+   - The PDF and the Excel file show both boxes.
+2. **Location history: a clear route**
+   - The blue line is now the **cleaned route**: vague phone-tower positions, GPS jitter and jumps are left out, so it no longer zig-zags.
+   - Every raw GPS point can still be shown with the **Every GPS point** tick box on the map.
+3. **Customer pins.** When the engineer reaches a customer, the map shows a purple 📍 pin with the customer's name:
+   - from a **visit check-in**, or
+   - from staying 10+ minutes at the customer's **saved location** (Customer map), even without a check-in.
+4. **Stops of 30+ minutes** get a numbered orange pin (it was 20 minutes).
+5. **Route by pins.** The pins are joined in order: ▶ Start (punch in) → stops and customers → ■ End (punch out). While still working, the last pin is "Last seen".
+   - Each pin shows the **km from the pin before**, and the total is shown with the number of **customers reached**.
+   - The km now start at the punch-in place and close at the punch-out place. The day's km in the km card and the reports include those stretches.
+6. **Punch out: 6:30 pm, grace till 7:30 pm.**
+   - The 6:30 pm reminder stays.
+   - Punching out up to 7:30 pm needs no reason. After 7:30 pm the reason is asked (working late / travelling from → to / at a customer / other).
+
 # Update — 4 Nov (h): customer price + PO to supplier (PDF / Excel), supplier prices hidden from engineers, paste a message into a quotation, logged-in name + Revise on quotations, punch-out rules + GPS km
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Phone app:** install the new APK from the `crm-apps` release (better tracking, see 5).

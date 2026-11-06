@@ -5,9 +5,9 @@ class AttendanceController
     // After 09:45 punching in is locked until an admin approves a request with a reason.
     public const ON_TIME_UNTIL = '09:30';
     public const GRACE_UNTIL   = '09:45';
-    // Punch-out window (v11.47): reminded at 18:30, expected by 19:00. Later → the reason (working late / travelling).
+    // Punch-out window: reminded at 18:30, grace until 19:30. Later → the reason (working late / travelling).
     public const OUT_FROM  = '18:30';
-    public const OUT_UNTIL = '19:00';
+    public const OUT_UNTIL = '19:30';
     // No location point for this long while punched in (field staff) = phone / GPS was off → reason + manual km.
     public const GAP_MINUTES = 20;
     public const LATE_OUT_TYPES = ['WORK' => 'Working late', 'TRAVEL' => 'Travelling', 'CUSTOMER' => 'At a customer', 'OTHER' => 'Other'];
@@ -142,7 +142,7 @@ class AttendanceController
             $closing = FuelExpenseController::readMeter($b['odometer'] ?? '', 'closing');
             $fx = FuelExpenseController::checkClosing($record, $closing);
         }
-        // After 19:00: why so late — working late / travelling (from → to) / at a customer / other.
+        // After 19:30: why so late — working late / travelling (from → to) / at a customer / other.
         $chk = self::outCheck($auth['id'], $record);
         $lateType = null; $lateReason = null; $tFrom = null; $tTo = null;
         if ($chk['phase'] === 'LATE') {
@@ -501,7 +501,7 @@ class AttendanceController
     private static function ampm(string $hm): string { return date('g:i a', strtotime('2000-01-01 ' . $hm)); }
 
     /**
-     * Punch-out facts for today's record: the phase (EARLY before 18:30, WINDOW 18:30–19:00, LATE after),
+     * Punch-out facts for today's record: the phase (EARLY before 18:30, WINDOW 18:30–19:30, LATE after),
      * km by GPS so far, and — for field staff — the stretches with no location point for 20+ min (phone / GPS off).
      */
     public static function outCheck(string $uid, array $record): array
@@ -511,7 +511,7 @@ class AttendanceController
         $p = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
         $p->execute([$record['id']]);
         $pts = $p->fetchAll();
-        $km = round(LocationHistoryController::distanceKm($pts), 2);
+        $km = round(LocationHistoryController::distanceKm($pts, $record), 2);
         $field = FuelExpenseController::odometerRequired($uid);
         $gaps = [];
         if ($field) {

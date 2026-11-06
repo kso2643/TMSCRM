@@ -213,7 +213,7 @@ class SupplierQuoteController
         $auth = self::auth();
         $b = request_body();
         $only = mb_strtolower(trim((string) ($b['supplier'] ?? '')));
-        $s = db()->prepare("SELECT r.*, b.requestNo, b.firm, c.companyName FROM `PriceRequest` r JOIN `PriceRequestBatch` b ON b.id=r.batchId
+        $s = db()->prepare("SELECT r.*, b.requestNo, b.firm, b.customerId AS batchCustomerId, c.companyName FROM `PriceRequest` r JOIN `PriceRequestBatch` b ON b.id=r.batchId
             LEFT JOIN `Customer` c ON c.id=b.customerId WHERE r.batchId=? ORDER BY r.sortOrder, r.id");
         $s->execute([$bid]);
         $rows = $s->fetchAll();
@@ -253,6 +253,8 @@ class SupplierQuoteController
                 'poDate' => date('Y-m-d'), 'quoteDate' => $qdate ? substr($qdate, 0, 10) : null,
                 'subject' => 'Purchase order against our ref ' . $first['requestNo'] . ($first['companyName'] ? ' — ' . $first['companyName'] : ''),
                 'gstPercent' => 18, 'paymentTerms' => '30 days', 'freight' => 'Door delivery', 'status' => 'DRAFT',
+                // delivered to us (our address + GSTIN, filled by the PO); the customer it is for, with their GSTIN
+                'customerId' => $first['batchCustomerId'] ?: ($first['customerId'] ?? null),
                 'signName' => $auth['name'] ?? '', 'items' => $items,
             ], $auth);
             foreach ($list as $r) $mark->execute([$po['id'], $r['id']]);

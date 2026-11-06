@@ -200,7 +200,7 @@
       vendorId: src.vendorId || '', vendorName: src.vendorName || '', vendorAddress: src.vendorAddress || '', vendorGstin: src.vendorGstin || '',
       vendorPhone: src.vendorPhone || '', vendorEmail: src.vendorEmail || '', kindAttn: src.kindAttn || '', brand: src.brand || '',
       poDate: (src.poDate || today()).slice(0, 10), quoteRef: src.quoteRef || '', quoteDate: (src.quoteDate || '').slice(0, 10), requiredBy: (src.requiredBy || '').slice(0, 10),
-      subject: src.subject || '', deliveryAddress: src.deliveryAddress || '', paymentTerms: src.paymentTerms || '30 days from the date of invoice',
+      subject: src.subject || '', deliveryAddress: src.deliveryAddress || '', customerId: src.customerId || '', customerName: src.customerName || '', customerGstin: src.customerGstin || '', paymentTerms: src.paymentTerms || '30 days from the date of invoice',
       deliveryTerms: src.deliveryTerms || '', freight: src.freight || '', taxes: src.taxes || '', gstPercent: src.gstPercent == null ? '18' : String(src.gstPercent),
       notes: src.notes || '', signName: src.signName || me().name || '', signDesignation: src.signDesignation || 'Authorised Signatory', status: src.status || 'DRAFT',
       items: (src.items && src.items.length ? src.items : [{}, {}, {}]).map(function (i) {
@@ -225,6 +225,7 @@
       var i = opts.type === 'textarea' ? el('textarea', { 'data-po': key, placeholder: opts.ph || '' }) : el('input', { 'data-po': key, type: opts.type || 'text', placeholder: opts.ph || '', list: opts.list || null });
       i.value = F[key] == null ? '' : F[key];
       if (opts.readonly) i.readOnly = true;
+      if (opts.rows) { i.rows = opts.rows; i.style.minHeight = (opts.rows * 1.45) + 'em'; }
       i.addEventListener('input', function () { F[key] = i.value; if (opts.onInput) opts.onInput(); });
       return el('div', { class: 'po-f' + (opts.w ? ' w' : '') }, [el('label', { text: label }), i]);
     }
@@ -294,6 +295,39 @@
             s.onchange = function () { F.status = s.value; }; return s; })()])
         ])])
       ]));
+      // deliver to: our address + GSTIN (from the letterhead) unless changed | the customer it is for, with GSTIN
+      function ourAddr() { var p = profs[F.company] || {}; return [p.name, (p.address || '').trim(), p.gstin ? 'GSTIN: ' + p.gstin : ''].filter(Boolean).join('\n'); }
+      if (!F.deliveryAddress) F.deliveryAddress = ourAddr();
+      var custIn = el('input', { 'data-po': 'customerName', id: 'po-cust', list: 'po-cust-list', autocomplete: 'off', placeholder: 'Type to find the customer (optional)', value: F.customerName });
+      var custDl = el('datalist', { id: 'po-cust-list' });
+      var gstIn = el('input', { 'data-po': 'customerGstin', id: 'po-cust-gst', placeholder: 'e.g. 33ABCDE1234F1Z5', maxlength: '15', value: F.customerGstin, style: 'text-transform:uppercase' });
+      var found = {}, ct;
+      custIn.addEventListener('input', function () {
+        F.customerName = custIn.value;
+        var hit = found[custIn.value];
+        if (hit) { F.customerId = hit.id; if (hit.gstin) { F.customerGstin = hit.gstin; gstIn.value = hit.gstin; } return; }
+        F.customerId = '';
+        clearTimeout(ct);
+        if (custIn.value.trim().length < 2) return;
+        ct = setTimeout(function () {
+          api('GET', '/customers?limit=10&search=' + encodeURIComponent(custIn.value.trim())).then(function (j) {
+            var rows = (j.data && (j.data.customers || j.data.items || j.data)) || [];
+            if (!Array.isArray(rows)) rows = [];
+            clear(custDl); rows.forEach(function (c) { found[c.companyName] = c; custDl.appendChild(el('option', { value: c.companyName, text: c.gstin ? 'GSTIN ' + c.gstin : (c.location || '') })); });
+          }).catch(function () {});
+        }, 250);
+      });
+      gstIn.addEventListener('input', function () { F.customerGstin = gstIn.value.toUpperCase(); });
+      sheet.appendChild(el('div', { class: 'po-two' }, [
+        el('div', { class: 'po-box' }, [el('h4', { text: 'DELIVER TO' }), el('div', { class: 'po-g' }, [
+          field('Delivery address', 'deliveryAddress', { type: 'textarea', w: true, ph: 'Our address', rows: 4 }),
+          el('div', { class: 'po-f w' }, [el('button', { class: 'vd-btn sm', type: 'button', id: 'po-our-addr', text: '↺ Our address (' + F.company + ')', onclick: function () { F.deliveryAddress = ourAddr(); render(); } })])
+        ])]),
+        el('div', { class: 'po-box' }, [el('h4', { text: 'CUSTOMER' }), el('div', { class: 'po-g' }, [
+          el('div', { class: 'po-f w' }, [el('label', { text: 'Customer (the material is for)' }), custIn, custDl]),
+          el('div', { class: 'po-f w' }, [el('label', { text: 'Customer GSTIN' }), gstIn])
+        ])])
+      ]));
       var subj = el('input', { 'data-po': 'subject', placeholder: 'e.g. Supply of milling inserts', value: F.subject });
       subj.addEventListener('input', function () { F.subject = subj.value; });
       sheet.appendChild(el('div', { class: 'po-sub' }, [el('b', { text: 'Sub:' }), subj]));
@@ -346,7 +380,7 @@
         el('div', { class: 'po-box' }, [el('h4', { text: 'TERMS & CONDITIONS' }), el('div', { class: 'po-g' }, [
           field('Payment', 'paymentTerms'), field('Delivery', 'deliveryTerms', { ph: 'e.g. Door delivery within 7 days' }),
           field('Freight', 'freight', { ph: 'e.g. Vendor scope' }), field('Taxes', 'taxes', { ph: 'default: GST % extra' }),
-          field('Deliver to', 'deliveryAddress', { type: 'textarea', w: true, ph: 'Leave blank to use our address' }), field('Note', 'notes', { type: 'textarea', w: true })
+          field('Note', 'notes', { type: 'textarea', w: true })
         ])]),
         el('div', { class: 'po-box' }, [el('h4', { text: 'FOR ' + String(prof.name || '').toUpperCase() }), el('div', { class: 'po-g' }, [
           field('Signed by', 'signName'), field('Designation', 'signDesignation')
@@ -367,7 +401,7 @@
 
     function save(btn, pdf) {
       var body = {}; Object.keys(F).forEach(function (k) { if (k !== 'items' && k !== 'id') body[k] = F[k]; });
-      if (!body.deliveryAddress) body.deliveryAddress = profs[F.company].name + '\n' + (profs[F.company].address || '');
+      if (!body.deliveryAddress) delete body.deliveryAddress;   // the server puts our address
       body.items = F.items.map(function (i) { return i; });
       btn.disabled = true;
       (F.id ? api('PUT', '/purchase-orders/' + encodeURIComponent(F.id), body) : api('POST', '/purchase-orders', body)).then(function (j) {

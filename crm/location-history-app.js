@@ -4,7 +4,8 @@
    Super Admin / Admin / Manager pick a person and a date (a strip shows
    which days that month have tracking data) and see:
      - the route travelled (every location point), punch in / punch out
-     - stops of 20+ minutes in one place (numbered pins; standing still adds no km), tea / lunch breaks, stationary and
+     - pins in order: start → stops of 30+ minutes and customers reached (📍 with the name) → end, joined, with the km
+       of each leg and the day's total (standing still adds no km), tea / lunch breaks, stationary and
        location-off alerts
      - distance, points, hours, break time, and a slider to replay the day.
    Data: GET /api/route-log/users | days | history (LocationHistoryController).
@@ -76,7 +77,17 @@
       '.lh-stop span{transform:rotate(45deg)}',
       '.lh-ev-stop{font-weight:600;color:#92400e}.dark .lh-ev-stop{color:#fcd34d}',
             '.lh-pin{width:16px;height:16px;border-radius:9999px;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}',
-      '.lh-emoji{font-size:20px;line-height:20px;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}'
+      '.lh-emoji{font-size:20px;line-height:20px;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}',
+      '.lh-mk{display:flex;flex-direction:column;align-items:center;transform:translateY(-4px)}',
+      '.lh-mk .b{width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}',
+      '.lh-mk .b span{transform:rotate(45deg);color:#fff;font:700 12px/1 system-ui,sans-serif}',
+      '.lh-mk .lb{margin-top:3px;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:6px;padding:1px 6px;font:600 11px/1.4 system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.2);max-width:180px;overflow:hidden;text-overflow:ellipsis}',
+      '.lh-pins{display:grid;gap:0}.lh-p{display:grid;grid-template-columns:2rem 1fr auto;gap:.5rem;align-items:start;padding:.45rem .2rem;cursor:pointer;border-radius:.4rem}.lh-p:hover{background:#f8fafc}.dark .lh-p:hover{background:#1e293b}',
+      '.lh-p .no{width:1.7rem;height:1.7rem;border-radius:999px;color:#fff;display:flex;align-items:center;justify-content:center;font:700 .72rem/1 system-ui,sans-serif}',
+      '.lh-p .t{font-size:.84rem;font-weight:600;color:#0f172a}.dark .lh-p .t{color:#f1f5f9}.lh-p .s{font-size:.74rem;color:#64748b}',
+      '.lh-leg{font-size:.72rem;color:#2563eb;padding:0 0 0 2.6rem;margin:-.1rem 0}',
+      '.lh-p .km{font-size:.78rem;font-weight:700;color:#2563eb;white-space:nowrap}',
+      '.lh-tot{display:flex;justify-content:space-between;border-top:2px solid #e2e8f0;margin-top:.4rem;padding-top:.5rem;font-weight:700}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -247,20 +258,38 @@
           stat('Punch in', a ? tm(a.checkIn) : 'No punch-in'),
           stat('Punch out', a ? (a.checkOut ? tm(a.checkOut) : (a.checkIn ? 'Still working' : '—')) : '—'),
           stat('Time on duty', a && a.checkIn ? dur(hrs) : '—'),
-          stat('Travelled (overall)', st.distanceKm + ' km'),
-          stat('Stops (' + (st.stopMinutes || 20) + '+ min)', st.stops ? st.stops + ' · ' + dur((st.stoppedMinutes || 0) * 60) : 'None'),
+          stat('Travelled (overall)', st.distanceKm + ' km' + (st.manualKm ? ' + ' + st.manualKm + ' typed' : '')),
+          stat('Customers reached', String(st.customersReached || 0)),
+          stat('Stops (' + (st.stopMinutes || 30) + '+ min)', st.stops ? st.stops + ' · ' + dur((st.stoppedMinutes || 0) * 60) : 'None'),
           stat('Location points', String(st.points)),
           stat('Break time', st.breakSeconds ? dur(st.breakSeconds) : 'None')
         ]),
         a && a.checkInLat === null ? el('p', { class: 'text-xs', style: 'color:#b91c1c', text: '⚠ Punched in without location.' }) : null
       ]));
 
+      // pin to pin: start → stops / customers → end, with the km of each leg
+      var pins = d.pins || [];
+      if (pins.length) {
+        var pl = el('div', { class: 'lh-pins', id: 'lh-pins' });
+        pins.forEach(function (p, i) {
+          pl.appendChild(el('div', { class: 'lh-p', 'data-pin': p.n, onclick: function () { if (map) map.setView([p.lat, p.lng], 16); } }, [
+            el('span', { class: 'no', style: 'background:' + PCOL[p.kind], text: pinLabel(p) }),
+            el('div', {}, [el('div', { class: 't', text: pinTitle(p) }),
+              el('div', { class: 's', text: tm(p.from) + (p.minutes ? ' – ' + tm(p.to) + ' · ' + dur(p.minutes * 60) : '') + (p.how === 'check-in' ? ' · visit check-in' : p.how === 'location' ? ' · at the customer\'s location' : '') })]),
+            el('span', { class: 'km', text: i ? '+' + p.kmFromPrev.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '' })
+          ]));
+        });
+        pl.appendChild(el('div', { class: 'lh-tot', id: 'lh-pin-total' }, [el('span', { text: 'Total · ' + (st.customersReached || 0) + ' customer' + (st.customersReached === 1 ? '' : 's') + ' reached' }), el('span', { text: (st.pinKm != null ? st.pinKm : st.distanceKm).toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' })]));
+        side.appendChild(el('div', { class: 'card p-4' }, [el('p', { class: 'font-semibold mb-2', text: 'Route by pins' }), pl]));
+      }
+
       // timeline
       var evs = [];
       if (a && a.checkIn) evs.push({ at: a.checkIn, i: '🟢', text: 'Punched in', lat: a.checkInLat, lng: a.checkInLng });
-      (d.stops || []).forEach(function (s) {
-        evs.push({ at: s.from, i: '📍', text: 'Stop ' + s.n + ' — ' + dur(s.minutes * 60) + ' in one place (' + tm(s.from) + ' – ' + tm(s.to) + ')', lat: s.lat, lng: s.lng, stop: s.n });
-        evs.push({ at: s.to, i: '▶', text: 'Moving again — tracking carries on', lat: s.lat, lng: s.lng });
+      pins.forEach(function (p) {
+        if (p.kind !== 'STOP' && p.kind !== 'VISIT') return;
+        evs.push({ at: p.from, i: p.kind === 'VISIT' ? '📍' : '⏸', text: pinTitle(p) + ' — ' + dur(p.minutes * 60) + ' (' + tm(p.from) + ' – ' + tm(p.to) + ')', lat: p.lat, lng: p.lng, stop: p.n });
+        evs.push({ at: p.to, i: '▶', text: 'Moving again', lat: p.lat, lng: p.lng });
       });
       (d.breaks || []).forEach(function (b) { evs.push({ at: b.startedAt, i: b.type === 'LUNCH' ? '🍽' : '☕', text: (b.type === 'LUNCH' ? 'Lunch' : 'Tea') + ' break · ' + (b.endedAt ? dur(b.seconds) + ' (to ' + tm(b.endedAt) + ')' : 'not ended') + (b.trigger === 'AUTO' ? ' · after 30-min prompt' : ''), lat: b.lat, lng: b.lng }); });
       (d.events || []).forEach(function (e) {
@@ -299,22 +328,33 @@
       var bounds = [];
       function pin(color) { return L.divIcon({ className: '', html: '<div class="lh-pin" style="background:' + color + '"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }); }
       function emoji(ch) { return L.divIcon({ className: '', html: '<div class="lh-emoji">' + ch + '</div>', iconSize: [22, 22], iconAnchor: [11, 11] }); }
-      if (pts.length) {
-        var line = pts.map(function (p) { return [p.lat, p.lng]; });
-        L.polyline(line, { color: '#2563eb', weight: 4, opacity: .8 }).addTo(layers);
-        pts.forEach(function (p) { L.circleMarker([p.lat, p.lng], { radius: 2.5, color: '#1d4ed8', weight: 1, fillOpacity: .9 }).bindTooltip(tm(p.capturedAt)).addTo(layers); });
-        bounds = bounds.concat(line);
-      }
-      if (a && a.checkInLat != null) { L.marker([a.checkInLat, a.checkInLng], { icon: pin('#16a34a') }).bindPopup('Punched in ' + tm(a.checkIn)).addTo(layers); bounds.push([a.checkInLat, a.checkInLng]); }
-      if (a && a.checkOutLat != null) { L.marker([a.checkOutLat, a.checkOutLng], { icon: pin('#dc2626') }).bindPopup('Punched out ' + tm(a.checkOut)).addTo(layers); bounds.push([a.checkOutLat, a.checkOutLng]); }
-      // stops of 20+ minutes: a numbered pin where they stayed
-      (d.stops || []).forEach(function (s) {
-        var txt = '<b>Stop ' + s.n + '</b> · ' + dur(s.minutes * 60) + '<br>' + tm(s.from) + ' – ' + tm(s.to);
-        L.circle([s.lat, s.lng], { radius: 60, color: '#d97706', fillColor: '#fbbf24', fillOpacity: .25, weight: 1.5 }).addTo(layers);
-        L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="lh-stop" data-stop-pin="' + s.n + '"><span>' + s.n + '</span></div>', iconSize: [26, 26], iconAnchor: [13, 26] }), zIndexOffset: 500 })
-          .bindPopup(txt).bindTooltip('Stop ' + s.n + ' · ' + dur(s.minutes * 60)).addTo(layers);
-        bounds.push([s.lat, s.lng]);
+      // the route: the cleaned path the km are measured on (vague tower fixes, jitter and glitches left out)
+      var path = (d.path || []).map(function (p) { return [p.lat, p.lng]; });
+      if (path.length > 1) L.polyline(path, { color: '#2563eb', weight: 5, opacity: .85, lineJoin: 'round' }).addTo(layers);
+      bounds = bounds.concat(path);
+      var rawLayer = L.layerGroup();
+      pts.forEach(function (p) { rawLayer.addLayer(L.circleMarker([p.lat, p.lng], { radius: 2.5, color: p.accuracy != null && p.accuracy > 150 ? '#f97316' : '#64748b', weight: 1, fillOpacity: .8 }).bindTooltip(tm(p.capturedAt) + (p.accuracy != null ? ' · ±' + Math.round(p.accuracy) + ' m' : ''))); });
+      // pins joined in order, start → … → end (dashed), each a marker
+      var pinsLL = pins.map(function (p) { return [p.lat, p.lng]; });
+      if (pinsLL.length > 1) L.polyline(pinsLL, { color: '#7c3aed', weight: 2, opacity: .7, dashArray: '6 6' }).addTo(layers);
+      pins.forEach(function (p) {
+        var lab = p.kind === 'VISIT' ? p.customer : p.kind === 'START' ? 'Start ' + tm(p.from) : p.kind === 'END' ? 'End ' + tm(p.from) : p.kind === 'NOW' ? 'Last seen ' + tm(p.from) : '';
+        var html = '<div class="lh-mk" data-pin-mk="' + p.n + '" data-kind="' + p.kind + '"><div class="b" style="background:' + PCOL[p.kind] + '"><span>' + pinLabel(p) + '</span></div>' + (lab ? '<div class="lb">' + escH(lab) + '</div>' : '') + '</div>';
+        L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html: html, iconSize: [30, 30], iconAnchor: [15, 34] }), zIndexOffset: p.kind === 'VISIT' ? 800 : 600 })
+          .bindPopup('<b>' + escH(pinTitle(p)) + '</b><br>' + tm(p.from) + (p.minutes ? ' – ' + tm(p.to) + ' · ' + dur(p.minutes * 60) : '') + (p.n > 1 ? '<br>+' + p.kmFromPrev + ' km from the pin before' : '')).addTo(layers);
+        if (p.kind === 'STOP' || p.kind === 'VISIT') L.circle([p.lat, p.lng], { radius: 60, color: PCOL[p.kind], fillColor: PCOL[p.kind], fillOpacity: .15, weight: 1.2 }).addTo(layers);
+        bounds.push([p.lat, p.lng]);
       });
+      var rawCtl = L.control({ position: 'topright' });
+      rawCtl.onAdd = function () {
+        var d2 = L.DomUtil.create('label', '');
+        d2.style.cssText = 'background:#fff;padding:4px 8px;border-radius:6px;font:12px system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex;gap:5px;align-items:center;cursor:pointer;color:#0f172a';
+        d2.innerHTML = '<input type="checkbox" id="lh-raw"> Every GPS point';
+        L.DomEvent.disableClickPropagation(d2);
+        d2.querySelector('input').addEventListener('change', function (e) { if (e.target.checked) rawLayer.addTo(map); else map.removeLayer(rawLayer); });
+        return d2;
+      };
+      rawCtl.addTo(map);
       (d.breaks || []).forEach(function (b) {
         if (b.lat == null) return;
         L.marker([b.lat, b.lng], { icon: emoji(b.type === 'LUNCH' ? '🍽' : '☕') }).bindPopup((b.type === 'LUNCH' ? 'Lunch' : 'Tea') + ' break ' + tm(b.startedAt) + (b.endedAt ? ' – ' + tm(b.endedAt) : '')).addTo(layers);
@@ -339,6 +379,11 @@
 
     function stat(k, v) { return el('div', { class: 'lh-stat' }, [el('p', { class: 'k', text: k }), el('p', { class: 'v', text: v })]); }
   }
+
+  var PCOL = { START: '#16a34a', STOP: '#d97706', VISIT: '#7c3aed', END: '#dc2626', NOW: '#1e3a5f' };
+  function pinLabel(p) { return p.kind === 'START' ? '▶' : p.kind === 'END' ? '■' : p.kind === 'NOW' ? '●' : p.kind === 'VISIT' ? '📍' : String(p.stopNo || p.n); }
+  function pinTitle(p) { return p.kind === 'START' ? 'Start — punched in' : p.kind === 'END' ? 'End — punched out' : p.kind === 'NOW' ? 'Last seen (still working)' : p.kind === 'VISIT' ? p.customer : 'Stop ' + (p.stopNo || p.n) + ' — stayed ' + dur(p.minutes * 60); }
+  function escH(t) { return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   window.LocationHistory = { mountPage: mount };
 })();

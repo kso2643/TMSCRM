@@ -63,6 +63,27 @@ $tail", 'columns' => ['customerName' => 'VARCHAR(160) NULL']],
   PRIMARY KEY (`code`)
 $tail"],
         ], 'Purchase orders + company letterhead');
+        // the customer the material is for, with their GSTIN (shown on the PO), and the customer's GSTIN kept on the customer
+        ensure_schema([
+            'PurchaseOrder' => ['create' => '', 'columns' => ['customerId' => 'VARCHAR(30) NULL', 'customerName' => 'VARCHAR(160) NULL', 'customerGstin' => 'VARCHAR(20) NULL']],
+            'Customer' => ['create' => '', 'columns' => ['gstin' => 'VARCHAR(20) NULL']],
+        ], 'PO customer + GSTIN');
+    }
+
+    /** "33ABCDE1234F1Z5" — 15 characters: state code, PAN, entity, Z, check. Empty is fine. */
+    public static function gstin($v, string $whose): ?string
+    {
+        $v = strtoupper(preg_replace('/\s+/', '', (string) $v));
+        if ($v === '') return null;
+        if (!preg_match('/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/', $v)) sendError($whose . ' GSTIN should be 15 characters, like 33ABCDE1234F1Z5.', 400);
+        return $v;
+    }
+
+    /** Our delivery address for a company: name, address and GSTIN from the letterhead. */
+    public static function ourDelivery(string $co): string
+    {
+        $p = self::profile($co);
+        return trim($p['name'] . "\n" . trim((string) $p['address']) . ($p['gstin'] ? "\nGSTIN: " . $p['gstin'] : ''));
     }
 
     public function __construct() { self::ensure(); }
@@ -202,6 +223,11 @@ $tail"],
         $tax = $gst ? round($sub * $gst / 100, 2) : 0.0;
         $status = strtoupper((string) ($b['status'] ?? 'DRAFT'));
         if (!isset(self::STATUSES[$status])) $status = 'DRAFT';
+        $co = self::co($b['company'] ?? 'TMS');
+        $customer = null;
+        if (!empty($b['customerId'])) { $cs = db()->prepare('SELECT id, companyName, gstin FROM `Customer` WHERE id=?'); $cs->execute([(string) $b['customerId']]); $customer = $cs->fetch() ?: null; }
+        $custName = self::str($b['customerName'] ?? '', 160) ?: ($customer['companyName'] ?? null);
+        $custGst = array_key_exists('customerGstin', $b) ? self::gstin($b['customerGstin'], 'Customer') : ($customer['gstin'] ?? null);
         $h = [
             'company' => self::co($b['company'] ?? 'TMS'), 'vendorId' => $vendor['id'] ?? null, 'vendorName' => $vendorName,
             'vendorAddress' => trim((string) ($b['vendorAddress'] ?? ($vendor['address'] ?? ''))) ?: null,
@@ -209,13 +235,20 @@ $tail"],
             'vendorEmail' => self::str($b['vendorEmail'] ?? ($vendor['email'] ?? ''), 160), 'kindAttn' => self::str($b['kindAttn'] ?? ($vendor['contactPerson'] ?? ''), 120),
             'brand' => self::str($b['brand'] ?? '', 160), 'poDate' => $poDate, 'quoteRef' => self::str($b['quoteRef'] ?? '', 120),
             'quoteDate' => to_date_only($b['quoteDate'] ?? '') ?: null, 'requiredBy' => to_date_only($b['requiredBy'] ?? '') ?: null,
-            'subject' => self::str($b['subject'] ?? '', 255), 'deliveryAddress' => trim((string) ($b['deliveryAddress'] ?? '')) ?: null,
+            'subject' => self::str($b['subject'] ?? '', 255), 'deliveryAddress' => trim((string) ($b['deliveryAddress'] ?? '')) ?: self::ourDelivery($co),
+            'customerId' => $customer['id'] ?? null, 'customerName' => $custName, 'customerGstin' => $custGst,
             'paymentTerms' => self::str($b['paymentTerms'] ?? '', 160), 'deliveryTerms' => self::str($b['deliveryTerms'] ?? '', 160),
             'freight' => self::str($b['freight'] ?? '', 120), 'taxes' => self::str($b['taxes'] ?? '', 120), 'gstPercent' => $gst,
             'notes' => trim((string) ($b['notes'] ?? '')) ?: null, 'signName' => self::str($b['signName'] ?? '', 120), 'signDesignation' => self::str($b['signDesignation'] ?? '', 120),
             'subTotal' => round($sub, 2), 'taxAmount' => $tax, 'totalAmount' => round($sub + $tax, 2), 'status' => $status,
         ];
         return [$h, $items];
+    }
+
+    /** A customer GSTIN typed on a PO is kept on the customer, so the next PO for them fills it in. */
+    private static function rememberCustomerGstin(array $h): void
+    {
+        if (!empty($h['customerId']) && !empty($h['customerGstin'])) db()->prepare('UPDATE `Customer` SET gstin=? WHERE id=?')->execute([$h['customerGstin'], $h['customerId']]);
     }
 
     private function saveItems(string $id, array $items): void
@@ -249,6 +282,7 @@ $tail"],
                 } catch (PDOException $e) { if ($try >= 2 || $e->getCode() !== '23000') throw $e; }
             }
             $this->saveItems($id, $items);
+            self::rememberCustomerGstin($h);
             db()->commit();
         } catch (Throwable $e) { db()->rollBack(); sendError('Could not save the PO: ' . $e->getMessage(), 500); }
         log_activity($auth['id'], 'PO_CREATED', 'PurchaseOrder', $id, ['poNumber' => $h['poNumber'], 'vendor' => $h['vendorName']]);
@@ -266,6 +300,7 @@ $tail"],
         try {
             db()->prepare('UPDATE `PurchaseOrder` SET ' . implode(',', array_map(fn($k) => "`$k`=?", array_keys($h))) . ' WHERE id=?')->execute(array_merge(array_values($h), [$id]));
             $this->saveItems($id, $items);
+            self::rememberCustomerGstin($h);
             db()->commit();
         } catch (Throwable $e) { db()->rollBack(); sendError('Could not save the PO: ' . $e->getMessage(), 500); }
         log_activity($auth['id'], 'PO_UPDATED', 'PurchaseOrder', $id, ['poNumber' => $h['poNumber'] ?? $old['poNumber']]);
@@ -334,6 +369,17 @@ $tail"],
             $r = $row([$vend[$i] ?? '', '', '', '', '', $info[$i][0] ?? '', '', $info[$i][1] ?? ''], $i === 0 ? 'bold' : 'default');
             $w->merge($sh, "A$r:E$r"); $w->merge($sh, "F$r:G$r"); $w->merge($sh, "H$r:J$r");
         }
+        // deliver to (A–E) | customer (F–J)
+        $dl = array_values(array_filter(array_map('trim', explode("\n", (string) ($p['deliveryAddress'] ?? '')))));
+        $cu = !empty($p['customerName']) || !empty($p['customerGstin']) ? ['Customer: ' . ($p['customerName'] ?: '—'), 'Customer GSTIN: ' . ($p['customerGstin'] ?: '—')] : [];
+        if ($dl || $cu) {
+            $row([''], 'plain', 6, true);
+            for ($i = 0; $i < max(count($dl), count($cu), 1); $i++) {
+                $left = $i === 0 ? 'Deliver to: ' . ($dl[0] ?? '') : ($dl[$i] ?? '');
+                $r = $row([$left, '', '', '', '', $cu[$i] ?? ''], $i === 0 ? 'bold' : 'default');
+                $w->merge($sh, "A$r:E$r"); $w->merge($sh, "F$r:J$r");
+            }
+        }
         $row([''], 'plain', 6, true);
         $row(['Sub: ' . ($p['subject'] ?: 'Purchase order for the items below')], 'section', 20, true);
         $row(['Dear Sir / Madam, please supply the following items as per the terms below.'], 'plain', null, true);
@@ -354,7 +400,7 @@ $tail"],
         $row(['', '', '', '', '', '', '', 'Grand Total', ['f' => $p['gstPercent'] ? "I$subRow+I$r" : "I$subRow", 'v' => (float) $p['totalAmount'], 's' => 'total'], ''], 'totallbl');
         $row([''], 'plain', 6, true);
         $row(['Terms & Conditions'], 'bold', null, true);
-        foreach ([['Payment', $p['paymentTerms']], ['Delivery', $p['deliveryTerms']], ['Freight', $p['freight']], ['Taxes', $p['taxes'] ?: ($p['gstPercent'] ? 'GST ' . (float) $p['gstPercent'] . '% extra' : null)], ['Deliver to', $p['deliveryAddress']], ['Note', $p['notes']]] as [$k, $v]) {
+        foreach ([['Payment', $p['paymentTerms']], ['Delivery', $p['deliveryTerms']], ['Freight', $p['freight']], ['Taxes', $p['taxes'] ?: ($p['gstPercent'] ? 'GST ' . (float) $p['gstPercent'] . '% extra' : null)], ['Note', $p['notes']]] as [$k, $v]) {
             if (!$v) continue;
             $row([$k . ': ' . str_replace("\n", ', ', (string) $v)], 'plain', null, true);
         }
@@ -463,6 +509,27 @@ class PurchaseOrderPdf
             $my += 4.5;
         }
         $this->y = $top + $boxH + 3;
+        // ── deliver to (our address + GSTIN) | customer the material is for (name + GSTIN) ──
+        $dl = []; foreach (array_filter(array_map('trim', explode("\n", (string) ($p['deliveryAddress'] ?? '')))) as $l) foreach ($this->wrap($l, $toW - 6) as $w) $dl[] = $w;
+        $hasCust = !empty($p['customerName']) || !empty($p['customerGstin']);
+        if ($dl || $hasCust) {
+            $top = $this->y;
+            $h2 = max(16, 9 + 4 * max(count($dl), $hasCust ? 2 : 0) + 2);
+            $this->box(self::ML, $top, $toW, $h2, self::BOX);
+            $this->font('Helvetica-Bold', 6.5, self::BLUE); $this->t('DELIVER TO', self::ML + 3, $top + 3);
+            $dy = $top + 8;
+            foreach ($dl as $k => $l) { $this->font($k === 0 ? 'Helvetica-Bold' : 'Helvetica', $k === 0 ? 8.5 : 8, $k === 0 ? self::DARK : '#374151'); $this->t($l, self::ML + 3, $dy); $dy += 4; }
+            if ($hasCust) {
+                $this->box($mX, $top, $mW, $h2, self::BOX);
+                $this->font('Helvetica-Bold', 6.5, self::BLUE); $this->t('CUSTOMER', $mX + 3, $top + 3);
+                $this->font('Helvetica-Bold', 8.5, self::DARK);
+                $cy = $top + 8;
+                foreach ($this->wrap((string) ($p['customerName'] ?: '—'), $mW - 6) as $l) { $this->t($l, $mX + 3, $cy); $cy += 4; }
+                $this->font('Helvetica', 7.5, self::GREY); $this->t('GSTIN', $mX + 3, $cy);
+                $this->font('Helvetica-Bold', 7.5, self::DARK); $this->t((string) ($p['customerGstin'] ?: '—'), $mX + $mW - 3, $cy, ['align' => 'right']);
+            }
+            $this->y = $top + $h2 + 3;
+        }
         // ── subject ──
         $sub = $p['subject'] ?: 'Purchase order for the items below';
         $this->pdf->rect($this->mm(self::ML), $this->mm($this->y), $this->mm($this->cw), $this->mm(8), self::BGBLUE);
@@ -528,7 +595,7 @@ class PurchaseOrderPdf
         // ── terms + delivery address + signatory ──
         $terms = [['Payment', $p['paymentTerms']], ['Delivery', $p['deliveryTerms']], ['Freight', $p['freight']], ['Taxes', $p['taxes'] ?: ($p['gstPercent'] ? 'GST ' . $this->q($p['gstPercent']) . '% extra' : null)]];
         $terms = array_values(array_filter($terms, fn($t) => $t[1]));
-        $dLines = $this->wrap((string) ($p['deliveryAddress'] ?? ''), 100);
+        $dLines = [];   // the delivery address has its own box at the top
         $nLines = $this->wrap((string) ($p['notes'] ?? ''), $this->cw - 6);
         $h = max(30, 10 + 4.5 * count($terms) + ($dLines ? 5 + 4 * count($dLines) : 0) + ($nLines ? 5 + 3.8 * count($nLines) : 0) + 3);
         $this->need($h + 4);

@@ -332,15 +332,15 @@
     }, function (e) { if (!/Punch in|lat and lng/i.test((e && e.message) || '')) keep(p); });
   }
 
-  // 6:30–7:00 pm: a banner on every page to punch out; after 7 pm it says the reason will be asked.
+  // 6:30–7:30 pm (grace): a banner on every page to punch out; after 7:30 pm it says the reason will be asked.
   function punchOutReminder() {
     if (!trk.punchedIn || /^\/attendance/.test(location.pathname)) { var o = tRoot && tRoot.querySelector('.outrem'); if (o) o.remove(); return; }
     var d = new Date(), hm = d.getHours() * 60 + d.getMinutes();
     if (hm < 18 * 60 + 30) return;
-    var late = hm >= 19 * 60, key = 'crm_outrem_' + d.toDateString() + (late ? '_late' : '');
+    var late = hm >= 19 * 60 + 30, key = 'crm_outrem_' + d.toDateString() + (late ? '_late' : '');
     if (lsGet(key)) return;
     var r = tUi(); if (r.querySelector('.outrem')) return;
-    var ban = mkEl('div', 'ban outrem', late ? '⏰ It is after 7 pm and you are still punched in. Punch out — you will be asked the reason (working late / travelling).' : '🕡 It is punch-out time (6:30–7:00 pm). Please punch out with your closing odometer.');
+    var ban = mkEl('div', 'ban outrem', late ? '⏰ It is after 7:30 pm and you are still punched in. Punch out — you will be asked the reason (working late / travelling).' : '🕡 It is punch-out time (6:30 pm, grace till 7:30 pm). Please punch out with your closing odometer.');
     ban.style.background = late ? '#b45309' : '#1e3a5f';
     var go = mkEl('button', '', 'Punch out'); go.addEventListener('click', function () { location.href = '/attendance/'; });
     var later = mkEl('button', '', 'Later'); later.style.background = 'transparent'; later.style.color = '#fff'; later.style.border = '1px solid rgba(255,255,255,.6)';

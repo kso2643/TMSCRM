@@ -305,7 +305,7 @@
     box.appendChild(el('div', { class: 'at-msg info', id: 'at-gps-km' }, [
       '📍 GPS today: ', el('b', { text: km(c.gpsKm) + ' km' }), ' (' + c.points + ' points)',
       c.suggestedClosing != null ? ' · closing odometer should be about ' + km(c.suggestedClosing) + ' km' : '']));
-    if (c.phase === 'WINDOW') box.appendChild(el('div', { class: 'at-msg ok', id: 'at-out-window', text: '🕡 Punch-out time — please punch out before ' + ampm(c.outUntil) + '.' }));
+    if (c.phase === 'WINDOW') box.appendChild(el('div', { class: 'at-msg ok', id: 'at-out-window', text: '🕡 Punch-out time (grace till ' + ampm(c.outUntil) + ') — please punch out now. After that you will be asked the reason.' }));
     if (c.phase === 'LATE') {
       var f = el('div', { class: 'at-msg warn at-f', id: 'at-late-out' }, [el('b', { text: '⏰ It is after ' + ampm(c.outUntil) + ' — why are you punching out late? *' })]);
       var seg = el('div', { class: 'at-row', style: 'flex-wrap:wrap;margin-top:.4rem' });

@@ -78,7 +78,9 @@ class LocationHistoryController
     }
 
     /** A stop is a stay of this many minutes or more in one place; it gets a pin on the map. */
-    public const STOP_MINUTES = 20;
+    public const STOP_MINUTES = 30;
+    /** A stay this long within a customer's saved location counts as reaching that customer (pin with the customer's name). */
+    public const VISIT_MINUTES = 10;
     /** Stays this long or longer add no distance (GPS drift while standing still is not travel). */
     private const STAY_MINUTES = 10;
     private const STAY_RADIUS = 150;   // metres from the centre of the stay
@@ -128,7 +130,31 @@ class LocationHistoryController
      *  - GPS jitter is ignored: a point counts once it is more than max(25 m, its accuracy) from the last one
      *  - impossible jumps (faster than 150 km/h between two points) are dropped as glitches
      */
-    public static function distanceKm(array $pts): float
+    /** The day's points with the punch-in place first and the punch-out place last, so the route starts and ends there. */
+    public static function withEnds(array $pts, ?array $att): array
+    {
+        if (!$att) return $pts;
+        $first = $pts ? (string) $pts[0]['capturedAt'] : null; $last = $pts ? (string) end($pts)['capturedAt'] : null;
+        // only where the times fit (a wrong phone clock must not turn the whole route into "glitches")
+        if (!empty($att['checkIn']) && isset($att['checkInLat']) && $att['checkInLat'] !== null && $att['checkInLng'] !== null && ($first === null || (string) $att['checkIn'] <= $first))
+            array_unshift($pts, ['lat' => (float) $att['checkInLat'], 'lng' => (float) $att['checkInLng'], 'accuracy' => 30, 'capturedAt' => $att['checkIn']]);
+        if (!empty($att['checkOut']) && isset($att['checkOutLat']) && $att['checkOutLat'] !== null && $att['checkOutLng'] !== null && ($last === null || (string) $att['checkOut'] >= $last))
+            $pts[] = ['lat' => (float) $att['checkOutLat'], 'lng' => (float) $att['checkOutLng'], 'accuracy' => 30, 'capturedAt' => $att['checkOut']];
+        return $pts;
+    }
+
+    public static function distanceKm(array $pts, ?array $att = null): float
+    {
+        if ($att) $pts = self::withEnds($pts, $att);
+        $path = self::cleanPath($pts);
+        return $path ? end($path)['km'] : 0.0;
+    }
+
+    /**
+     * The route the km are measured on (see distanceKm): vague fixes, jitter and glitches removed,
+     * each stay of 10+ min as one point. Each point: lat, lng, at, until, km (running total).
+     */
+    public static function cleanPath(array $pts): array
     {
         $pts = self::usable($pts);
         $path = []; $k = 0;
@@ -138,23 +164,124 @@ class LocationHistoryController
             $k = $st['j'] + 1;
         }
         for ($n = count($pts); $k < $n; $k++) $path[] = $pts[$k];
-        $m = 0; $prev = null;
+        $m = 0; $prev = null; $out = [];
         foreach ($path as $p) {
             $acc = isset($p['accuracy']) && $p['accuracy'] !== null ? (float) $p['accuracy'] : 0;
             if ($prev) {
                 $d = self::meters((float) $prev['lat'], (float) $prev['lng'], (float) $p['lat'], (float) $p['lng']);
-                if ($d < max(25, $acc)) continue; // jitter — keep the previous anchor
+                if ($d < max(25, $acc) && !isset($p['until'])) continue; // jitter — keep the previous anchor
                 $t0 = $prev['until'] ?? $prev['capturedAt'] ?? null;
                 $secs = isset($p['capturedAt']) && $t0 ? max(1, strtotime($p['capturedAt']) - strtotime($t0)) : null;
                 if ($secs !== null && $d / $secs > 41.7) continue; // > 150 km/h: a glitch, not a drive
-                $m += $d;
+                if ($d >= max(25, $acc)) $m += $d;
             }
+            $out[] = ['lat' => round((float) $p['lat'], 6), 'lng' => round((float) $p['lng'], 6), 'at' => $p['capturedAt'], 'until' => $p['until'] ?? $p['capturedAt'], 'km' => round($m / 1000, 3)];
             $prev = $p;
         }
-        return $m / 1000;
+        return $out;
     }
 
-    /** Stops of 20+ minutes in one place (pinned on the map), numbered in order. */
+    /** Km travelled on the clean path between two times. */
+    private static function kmAt(array $path, ?string $t): float
+    {
+        if (!$path || !$t) return 0.0;
+        $km = 0.0;
+        foreach ($path as $p) { if ($p['at'] <= $t) $km = $p['km']; else break; }
+        return $km;
+    }
+
+    /**
+     * The day as pins, in order: start (punch in) → stops of 30+ min and customers reached → end (punch out,
+     * or the last point while still working), each with the km from the pin before. Customers come from a
+     * visit check-in, or from a 10+ min stay within the customer's saved location.
+     */
+    public static function pins(?array $att, array $pts, string $uid, string $date): array
+    {
+        $pts = self::withEnds($pts, $att);
+        $path = self::cleanPath($pts);
+        $use = self::usable($pts);
+        $cand = [];
+        foreach (self::stays($use, self::STOP_MINUTES) as $st) $cand[] = ['kind' => 'STOP', 'lat' => $st['lat'], 'lng' => $st['lng'], 'from' => $st['from'], 'to' => $st['to'], 'minutes' => $st['minutes']];
+        // customers with a saved location near the day's route
+        $custs = [];
+        if ($use) {
+            $la = array_column($use, 'lat'); $lo = array_column($use, 'lng');
+            try {
+                $c = db()->prepare('SELECT id, companyName, lat, lng, geoFenceRadius FROM `Customer` WHERE isActive=1 AND lat IS NOT NULL AND lng IS NOT NULL AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?');
+                $c->execute([min($la) - 0.01, max($la) + 0.01, min($lo) - 0.01, max($lo) + 0.01]);
+                $custs = $c->fetchAll();
+            } catch (PDOException $e) {}
+        }
+        $near = function (float $lat, float $lng) use ($custs): ?array {
+            $best = null; $bd = INF;
+            foreach ($custs as $c) {
+                $d = self::meters($lat, $lng, (float) $c['lat'], (float) $c['lng']);
+                if ($d <= max(200, (float) ($c['geoFenceRadius'] ?? 0)) && $d < $bd) { $bd = $d; $best = $c; }
+            }
+            return $best;
+        };
+        foreach (self::stays($use, self::VISIT_MINUTES) as $st) {
+            $c = $near($st['lat'], $st['lng']);
+            if ($c) $cand[] = ['kind' => 'VISIT', 'lat' => $st['lat'], 'lng' => $st['lng'], 'from' => $st['from'], 'to' => $st['to'], 'minutes' => $st['minutes'], 'customerId' => $c['id'], 'customer' => $c['companyName'], 'how' => 'location'];
+        }
+        // visit check-ins (Meetings) on this day
+        try {
+            $m = db()->prepare("SELECT m.id, m.checkInLat, m.checkInLng, m.checkedInAt, m.visitDurationMinutes, m.timerEndedAt, m.meetingType, c.id AS cid, c.companyName, c.lat AS clat, c.lng AS clng
+                FROM `Meeting` m LEFT JOIN `Customer` c ON c.id=m.customerId
+                WHERE (m.userId=? OR m.assignedToId=?) AND m.checkedInAt>=? AND m.checkedInAt<? ORDER BY m.checkedInAt");
+            $m->execute([$uid, $uid, $date . ' 00:00:00', date('Y-m-d 00:00:00', strtotime($date . ' +1 day'))]);
+            foreach ($m->fetchAll() as $r) {
+                $lat = $r['checkInLat'] !== null ? (float) $r['checkInLat'] : ($r['clat'] !== null ? (float) $r['clat'] : null);
+                $lng = $r['checkInLng'] !== null ? (float) $r['checkInLng'] : ($r['clng'] !== null ? (float) $r['clng'] : null);
+                if ($lat === null || $lng === null) continue;
+                $mins = $r['visitDurationMinutes'] !== null ? (int) $r['visitDurationMinutes'] : ($r['timerEndedAt'] ? (int) round((strtotime($r['timerEndedAt']) - strtotime($r['checkedInAt'])) / 60) : 0);
+                $cand[] = ['kind' => 'VISIT', 'lat' => $lat, 'lng' => $lng, 'from' => $r['checkedInAt'], 'to' => date('Y-m-d H:i:s', strtotime($r['checkedInAt']) + max(0, $mins) * 60), 'minutes' => max(0, $mins),
+                           'customerId' => $r['cid'], 'customer' => $r['companyName'] ?: 'Customer visit', 'meetingId' => $r['id'], 'how' => 'check-in'];
+            }
+        } catch (PDOException $e) {}
+        usort($cand, fn($x, $y) => strcmp($x['from'], $y['from']));
+        // same place at the same time → one pin (a customer name wins over a plain stop)
+        $pins = [];
+        foreach ($cand as $c) {
+            $hit = null;
+            foreach ($pins as $k => $p) {
+                $close = self::meters($p['lat'], $p['lng'], $c['lat'], $c['lng']) <= 250;
+                $overlap = strtotime($c['from']) <= strtotime($p['to']) + 1800 && strtotime($c['to']) >= strtotime($p['from']) - 1800;
+                if ($close && $overlap) { $hit = $k; break; }
+            }
+            if ($hit === null) { $pins[] = $c; continue; }
+            $p = &$pins[$hit];
+            if ($c['kind'] === 'VISIT' && ($p['kind'] !== 'VISIT' || ($c['how'] ?? '') === 'check-in')) { $p['kind'] = 'VISIT'; $p['customer'] = $c['customer']; $p['customerId'] = $c['customerId'] ?? null; $p['how'] = $c['how'] ?? null; if (!empty($c['meetingId'])) $p['meetingId'] = $c['meetingId']; }
+            if ($c['from'] < $p['from']) $p['from'] = $c['from'];
+            if ($c['to'] > $p['to']) $p['to'] = $c['to'];
+            $p['minutes'] = (int) round((strtotime($p['to']) - strtotime($p['from'])) / 60);
+            unset($p);
+        }
+        usort($pins, fn($x, $y) => strcmp($x['from'], $y['from']));
+        // start and end
+        if ($att && $att['checkIn']) {
+            $sl = $att['checkInLat'] !== null ? (float) $att['checkInLat'] : ($path[0]['lat'] ?? null); $sg = $att['checkInLng'] !== null ? (float) $att['checkInLng'] : ($path[0]['lng'] ?? null);
+            if ($sl !== null) array_unshift($pins, ['kind' => 'START', 'lat' => $sl, 'lng' => $sg, 'from' => $att['checkIn'], 'to' => $att['checkIn'], 'minutes' => 0]);
+        }
+        $last = $path ? end($path) : null;
+        if ($att && $att['checkOut'] && $att['checkOutLat'] !== null) $pins[] = ['kind' => 'END', 'lat' => (float) $att['checkOutLat'], 'lng' => (float) $att['checkOutLng'], 'from' => $att['checkOut'], 'to' => $att['checkOut'], 'minutes' => 0];
+        elseif ($last) $pins[] = ['kind' => $att && $att['checkOut'] ? 'END' : 'NOW', 'lat' => $last['lat'], 'lng' => $last['lng'], 'from' => $last['until'], 'to' => $last['until'], 'minutes' => 0];
+        // number them and measure each leg on the clean path
+        $prevT = null; $n = 0; $s = 0;
+        foreach ($pins as $i => &$p) {
+            $p['n'] = ++$n;
+            if ($p['kind'] === 'STOP' || $p['kind'] === 'VISIT') $p['stopNo'] = ++$s;
+            $p['kmFromPrev'] = $prevT === null ? 0.0 : round(max(0, self::kmAt($path, $p['from']) - self::kmAt($path, $prevT)), 2);
+            $prevT = $p['to'];
+        }
+        unset($p);
+        $legs = round(array_sum(array_column($pins, 'kmFromPrev')), 2);
+        $customers = [];
+        foreach ($pins as $p) if ($p['kind'] === 'VISIT') $customers[] = ['customer' => $p['customer'], 'customerId' => $p['customerId'] ?? null, 'at' => $p['from'], 'minutes' => $p['minutes'], 'how' => $p['how'] ?? null];
+        return ['pins' => $pins, 'path' => $path, 'pinKm' => $legs, 'customers' => $customers];
+    }
+
+    /** Stops of 30+ minutes in one place (pinned on the map), numbered in order. */
     public static function stops(array $pts): array
     {
         $out = [];
@@ -189,7 +316,7 @@ class LocationHistoryController
         if ($to < $from) [$from, $to] = [$to, $from];
         $end = date('Y-m-d 00:00:00', strtotime($to . ' +1 day'));
         try { new AttendanceController(); } catch (Throwable $e) {}   // makes sure manualKm exists
-        $att = db()->prepare("SELECT a.id, a.userId, a.date, a.manualKm, u.name, u.role FROM `Attendance` a JOIN `User` u ON u.id=a.userId
+        $att = db()->prepare("SELECT a.id, a.userId, a.date, a.manualKm, a.checkIn, a.checkInLat, a.checkInLng, a.checkOut, a.checkOutLat, a.checkOutLng, u.name, u.role FROM `Attendance` a JOIN `User` u ON u.id=a.userId
                               WHERE a.date>=? AND a.date<? AND a.checkIn IS NOT NULL ORDER BY u.name, a.date");
         $att->execute([$from . ' 00:00:00', $end]);
         $pp = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
@@ -207,7 +334,7 @@ class LocationHistoryController
         foreach ($att->fetchAll() as $a) {
             $pp->execute([$a['id']]);
             $pts = $pp->fetchAll();
-            $km = self::distanceKm($pts);
+            $km = self::distanceKm($pts, $a);
             $x = &$people[$a['userId']];
             $x = $x ?? ['id' => $a['userId'], 'name' => $a['name'], 'role' => $a['role'], 'days' => 0, 'km' => 0.0, 'manualKm' => 0.0, 'points' => 0, 'perDay' => []];
             $mk = $a['manualKm'] !== null ? (float) $a['manualKm'] : 0.0;   // km typed at punch out for the time GPS was off
@@ -292,9 +419,11 @@ class LocationHistoryController
                 'checkInLat' => $att['checkInLat'] !== null ? (float) $att['checkInLat'] : null, 'checkInLng' => $att['checkInLng'] !== null ? (float) $att['checkInLng'] : null,
                 'checkOutLat' => $att['checkOutLat'] !== null ? (float) $att['checkOutLat'] : null, 'checkOutLng' => $att['checkOutLng'] !== null ? (float) $att['checkOutLng'] : null,
             ] : null,
-            'points' => $pts, 'breaks' => $breaks, 'events' => $events, 'stops' => ($stops = self::stops($pts)),
+            'points' => $pts, 'breaks' => $breaks, 'events' => $events, 'stops' => ($stops = self::stops(self::withEnds($pts, $att))),
+            'pins' => ($pp = self::pins($att, $pts, $uid, $date))['pins'], 'path' => $pp['path'], 'customers' => $pp['customers'],
             'stats' => [
-                'points' => count($pts), 'distanceKm' => round(self::distanceKm($pts), 2),
+                'points' => count($pts), 'distanceKm' => round(self::distanceKm($pts, $att), 2), 'pinKm' => $pp['pinKm'], 'customersReached' => count($pp['customers']),
+                'manualKm' => $att && isset($att['manualKm']) && $att['manualKm'] !== null ? (float) $att['manualKm'] : null,
                 'stops' => count($stops), 'stoppedMinutes' => array_sum(array_column($stops, 'minutes')), 'stopMinutes' => self::STOP_MINUTES,
                 'firstPoint' => $pts ? $pts[0]['capturedAt'] : null, 'lastPoint' => $pts ? end($pts)['capturedAt'] : null,
                 'breakSeconds' => array_sum(array_column($breaks, 'seconds')),
