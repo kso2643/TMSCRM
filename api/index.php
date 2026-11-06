@@ -401,6 +401,8 @@ try {
             $method === 'GET'   && $c1 === 'next-number'                   => $ctrl->nextNumber(),
             $method === 'GET'   && $c1 === 'engineers'                     => $ctrl->engineers(),
             $method === 'GET'   && $c1 === 'stock-check'                   => $ctrl->stockCheck(),
+            $method === 'GET'   && $c1 === 'items-template'                => $ctrl->itemsTemplate(),
+            $method === 'POST'  && $c1 === 'items-parse'                   => $ctrl->itemsParse(),
             $method === 'GET'   && $c1 !== '' && $c2 === 'pdf'             => $ctrl->pdf($c1),
             $method === 'GET'   && $c1 !== '' && $c2 === 'document'        => $ctrl->downloadDocument($c1),
             $method === 'POST'  && $c1 !== '' && $c2 === 'document'        => $ctrl->uploadDocument($c1),

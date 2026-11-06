@@ -122,6 +122,9 @@
       '.dark .lv-f input,.dark .lv-f select,.dark .lv-f textarea{background:#0f172a;border-color:#334155}',
       '.lv-f.wide{grid-column:1/-1}.lv-f textarea{min-height:64px;resize:vertical}',
       '.lv-hours{display:inline-block;margin-top:.25rem;font-size:.8rem;font-weight:600;color:#0f766e}.lv-hours.bad{color:#b91c1c}',
+      '.lv-days{margin:.2rem 0 .7rem;display:inline-block;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:999px;padding:.3rem .8rem;font-size:.85rem;font-weight:700}.dark .lv-days{background:#083344;color:#a5f3fc;border-color:#155e75}',
+      '.lv-presets{display:flex;flex-wrap:wrap;gap:.35rem;margin:.1rem 0 .45rem}',
+      '.lv-chip{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:.28rem .7rem;font-size:.78rem;font-weight:600;cursor:pointer}.lv-chip:hover{border-color:#0f766e;color:#0f766e;background:#f0fdfa}.dark .lv-chip{background:#1e293b;border-color:#334155;color:#cbd5e1}',
       '.lv-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem}',
       '.lv-tabs{display:flex;gap:.25rem;border-bottom:1px solid #e2e8f0;margin-bottom:.75rem;overflow-x:auto}.dark .lv-tabs{border-color:#334155}',
       '.lv-tab{padding:.55rem 1rem;font-size:.88rem;font-weight:600;color:#64748b;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap}',
@@ -222,6 +225,15 @@
     var tt = el('input', { type: 'time', id: 'lv-ttime', value: '12:00' });
     var reason = el('textarea', { id: 'lv-reason', placeholder: 'Why do you need this leave / permission?' });
     var hoursOut = el('span', { class: 'lv-hours', id: 'lv-hours' });
+    // how many days the dates make (counted like the server: from → to, both days included)
+    var daysOut = el('div', { class: 'lv-days', id: 'lv-days' });
+    // one-tap reasons ("default leave requests"); a reason sets the matching type
+    var PRESETS = [['Not feeling well', 'SICK', 'Not feeling well — taking rest.'], ['Hospital / doctor visit', 'SICK', 'Hospital / doctor visit.'],
+                   ['Family function', 'CASUAL', 'Family function.'], ['Personal work', 'PERSONAL', 'Personal work.'],
+                   ['Going to native place', 'CASUAL', 'Going to native place.'], ['Bank / office work (few hours)', 'PERMISSION', 'Bank / government office work.']];
+    var presets = el('div', { class: 'lv-presets', id: 'lv-presets' }, PRESETS.map(function (p) {
+      return el('button', { type: 'button', class: 'lv-chip', 'data-preset': p[1], text: p[0], onclick: function () { type.value = p[1]; reason.value = p[2]; sync(); reason.focus(); } });
+    }));
     var toF = field('To date', to, true), ftF = field('Time from', ft, true), ttF = field('Time to', tt, true, '');
     ttF.appendChild(hoursOut);
     var fromLbl;
@@ -234,6 +246,10 @@
       fromLbl.firstChild.textContent = one ? 'Date' : 'From date';
       if (to.value < from.value) to.value = from.value;
       to.min = from.value;
+      var n = !from.value ? 0 : perm ? 0 : t === 'HALF_DAY' ? 0.5 : Math.round((new Date(to.value + 'T00:00:00') - new Date(from.value + 'T00:00:00')) / 86400000) + 1;
+      function dd(v) { var x = new Date(v + 'T00:00:00'); return isNaN(x) ? '' : x.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }); }
+      daysOut.textContent = !from.value ? '' : perm ? 'Hourly permission on ' + dd(from.value) : n === 0.5 ? '½ day · ' + dd(from.value) : n + ' day' + (n === 1 ? '' : 's') + ' · ' + dd(from.value) + (n > 1 ? ' → ' + dd(to.value) : '');
+      daysOut.style.display = from.value ? '' : 'none';
       if (perm) {
         var a = minutes(ft.value), b = minutes(tt.value), d = a == null || b == null ? null : b - a;
         hoursOut.className = 'lv-hours' + (d == null || d <= 0 || d > 480 ? ' bad' : '');
@@ -261,7 +277,9 @@
     } });
     var card = el('div', { class: 'lv-card' }, [
       el('h2', { text: 'Apply for leave or permission' }),
-      el('div', { class: 'lv-grid' }, [field('Type', type, true), fromF, toF, ftF, ttF, field('Reason', reason, true, ' wide')]),
+      el('div', { class: 'lv-grid' }, [field('Type', type, true), fromF, toF, ftF, ttF]),
+      daysOut,
+      el('div', { class: 'lv-grid' }, [(function () { var r = field('Reason', reason, true, ' wide'); r.insertBefore(presets, reason); return r; })()]),
       el('div', { class: 'lv-actions' }, [submit])
     ]);
     sync();

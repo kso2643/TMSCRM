@@ -141,7 +141,29 @@
       '.ox-item:first-child{border-top:0}',
       '.ox-item-on{background:rgba(34,197,94,.08)}',
       '.ox-overdue{color:#dc2626;font-weight:600}',
-      '.ox-dialog{max-width:40rem}',
+      '.ox-dialog{max-width:64rem}',
+      '.ox-ic{display:inline-flex;vertical-align:-3px}.ox-ic svg{display:block}',
+      '.ox-items{border-top:1px solid #e2e8f0;padding-top:.9rem}.dark .ox-items{border-color:#1e293b}',
+      '.ox-items-h{display:flex;justify-content:space-between;align-items:flex-end;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem}',
+      '.ox-items-t{font-size:1rem;font-weight:700;color:#0f172a;margin-right:.5rem}.dark .ox-items-t{color:#f1f5f9}.ox-items-s{font-size:.75rem;color:#64748b}',
+      '.ox-items-acts{display:flex;gap:.45rem;flex-wrap:wrap}',
+      '.ox-ibtn{display:inline-flex;align-items:center;gap:.4rem;border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:.6rem;padding:.5rem .85rem;font-size:.84rem;font-weight:600;cursor:pointer}',
+      '.ox-ibtn:hover{background:#f8fafc;border-color:#94a3b8}.ox-ibtn.sm{padding:.4rem .65rem;font-size:.78rem}.dark .ox-ibtn{background:#1e293b;border-color:#334155;color:#e2e8f0}',
+      '.ox-card{position:relative;border:1px solid #e2e8f0;border-radius:.8rem;padding:1.05rem .9rem .8rem;margin:.9rem 0 .4rem;background:#fff}.dark .ox-card{background:#0f172a;border-color:#334155}',
+      '.ox-card-h{position:absolute;top:-.7rem;left:.75rem;right:.6rem;display:flex;align-items:center;gap:.4rem}',
+      '.ox-badge{background:#1e3a8a;color:#fff;border-radius:999px;padding:.12rem .6rem;font-size:.72rem;font-weight:700}',
+      '.ox-tag{background:#f1f5f9;color:#475569;border-radius:999px;padding:.08rem .5rem;font-size:.68rem;font-weight:600}.dark .ox-tag{background:#1e293b;color:#cbd5e1}',
+      '.ox-x{margin-left:auto;border:1px solid #e2e8f0;background:#fff;color:#94a3b8;border-radius:.5rem;padding:.2rem .35rem;cursor:pointer}.ox-x:hover{color:#dc2626;border-color:#fecaca}.dark .ox-x{background:#0f172a;border-color:#334155}',
+      '.ox-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.6rem .75rem}.ox-grid .w2{grid-column:span 2}',
+      '@media(max-width:760px){.ox-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ox-grid .w2{grid-column:span 2}}',
+      '.ox-f{display:block}.ox-f>span{display:block;font-size:.74rem;font-weight:600;color:#475569;margin-bottom:.25rem}.ox-f i{color:#dc2626;font-style:normal}.dark .ox-f>span{color:#94a3b8}',
+      '.ox-amt{padding:.55rem .1rem;font-weight:700;color:#0f172a;font-variant-numeric:tabular-nums}.dark .ox-amt{color:#f1f5f9}',
+      '.ox-rel{position:relative}.ox-sugg-box{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #cbd5e1;border-radius:.6rem;box-shadow:0 12px 30px -10px rgba(15,23,42,.3);max-height:300px;overflow:auto;padding:.25rem}',
+      '.dark .ox-sugg-box{background:#0f172a;border-color:#334155}.ox-sugg{display:block;width:100%;text-align:left;padding:.45rem .6rem;border-radius:.45rem;background:none;border:0;cursor:pointer}.ox-sugg:hover{background:#f1f5f9}.dark .ox-sugg:hover{background:#1e293b}',
+      '.ox-sugg-l{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;font-size:.84rem}.ox-sugg-d{font-size:.74rem;color:#64748b;margin-top:.1rem}',
+      '.ox-chip{font-size:.66rem;font-weight:700;border-radius:999px;padding:.05rem .45rem;background:#e0e7ff;color:#3730a3}.ox-chip.g{background:#f1f5f9;color:#475569}.ox-chip.ok{background:#dcfce7;color:#166534}.ox-chip.no{background:#fee2e2;color:#991b1b}',
+      '.ox-items-tot{display:flex;justify-content:space-between;padding:.55rem .2rem 0;font-size:.85rem;color:#475569}',
+      '.ox-line-stock{margin-top:.45rem}',
       '.ox-expand-grid{display:grid;gap:1rem}',
       '@media(min-width:1024px){.ox-expand-grid{grid-template-columns:3fr 2fr}}',
       '.ox-muted-link{font-size:.75rem;font-weight:500;color:#1e3a5f;cursor:pointer;background:none;border:0;padding:0}',
@@ -188,6 +210,26 @@
     });
   }
 
+  // Line icons (stroke SVG) for a cleaner look than emoji
+  var ICONS = {
+    plus: '<path d="M12 5v14M5 12h14"/>', upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+    download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+    repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>', file: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>', check: '<path d="M5 12l5 5L20 7"/>'
+  };
+  function ic(name) {
+    var s = document.createElement('span'); s.className = 'ox-ic'; s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || '') + '</svg>';
+    return s;
+  }
+  function downloadFile(path, fallback) {
+    return fetch(API + '/api' + path, { headers: { Authorization: 'Bearer ' + (token() || '') } }).then(function (r) {
+      if (!r.ok) throw new Error('Download failed');
+      var m = /filename="?([^";]+)"?/.exec(r.headers.get('Content-Disposition') || '');
+      return r.blob().then(function (b) { var u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = m ? m[1] : fallback; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 4000); });
+    }).catch(function (e) { alert(e.message); });
+  }
   function fmtQty(v) { v = Number(v) || 0; return (Math.round(v * 100) / 100).toLocaleString('en-IN'); }
   function el(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -242,8 +284,8 @@
       el('div', { class: 'flex items-center justify-between gap-3 flex-wrap' }, [
         el('h1', { class: 'page-title', text: 'Orders' }),
         el('div', { class: 'flex gap-2 flex-wrap' }, [
-          el('button', { class: 'btn-secondary', id: 'ox-reg-btn', text: '🔁 Stock reminders & regular items', onclick: function () { toggleReg(); } }),
-          el('button', { class: 'btn-primary', text: '+ New order', onclick: function () { openOrderDialog(null, load); } })
+          el('button', { class: 'btn-secondary', id: 'ox-reg-btn', onclick: function () { toggleReg(); } }, [ic('repeat'), ' Stock reminders & regular items']),
+          el('button', { class: 'btn-primary', onclick: function () { openOrderDialog(null, load); } }, [ic('plus'), ' New order'])
         ])
       ]),
       regBox, stats, filters, flashBox, body
@@ -373,10 +415,10 @@
     function stop(e) { e.stopPropagation(); }
     // ⧉ copy the order number
     function copyNoBtn(no) {
-      var b = el('button', { type: 'button', class: 'ox-copy', title: 'Copy ' + no, 'aria-label': 'Copy ' + no, 'data-copy-no': no, text: '⧉' });
+      var b = el('button', { type: 'button', class: 'ox-copy', title: 'Copy ' + no, 'aria-label': 'Copy ' + no, 'data-copy-no': no }, [ic('copy')]);
       b.addEventListener('click', function (e) {
         e.stopPropagation();
-        var done = function () { b.textContent = '✓'; setTimeout(function () { b.textContent = '⧉'; }, 1500); };
+        var done = function () { b.innerHTML = ''; b.appendChild(ic('check')); setTimeout(function () { b.innerHTML = ''; b.appendChild(ic('copy')); }, 1500); };
         var fb = function () { var t = document.createElement('textarea'); t.value = no; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); done(); } catch (x) { prompt('Copy this number:', no); } t.remove(); };
         try { if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(no).then(done, fb); else fb(); } catch (x) { fb(); }
       });
@@ -533,8 +575,8 @@
             ])
           ]),
           el('div', { class: 'flex items-center gap-2' }, [
-            canEdit ? el('button', { class: 'btn-primary btn-sm', type: 'button', id: 'ox-view-edit', text: '✎ Edit order', onclick: function () { close(); openOrderDialog(order.id, load, { edit: true }); } }) : null,
-            el('button', { class: 'p-1 rounded text-slate-400 hover:text-slate-600', 'aria-label': 'Close', text: '✕', onclick: close })
+            canEdit ? el('button', { class: 'btn-primary btn-sm', type: 'button', id: 'ox-view-edit', onclick: function () { close(); openOrderDialog(order.id, load, { edit: true }); } }, [ic('edit'), ' Edit order']) : null,
+            el('button', { class: 'p-1 rounded text-slate-400 hover:text-slate-600', 'aria-label': 'Close', onclick: close }, [ic('x')])
           ])
         ]));
         card.appendChild(orderDetailPanel(order, {
@@ -811,7 +853,7 @@
     }
     paintTabs(); paint();
     card.appendChild(el('div', { class: 'flex items-center justify-between gap-2' }, [
-      el('span', { class: 'text-sm font-semibold', text: '🔁 Stock reminders & regular items' }),
+      el('span', { class: 'text-sm font-semibold' }, [ic('repeat'), ' Stock reminders & regular items']),
       el('button', { class: 'ox-muted-link', type: 'button', text: 'Close', onclick: function () { if (opts.onClose) opts.onClose(); } })
     ]));
     card.appendChild(tabs); card.appendChild(body);
@@ -955,6 +997,8 @@
     var reason = o.deliveryStatus === 'PARTIALLY_DELIVERED' || o.deliveryStatus === 'NOT_DELIVERED' ? (o.notDeliveredReason || '') : '';
     var err = '';
     var saving = false;
+    // a fresh (pending) order asks nothing until something is ticked or "Not delivered…" is pressed
+    var askNotDelivered = opts.preset === 'NOT_DELIVERED' || o.deliveryStatus === 'NOT_DELIVERED';
     var wrap = el('div', { class: 'space-y-3' });
 
     function full(i) { return (qty[i.id] || 0) >= Number(i.quantity); }
@@ -1068,7 +1112,8 @@
       }
 
       var complete = total > 0 && n === total, some = anySupplied();
-      if (!complete && total) {
+      var pendingQuiet = !complete && !some && !askNotDelivered;
+      if (!complete && total && !pendingQuiet) {
         var ta = el('textarea', { class: INPUT, rows: '2', placeholder: some ? 'Why is the order only partially complete?' : 'Why wasn’t it delivered?' });
         ta.value = reason;
         ta.addEventListener('input', function () { reason = ta.value; });
@@ -1085,7 +1130,10 @@
       if (opts.preset && opts.onCancelPreset) {
         btns.appendChild(el('button', { class: 'btn-secondary btn-sm', text: 'Cancel', onclick: function (e) { e.stopPropagation(); opts.onCancelPreset(); } }));
       }
-      if (total) {
+      if (total && pendingQuiet) {
+        btns.appendChild(el('span', { class: 'text-xs text-muted mr-auto', style: 'align-self:center', text: 'Tick the items as they are supplied.' }));
+        btns.appendChild(el('button', { class: 'btn-secondary btn-sm', 'data-supply-notdel': '1', text: 'Not delivered…', onclick: function (e) { e.stopPropagation(); askNotDelivered = true; render(); } }));
+      } else if (total) {
         btns.appendChild(el('button', {
           class: 'btn-primary btn-sm' + (saving ? ' ox-btn-disabled' : ''), 'data-supply-save': '1', text: saving ? 'Saving…' : label,
           onclick: function (e) { e.stopPropagation(); save(); }
@@ -1148,7 +1196,7 @@
       });
   }
   function pdfButton(o, cls) {
-    var b = el('button', { class: cls || 'btn-secondary btn-sm', type: 'button', 'data-order-pdf': o.id, title: 'Download this order as PDF', text: '⬇ PDF' });
+    var b = el('button', { class: cls || 'btn-secondary btn-sm', type: 'button', 'data-order-pdf': o.id, title: 'Download this order as PDF' }, [ic('download'), ' PDF']);
     b.addEventListener('click', function (e) {
       e.stopPropagation();
       b.disabled = true;
@@ -1194,7 +1242,7 @@
         orderType: order ? order.orderType : 'VERBAL',
         firm: order ? order.firm || '' : '',
         verbalDetails: order ? order.verbalDetails || '' : '',
-        orderDate: order ? order.orderDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
+        orderDate: order ? order.orderDate.slice(0, 10) : todayIso(),
         notes: order ? order.notes || '' : '',
         orderValue: order && order.orderValue != null ? order.orderValue : '',
         poNumber: order ? order.poNumber || '' : '',
@@ -1233,7 +1281,7 @@
           ]),
           el('div', { class: 'flex items-center gap-2' }, [
             !isCreate ? pdfButton(order) : null,
-            el('button', { class: 'p-1 rounded text-slate-400 hover:text-slate-600', 'aria-label': 'Close', text: '✕', onclick: close })
+            el('button', { class: 'p-1 rounded text-slate-400 hover:text-slate-600', 'aria-label': 'Close', onclick: close }, [ic('x')])
           ])
         ]);
       }
@@ -1430,10 +1478,11 @@
             state._noKey = key; state._no = '';
             api('GET', '/orders/next-number?firm=' + (state.firm || '') + '&engineerId=' + encodeURIComponent(state.engineerId || '')).then(function (r) {
               if (state._noKey !== key) return; state._no = r.data.orderNo;
-              var n = document.getElementById('ox-next-no'); if (n) { n.innerHTML = ''; n.appendChild(el('span', {}, ['Order no.: ', el('b', { 'data-next-order-no': state._no, text: state._no }), state.firm ? ' (given when you save)' : ' — choose TMS or APJ: the number starts with it'])); }
+              var n = document.getElementById('ox-next-no'); if (n && state.firm) { n.innerHTML = ''; n.appendChild(el('span', {}, ['Order no.: ', el('b', { 'data-next-order-no': state._no, text: state._no }), ' (given when you save)'])); }
             }).catch(function () {});
           }
-          if (state._no) noLine.appendChild(el('span', {}, ['Order no.: ', el('b', { 'data-next-order-no': state._no, text: state._no }), state.firm ? ' (given when you save)' : ' — choose TMS or APJ: the number starts with it']));
+          if (!state.firm) noLine.appendChild(el('span', { 'data-no-firm': '1', text: 'Choose TMS or APJ — the order number starts with it (TMS-ORD-… / APJ-ORD-…).' }));
+          else if (state._no) noLine.appendChild(el('span', {}, ['Order no.: ', el('b', { 'data-next-order-no': state._no, text: state._no }), ' (given when you save)']));
         }
         wrap.appendChild(noLine);
 
@@ -1549,152 +1598,142 @@
         return box('bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-200', [bits.join(' · '), el('div', { class: 'mt-1 font-semibold', text: 'Check every line below — you can change the code, description, quantity and price.' })]);
       }
 
+      // ── Items: cards like the price-request page (search a product or type it in; Excel upload) ──
+      function blankItem() { return { productId: null, itemCode: '', productName: '', unit: 'PCS', category: null, brand: null, quantity: '', unitPrice: null, _new: true }; }
       function itemsEditor() {
-        var wrap = el('div', {});
-        wrap.appendChild(el('span', { class: 'text-xs text-muted', text: 'Products' }));
-        var list = el('div', { class: 'mt-1 space-y-2' });
-        state.items.forEach(function (it, idx) {
-          var qty = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, style: 'max-width:80px', value: it.quantity });
-          var stockEl = el('span', { class: 'ox-line-stock', 'data-line-stock': it.itemCode || '' });
-          function paintStock() {
-            var st = it.stock, q = Number(state.items[idx] && state.items[idx].quantity) || 0;
-            stockEl.innerHTML = '';
-            if (!it.itemCode || it.itemCode === 'MANUAL') return;
-            if (it.stock === undefined) { stockEl.appendChild(el('span', { class: 'text-muted', text: 'Checking stock…' })); return; }
-            if (!st) { stockEl.appendChild(el('span', { class: 'ox-stock ox-stock-none', text: 'Not in stock list — needs to be procured' })); return; }
-            var cls = st.total <= 0 ? 'ox-stock-none' : (st.hand >= q ? 'ox-stock-ok' : 'ox-stock-low');
-            stockEl.appendChild(el('span', { class: 'ox-stock ' + cls, text: 'In hand ' + fmtQty(st.hand) + ' · total ' + fmtQty(st.total) +
-              (st.onOrder ? ' · on open orders ' + fmtQty(st.onOrder) : '') +
-              (q > st.hand ? (q > st.total ? ' — short by ' + fmtQty(q - st.total) : ' — ' + fmtQty(q - st.hand) + ' from other places') : ' — enough in hand') }));
-          }
-          paintStock();
-          var price = el('input', { type: 'number', min: '0', step: '0.01', class: INPUT, style: 'max-width:105px', placeholder: '₹ price', 'data-line-price': String(idx), value: it.unitPrice == null ? '' : it.unitPrice });
-          var amt = el('span', { class: 'text-xs text-muted whitespace-nowrap', style: 'min-width:80px;text-align:right', 'data-line-amount': String(idx) });
-          function paintAmt() { var a = (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0); amt.textContent = it.unitPrice != null && it.unitPrice !== '' ? '₹' + a.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : ''; }
-          function autoValue() {
-            if (state.valueTyped) return;
-            var priced = state.items.filter(function (x) { return x.unitPrice != null && x.unitPrice !== ''; });
-            if (!priced.length) return;
-            state.orderValue = Math.round(state.items.reduce(function (a, x) { return a + (Number(x.unitPrice) || 0) * (Number(x.quantity) || 0); }, 0) * 100) / 100;
-            var ov = document.getElementById('ox-order-value'); if (ov) ov.value = state.orderValue;
-          }
-          paintAmt();
-          qty.addEventListener('input', function () { state.items[idx].quantity = Number(qty.value) || 0; paintStock(); paintAmt(); autoValue(); });
-          price.addEventListener('input', function () { state.items[idx].unitPrice = price.value === '' ? null : Number(price.value); paintAmt(); autoValue(); });
-          var brand = brandSelect(it.brand, function (v) { state.items[idx].brand = v || null; });
-          // code + description can be corrected (a changed line is saved as typed)
-          var codeI = el('input', { class: INPUT, style: 'max-width:150px', 'data-line-code': String(idx), value: it.itemCode && it.itemCode !== 'MANUAL' ? it.itemCode : '', placeholder: 'Item code' });
-          var nameI = el('input', { class: INPUT, 'data-line-name': String(idx), value: it.productName || '', placeholder: 'Description' });
-          codeI.addEventListener('change', function () { var v = codeI.value.trim(); if (v !== it.itemCode) { it.itemCode = v || 'MANUAL'; it.productId = null; it.stock = undefined; render(); } });
-          nameI.addEventListener('change', function () { var v = nameI.value.trim(); if (v && v !== it.productName) { it.productName = v; if (it.productId) it.productId = null; } });
-          var tags = [it.category, it.productId ? null : 'new product', it.fromPO ? 'from PO' : null].filter(Boolean).join(' · ');
-          list.appendChild(el('div', { class: 'ox-edit-line rounded-lg border border-slate-200 dark:border-slate-700 p-2', 'data-edit-line': String(idx) }, [
-            el('div', { class: 'flex items-center gap-2' }, [codeI, nameI,
-              el('button', { class: 'p-1 text-slate-400 hover:text-red-500', 'aria-label': 'Remove line', title: 'Remove line', text: '✕', onclick: function () { state.items.splice(idx, 1); render(); } })]),
-            el('div', { class: 'flex items-center gap-2 mt-1 flex-wrap' }, [
-              el('span', { class: 'text-xs text-muted', text: 'Qty' }), qty, el('span', { class: 'text-xs text-muted', text: 'Price' }), price, amt, brand,
-              tags ? el('span', { class: 'text-xs text-muted', text: tags }) : null]),
-            stockEl
-          ]));
+        var wrap = el('div', { class: 'ox-items', id: 'ox-items' });
+        var fileIn = el('input', { type: 'file', accept: '.xlsx,.csv', style: 'display:none', id: 'ox-items-file' });
+        fileIn.addEventListener('change', function () {
+          var f = fileIn.files[0]; if (!f) return;
+          var fd = new FormData(); fd.append('file', f);
+          api('POST', '/orders/items-parse', fd).then(function (r) {
+            var lines = (r.data.items || []).map(function (x) { return { productId: x.productId, itemCode: x.itemCode, productName: x.productName, unit: x.unit, category: x.category, brand: x.brand, quantity: x.quantity == null ? '' : x.quantity, unitPrice: x.unitPrice }; });
+            var real = state.items.filter(function (x) { return x.productName || (x.itemCode && x.itemCode !== 'MANUAL'); });
+            state.items = real.length && !confirm('Replace the ' + real.length + ' item(s) already on this order with the ' + lines.length + ' from the file?\n(Cancel adds them below.)') ? real.concat(lines) : lines;
+            errMsg = (r.data.problems || []).length ? 'Check: ' + r.data.problems.slice(0, 4).join(' · ') : '';
+            render();
+          }).catch(function (e) { errMsg = e.message; render(); });
         });
-        wrap.appendChild(list);
+        wrap.appendChild(el('div', { class: 'ox-items-h' }, [
+          el('div', {}, [el('span', { class: 'ox-items-t', text: 'Items' }), el('span', { class: 'ox-items-s', text: 'search a product or type it in · quantity required · price optional' })]),
+          el('div', { class: 'ox-items-acts' }, [
+            el('button', { type: 'button', class: 'ox-ibtn', id: 'ox-add-item', onclick: function () { state.items.push(blankItem()); render(); var c = document.querySelectorAll('[data-item-card] [data-f="productName"]'); if (c.length) c[c.length - 1].focus(); } }, [ic('plus'), 'Add item']),
+            el('button', { type: 'button', class: 'ox-ibtn', id: 'ox-items-upload', onclick: function () { fileIn.click(); } }, [ic('upload'), 'Upload items from Excel']),
+            el('button', { type: 'button', class: 'ox-ibtn sm', id: 'ox-items-template', onclick: function () { downloadFile('/orders/items-template', 'order-items-template.xlsx'); } }, [ic('download'), 'Template']),
+            fileIn])
+        ]));
+        if (!state.items.length) state.items.push(blankItem());
+        state.items.forEach(function (it, idx) { wrap.appendChild(itemCard(it, idx)); });
+        wrap.appendChild(el('div', { class: 'ox-items-tot', id: 'ox-items-total' }, [el('span', { text: '' }), el('b', { id: 'ox-items-total-v' })]));
+        setTimeout(paintTotal, 0);
         // stock for lines that don't have it yet (manual codes, older orders)
         var need = state.items.filter(function (x) { return x.itemCode && x.itemCode !== 'MANUAL' && x.stock === undefined; });
         if (need.length) {
+          need.forEach(function (x) { x.stock = null; x._stockPending = true; });
           api('GET', '/orders/stock-check?codes=' + encodeURIComponent(need.map(function (x) { return x.itemCode; }).join(','))).then(function (res) {
             var map = (res.data && res.data.stock) || {};
-            need.forEach(function (x) { x.stock = map[String(x.itemCode).toUpperCase()] || null; });
+            need.forEach(function (x) { x.stock = map[String(x.itemCode).toUpperCase()] || null; x._stockPending = false; });
             render();
-          }).catch(function () { need.forEach(function (x) { x.stock = null; }); });
-        }
-
-        var prodInput = el('input', { class: INPUT, placeholder: 'Search products to add…' });
-        var prodResults = el('div', { class: 'mt-1 space-y-1' });
-        var t2;
-        prodInput.addEventListener('input', function () {
-          clearTimeout(t2);
-          var q = prodInput.value.trim();
-          if (!q) { prodResults.innerHTML = ''; return; }
-          t2 = setTimeout(function () {
-            api('GET', '/products/search?q=' + encodeURIComponent(q)).then(function (res) {
-              var results = (res.data && res.data.results) || [];
-              prodResults.innerHTML = '';
-              results.forEach(function (p) {
-                var stk = p.stock;
-                prodResults.appendChild(el('button', {
-                  class: 'block w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 ox-sugg',
-                  onclick: function () {
-                    state.items.push({ productId: p.id, itemCode: p.itemCode, productName: p.productName, unit: p.unit, category: p.category || null, brand: p.brand || null, quantity: 1,
-                                       specification: p.specification || null, grade: p.grade || null, stock: stk || null });
-                    prodInput.value = ''; prodResults.innerHTML = '';
-                    render();
-                  }
-                }, [
-                  el('div', { class: 'flex items-center gap-2 flex-wrap' }, [
-                    el('b', { text: p.itemCode }),
-                    p.brand ? el('span', { class: 'badge badge-blue', text: p.brand }) : null,
-                    p.grade ? el('span', { class: 'badge badge-gray', text: 'Grade ' + p.grade }) : null,
-                    stk ? el('span', { class: 'badge ' + (stk.total > 0 ? 'badge-green' : 'badge-red'), text: 'Stock ' + fmtQty(stk.total) + (stk.hand ? ' · hand ' + fmtQty(stk.hand) : '') }) : el('span', { class: 'badge badge-gray', text: 'not in stock list' })
-                  ]),
-                  el('div', { class: 'text-xs text-muted', text: [p.specification, p.productName].filter(Boolean).join(' · ') })
-                ]));
-              });
-            }).catch(function () {});
-          }, 300);
-        });
-        wrap.appendChild(el('div', { class: 'mt-2' }, [prodInput, prodResults]));
-
-        if (!showManualEntry) {
-          wrap.appendChild(el('button', {
-            class: 'text-xs text-primary dark:text-primary-300 font-medium mt-2',
-            text: "Can't find it? Add manually",
-            onclick: function () { showManualEntry = true; render(); }
-          }));
-        } else {
-          wrap.appendChild(manualEntryForm());
+          }).catch(function () { need.forEach(function (x) { x._stockPending = false; }); });
         }
         return wrap;
       }
-
-      // Not in the Products catalog — type it in directly. Goes onto the
-      // order with no productId; the backend stores exactly what's typed
-      // here rather than looking it up.
-      function manualEntryForm() {
-        var nameI = el('input', { class: INPUT, placeholder: 'Product / item name' });
-        var codeI = el('input', { class: INPUT, placeholder: 'Code (optional)' });
-        var unitI = el('input', { class: INPUT, placeholder: 'Unit (optional)' });
-        var catI = el('input', { class: INPUT, placeholder: 'Category (optional)' });
-        var brandV = null, brandI = brandSelect(null, function (v) { brandV = v || null; });
-        var qtyI = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, value: '1' });
-        var err = el('p', { class: 'text-xs text-red-600 dark:text-red-400 hidden' });
-
-        function addLine() {
-          var name = nameI.value.trim();
-          if (!name) {
-            err.textContent = 'Enter a name for the item.';
-            err.classList.remove('hidden');
-            return;
-          }
-          state.items.push({
-            productId: null, itemCode: codeI.value.trim() || 'MANUAL', productName: name,
-            unit: unitI.value.trim() || null, category: catI.value.trim() || null,
-            brand: brandV, quantity: Number(qtyI.value) || 1
-          });
-          showManualEntry = false;
-          render();
+      function paintTotal() {
+        var tot = state.items.reduce(function (a, x) { return a + (Number(x.unitPrice) || 0) * (Number(x.quantity) || 0); }, 0);
+        var v = document.getElementById('ox-items-total-v'), row = document.getElementById('ox-items-total');
+        if (!v || !row) return;
+        row.style.display = tot ? '' : 'none';
+        v.textContent = 'Items total ₹' + tot.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+      }
+      function itemCard(it, idx) {
+        function f(label, req, node, cls) { return el('label', { class: 'ox-f' + (cls ? ' ' + cls : '') }, [el('span', {}, [label, req ? el('i', { text: ' *' }) : null]), node]); }
+        function autoValue() {
+          if (state.valueTyped) return;
+          var priced = state.items.filter(function (x) { return x.unitPrice != null && x.unitPrice !== ''; });
+          if (!priced.length) return;
+          state.orderValue = Math.round(state.items.reduce(function (a, x) { return a + (Number(x.unitPrice) || 0) * (Number(x.quantity) || 0); }, 0) * 100) / 100;
+          var ov = document.getElementById('ox-order-value'); if (ov) ov.value = state.orderValue;
         }
-
-        return el('div', { class: 'mt-2 p-3 space-y-2 rounded-lg border border-slate-200 dark:border-slate-700' }, [
-          nameI,
-          el('div', { class: 'grid grid-cols-2 gap-2' }, [codeI, catI]),
-          el('div', { class: 'grid grid-cols-2 gap-2' }, [brandI, unitI]),
-          qtyI,
-          err,
-          el('div', { class: 'flex gap-2 justify-end' }, [
-            el('button', { class: 'btn-secondary', text: 'Cancel', onclick: function () { showManualEntry = false; render(); } }),
-            el('button', { class: 'btn-primary', text: 'Add item', onclick: addLine })
-          ])
+        // product: type a name / code → suggestions from Products; or keep what you typed (a new product)
+        var nameI = el('input', { class: INPUT, 'data-f': 'productName', placeholder: 'Product name or item code', autocomplete: 'off', value: it.productName || '' });
+        var sugg = el('div', { class: 'ox-sugg-box', hidden: true });
+        var t;
+        nameI.addEventListener('input', function () {
+          it.productName = nameI.value; if (it.productId) { it.productId = null; it.stock = undefined; }
+          clearTimeout(t);
+          var q = nameI.value.trim();
+          if (q.length < 2) { sugg.hidden = true; return; }
+          t = setTimeout(function () {
+            api('GET', '/products/search?q=' + encodeURIComponent(q)).then(function (res) {
+              var results = ((res.data && res.data.results) || []).slice(0, 8);
+              sugg.innerHTML = ''; sugg.hidden = !results.length;
+              results.forEach(function (p) {
+                var stk = p.stock;
+                sugg.appendChild(el('button', { type: 'button', class: 'ox-sugg', 'data-sugg': p.itemCode, onmousedown: function (e) { e.preventDefault(); },
+                  onclick: function () {
+                    it.productId = p.id; it.itemCode = p.itemCode; it.productName = p.productName; it.unit = p.unit || it.unit; it.category = p.category || null; it.brand = p.brand || null; it.stock = stk || null;
+                    if (!it.quantity) it.quantity = 1;
+                    if ((it.unitPrice == null || it.unitPrice === '') && p.price) it.unitPrice = Number(p.price);
+                    sugg.hidden = true; render(); autoValue();
+                  } }, [
+                  el('div', { class: 'ox-sugg-l' }, [el('b', { text: p.itemCode }), p.brand ? el('span', { class: 'ox-chip', text: p.brand }) : null, p.grade ? el('span', { class: 'ox-chip g', text: 'Grade ' + p.grade }) : null,
+                    el('span', { class: 'ox-chip ' + (stk && stk.total > 0 ? 'ok' : 'no'), text: stk ? 'Stock ' + fmtQty(stk.total) : 'Not in stock list' })]),
+                  el('div', { class: 'ox-sugg-d', text: [p.specification, p.productName].filter(Boolean).join(' · ') })]));
+              });
+            }).catch(function () {});
+          }, 250);
+        });
+        nameI.addEventListener('blur', function () { setTimeout(function () { sugg.hidden = true; }, 150); });
+        var codeI = el('input', { class: INPUT, 'data-f': 'itemCode', placeholder: 'Item code', value: it.itemCode && it.itemCode !== 'MANUAL' ? it.itemCode : '' });
+        codeI.addEventListener('change', function () { var v = codeI.value.trim().toUpperCase(); if (v !== (it.itemCode === 'MANUAL' ? '' : it.itemCode)) { it.itemCode = v || 'MANUAL'; it.productId = null; it.stock = undefined; render(); } });
+        var catI = el('input', { class: INPUT, 'data-f': 'category', placeholder: 'e.g. Inserts', value: it.category || '' });
+        catI.addEventListener('input', function () { it.category = catI.value.trim() || null; });
+        var brand = brandSelect(it.brand, function (v) { it.brand = v || null; });
+        var qty = el('input', { type: 'number', min: '0.01', step: 'any', class: INPUT, 'data-f': 'quantity', placeholder: '0', value: it.quantity === '' || it.quantity == null ? '' : it.quantity });
+        var unitI = el('input', { class: INPUT, 'data-f': 'unit', placeholder: 'PCS', value: it.unit || '' });
+        unitI.addEventListener('input', function () { it.unit = unitI.value.trim() || null; });
+        var price = el('input', { type: 'number', min: '0', step: '0.01', class: INPUT, 'data-f': 'unitPrice', 'data-line-price': String(idx), placeholder: '0.00', value: it.unitPrice == null ? '' : it.unitPrice });
+        var amt = el('div', { class: 'ox-amt', 'data-line-amount': String(idx) });
+        var stockEl = el('div', { class: 'ox-line-stock', 'data-line-stock': it.itemCode || '' });
+        function paint() {
+          var a = (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0);
+          amt.textContent = it.unitPrice != null && it.unitPrice !== '' && it.quantity ? '₹' + a.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—';
+          stockEl.innerHTML = '';
+          if (!it.itemCode || it.itemCode === 'MANUAL') { if (it.productName && !it.productId) stockEl.appendChild(el('span', { class: 'ox-stock ox-stock-none', text: 'New product — not in Products yet' })); return; }
+          if (it._stockPending || it.stock === undefined) { stockEl.appendChild(el('span', { class: 'text-muted', text: 'Checking stock…' })); return; }
+          var st = it.stock, q = Number(it.quantity) || 0;
+          if (!st) { stockEl.appendChild(el('span', { class: 'ox-stock ox-stock-none', text: 'Not in stock list — needs to be procured' })); return; }
+          var cls = st.total <= 0 ? 'ox-stock-none' : (st.hand >= q ? 'ox-stock-ok' : 'ox-stock-low');
+          stockEl.appendChild(el('span', { class: 'ox-stock ' + cls, text: 'In hand ' + fmtQty(st.hand) + ' · total ' + fmtQty(st.total) + (st.onOrder ? ' · on open orders ' + fmtQty(st.onOrder) : '') +
+            (q > st.hand ? (q > st.total ? ' — short by ' + fmtQty(q - st.total) : ' — ' + fmtQty(q - st.hand) + ' from other places') : ' — enough in hand') }));
+        }
+        paint();
+        var basePaint = paint; paint = function () { basePaint(); paintTotal(); };
+        qty.addEventListener('input', function () { it.quantity = qty.value === '' ? '' : Number(qty.value); paint(); autoValue(); });
+        price.addEventListener('input', function () { it.unitPrice = price.value === '' ? null : Number(price.value); paint(); autoValue(); });
+        var tags = [it.productId ? null : (it.productName ? 'new product' : null), it.fromPO ? 'from PO' : null].filter(Boolean).join(' · ');
+        return el('div', { class: 'ox-card', 'data-item-card': String(idx), 'data-edit-line': String(idx) }, [
+          el('div', { class: 'ox-card-h' }, [el('span', { class: 'ox-badge', text: 'Item ' + (idx + 1) }), tags ? el('span', { class: 'ox-tag', text: tags }) : null,
+            el('button', { type: 'button', class: 'ox-x', 'aria-label': 'Remove item ' + (idx + 1), title: 'Remove item', onclick: function () { state.items.splice(idx, 1); render(); } }, [ic('trash')])]),
+          el('div', { class: 'ox-grid' }, [
+            f('Product', true, el('div', { class: 'ox-rel' }, [nameI, sugg]), 'w2'),
+            f('Item code', false, codeI), f('Category', false, catI), f('Brand', false, brand), f('Quantity', true, qty),
+            f('Unit', false, unitI), f('Price ₹/unit', false, price), f('Amount', false, amt)
+          ]),
+          stockEl
         ]);
+      }
+      /** Items to save: blank cards dropped; every other card needs a product and a quantity. */
+      function readyItems() {
+        var out = [], bad = '';
+        state.items.forEach(function (i, k) {
+          var hasAny = (i.productName || '').trim() || (i.itemCode && i.itemCode !== 'MANUAL') || i.quantity;
+          if (!hasAny) return;
+          if (!(i.productName || '').trim() && !(i.itemCode && i.itemCode !== 'MANUAL')) { bad = bad || 'Item ' + (k + 1) + ': enter the product.'; return; }
+          if (!(Number(i.quantity) > 0)) { bad = bad || 'Item ' + (k + 1) + ' (' + (i.productName || i.itemCode) + '): enter the quantity.'; return; }
+          out.push({ productId: i.productId, quantity: Number(i.quantity), productName: (i.productName || '').trim() || i.itemCode, itemCode: i.itemCode || 'MANUAL', unit: i.unit, category: i.category, brand: i.brand, unitPrice: i.unitPrice == null ? '' : i.unitPrice });
+        });
+        return { items: out, error: bad };
       }
 
       function footer() {
@@ -1725,7 +1764,9 @@
         errMsg = '';
         if (!state.customerId) { errMsg = 'Please choose a customer.'; return render(); }
         if (!state.firm) { errMsg = 'Choose TMS or APJ (our company).'; return render(); }
-        if (!state.items.length) { errMsg = 'Add at least one product.'; return render(); }
+        var ready = readyItems();
+        if (ready.error) { errMsg = ready.error; return render(); }
+        if (!ready.items.length) { errMsg = 'Add at least one item.'; return render(); }
         if (state.orderType === 'PO' && !state.file) { errMsg = 'Please attach the purchase order document.'; return render(); }
         if (state.orderType === 'VERBAL' && !state.verbalDetails.trim()) { errMsg = 'Please note what was agreed.'; return render(); }
 
@@ -1736,9 +1777,7 @@
         fd.append('orderDate', state.orderDate);
         fd.append('notes', state.notes || '');
         fd.append('orderValue', state.orderValue == null ? '' : String(state.orderValue));
-        fd.append('items', JSON.stringify(state.items.map(function (i) {
-          return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand, unitPrice: i.unitPrice == null ? '' : i.unitPrice };
-        })));
+        fd.append('items', JSON.stringify(ready.items));
         fd.append('poNumber', state.orderType === 'PO' ? (state.poNumber || '') : '');
         if (state.orderType === 'VERBAL') fd.append('verbalDetails', state.verbalDetails);
         if (state.orderType === 'PO' && state.file) fd.append('file', state.file);
@@ -1752,7 +1791,9 @@
 
       function submitEdit() {
         errMsg = '';
-        if (!state.items.length) { errMsg = 'Add at least one product.'; return render(); }
+        var ready = readyItems();
+        if (ready.error) { errMsg = ready.error; return render(); }
+        if (!ready.items.length) { errMsg = 'Add at least one item.'; return render(); }
         if (!state.firm) { errMsg = 'Choose TMS or APJ (our company).'; return render(); }
 
         var goingToPO = state.orderType === 'PO' && order.orderType !== 'PO';
@@ -1771,9 +1812,7 @@
           firm: state.firm,
           notes: state.notes,
           orderValue: state.orderValue == null ? '' : String(state.orderValue),
-          items: state.items.map(function (i) {
-            return { productId: i.productId, quantity: i.quantity, productName: i.productName, itemCode: i.itemCode, unit: i.unit, category: i.category, brand: i.brand, unitPrice: i.unitPrice == null ? '' : i.unitPrice };
-          }),
+          items: ready.items,
           poNumber: state.orderType === 'PO' ? (state.poNumber || '') : '',
         };
         if (state.orderType === 'VERBAL') body2.verbalDetails = state.verbalDetails;

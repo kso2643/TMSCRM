@@ -336,7 +336,7 @@
       pts.forEach(function (p) { rawLayer.addLayer(L.circleMarker([p.lat, p.lng], { radius: 2.5, color: p.accuracy != null && p.accuracy > 150 ? '#f97316' : '#64748b', weight: 1, fillOpacity: .8 }).bindTooltip(tm(p.capturedAt) + (p.accuracy != null ? ' · ±' + Math.round(p.accuracy) + ' m' : ''))); });
       // pins joined in order, start → … → end (dashed), each a marker
       var pinsLL = pins.map(function (p) { return [p.lat, p.lng]; });
-      if (pinsLL.length > 1) L.polyline(pinsLL, { color: '#7c3aed', weight: 2, opacity: .7, dashArray: '6 6' }).addTo(layers);
+      if (pinsLL.length > 1) L.polyline(pinsLL, { color: '#dc2626', weight: 2, opacity: .7, dashArray: '6 6' }).addTo(layers);
       pins.forEach(function (p) {
         var lab = p.kind === 'VISIT' ? p.customer : p.kind === 'START' ? 'Start ' + tm(p.from) : p.kind === 'END' ? 'End ' + tm(p.from) : p.kind === 'NOW' ? 'Last seen ' + tm(p.from) : '';
         var html = '<div class="lh-mk" data-pin-mk="' + p.n + '" data-kind="' + p.kind + '"><div class="b" style="background:' + PCOL[p.kind] + '"><span>' + pinLabel(p) + '</span></div>' + (lab ? '<div class="lb">' + escH(lab) + '</div>' : '') + '</div>';
@@ -380,7 +380,8 @@
     function stat(k, v) { return el('div', { class: 'lh-stat' }, [el('p', { class: 'k', text: k }), el('p', { class: 'v', text: v })]); }
   }
 
-  var PCOL = { START: '#16a34a', STOP: '#d97706', VISIT: '#7c3aed', END: '#dc2626', NOW: '#1e3a5f' };
+  // every pin red (as asked); the symbol inside tells start ▶, stop number, customer 📍, end ■
+  var PCOL = { START: '#dc2626', STOP: '#dc2626', VISIT: '#dc2626', END: '#dc2626', NOW: '#b91c1c' };
   function pinLabel(p) { return p.kind === 'START' ? '▶' : p.kind === 'END' ? '■' : p.kind === 'NOW' ? '●' : p.kind === 'VISIT' ? '📍' : String(p.stopNo || p.n); }
   function pinTitle(p) { return p.kind === 'START' ? 'Start — punched in' : p.kind === 'END' ? 'End — punched out' : p.kind === 'NOW' ? 'Last seen (still working)' : p.kind === 'VISIT' ? p.customer : 'Stop ' + (p.stopNo || p.n) + ' — stayed ' + dur(p.minutes * 60); }
   function escH(t) { return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }

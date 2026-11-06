@@ -144,7 +144,10 @@ public class AlertService extends Service {
         @Override public void onProviderDisabled(String provider) { if (LocationManager.GPS_PROVIDER.equals(provider)) locationOff(); }
         // GPS (or network location) switched back on → start using it again straight away; before,
         // a provider that was off when tracking began was never asked again until the app restarted.
-        @Override public void onProviderEnabled(String provider) { if (trackingActive) requestProvider(provider); }
+        @Override public void onProviderEnabled(String provider) {
+            if (trackingActive) requestProvider(provider);
+            if (LocationManager.GPS_PROVIDER.equals(provider)) try { androidx.core.app.NotificationManagerCompat.from(AlertService.this).cancel(7301); } catch (Exception ignored) { }
+        }
         @Override public void onStatusChanged(String provider, int status, Bundle extras) { }
     };
 
@@ -253,6 +256,23 @@ public class AlertService extends Service {
     }
 
     private void locationOff() {
+        // tell the person straight away, on the phone: turn location back on
+        try {
+            Intent loc = new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            PendingIntent pi = PendingIntent.getActivity(this, 7301, loc, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            Notification n = new NotificationCompat.Builder(this, AlertNotifier.CHANNEL_DEFAULT)
+                    .setSmallIcon(R.drawable.ic_stat_notify)
+                    .setColor(0xFFDC2626)
+                    .setContentTitle("Location is turned off")
+                    .setContentText("You are punched in — turn on Location / GPS so your route and km are recorded.")
+                    .setStyle(new NotificationCompat.BigTextStyle().bigText("You are punched in — turn on Location / GPS so your route and km are recorded. Tap to open the location settings."))
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_ALARM)
+                    .setAutoCancel(true)
+                    .setContentIntent(pi)
+                    .build();
+            androidx.core.app.NotificationManagerCompat.from(this).notify(7301, n);
+        } catch (SecurityException | IllegalArgumentException ignored) { }   // notifications not allowed on this phone
         final String token = AlertNotifier.prefs(this).getString("token", "");
         final Location l = lastSent != null ? lastSent : lastGood;
         new Thread(() -> {

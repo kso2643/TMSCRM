@@ -533,6 +533,14 @@ class LocationHistoryController
         db()->prepare('INSERT INTO `StationaryLog` (id,userId,attendanceId,eventType,sinceAt,detectedAt,minutes,lat,lng,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)')
             ->execute([gen_id(), $auth['id'], $att['id'], $type, to_dt($b['sinceAt'] ?? null), now_sql(),
                        is_numeric($b['minutes'] ?? null) ? (int) $b['minutes'] : null, $lat, $lng, now_sql()]);
+        // tell the person too (an alert on the phone): turn location back on
+        if ($type === 'LOCATION_OFF') {
+            try {
+                ChangeNotice::ensure();
+                db()->prepare('INSERT INTO `ChangeNotice` (id,userId,byId,title,body,link,createdAt) VALUES (?,?,?,?,?,?,?)')
+                    ->execute([gen_id(), $auth['id'], $auth['id'], '📍 Your location is turned off', 'You are punched in, so live tracking and your km need it. Turn on Location / GPS on your phone and open the CRM app.', '/attendance/', now_sql()]);
+            } catch (Throwable $e) { error_log('Location-off notice: ' . $e->getMessage()); }
+        }
         sendSuccess([], 'Recorded', 201);
     }
 }

@@ -471,6 +471,74 @@ class OrderController
     }
 
     // GET /api/orders/stock-check?codes=A,B — stock for item codes typed in the order form
+    private const ITEM_COLS = ['Item Code', 'Product / Description *', 'Category', 'Brand', 'Quantity *', 'Unit', 'Price ₹/unit'];
+
+    // GET /api/orders/items-template — Excel sheet to fill the order's items
+    public function itemsTemplate(): void
+    {
+        authenticate();
+        $wb = new StyledXlsxWriter();
+        $sh = $wb->addSheet('Order items');
+        $wb->setWidths($sh, [18, 40, 16, 16, 11, 9, 13]);
+        $wb->addRow($sh, self::ITEM_COLS, 'header', 30);
+        $wb->addRow($sh, ['CNMG120408-PM', 'CNMG 120408-PM 4325 turning insert', 'Inserts', 'Sandvik', 100, 'PCS', 450]);
+        $wb->addRow($sh, ['', 'Solid carbide drill D8.5 x 5xD', 'Drills', 'YG-1', 10, 'PCS', '']);
+        $wb->freeze($sh, 1);
+        $bytes = $wb->output();
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="order-items-template.xlsx"');
+        echo $bytes; exit;
+    }
+
+    // POST /api/orders/items-parse — multipart "file" (.xlsx / .csv) → items for the order form (nothing is saved).
+    // Item codes found in Products fill the name, category, brand and unit.
+    public function itemsParse(): void
+    {
+        authenticate();
+        if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) sendError('Choose the filled Excel sheet (.xlsx or .csv).', 400);
+        $f = $_FILES['file'];
+        $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
+        try {
+            if ($ext === 'csv') {
+                $rows = []; $fh = fopen($f['tmp_name'], 'r');
+                while (($r = fgetcsv($fh)) !== false) $rows[] = $r;
+                fclose($fh);
+                if ($rows && isset($rows[0][0])) $rows[0][0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $rows[0][0]);
+            } elseif ($ext === 'xlsx') $rows = XlsxReader::readFirstSheetRows($f['tmp_name']);
+            else sendError('Upload the sheet as .xlsx (or .csv).', 400);
+        } catch (Throwable $e) { sendError($e->getMessage(), 400); }
+        $alias = ['itemCode' => '/item\s*code|^code|part\s*no|edp|cat(alog)?\.?\s*no/i', 'productName' => '/product|description|item\s*name|^item$/i', 'category' => '/categor/i',
+                  'brand' => '/brand|make/i', 'quantity' => '/qty|quantity|nos/i', 'unit' => '/^unit|uom/i', 'unitPrice' => '/price|rate/i'];
+        $hIdx = null; $map = [];
+        foreach (array_slice($rows, 0, 10, true) as $i => $r) {
+            $m = [];
+            foreach ($r as $ci => $h) { $h = trim((string) $h); if ($h === '') continue; foreach ($alias as $k => $re) if (!isset($m[$k]) && preg_match($re, $h)) { $m[$k] = $ci; break; } }
+            if (isset($m['quantity']) && (isset($m['productName']) || isset($m['itemCode']))) { $hIdx = $i; $map = $m; break; }
+        }
+        if ($hIdx === null) sendError('Could not find the heading row (Item Code / Product, Quantity …). Use the template.', 400);
+        $num = function ($v) { $v = str_replace([',', '₹', ' '], '', (string) $v); return $v === '' || !is_numeric($v) ? null : (float) $v; };
+        $find = db()->prepare('SELECT id, itemCode, productName, category, brand, unit FROM `Product` WHERE UPPER(itemCode)=? LIMIT 1');
+        $items = []; $problems = [];
+        foreach ($rows as $ri => $r) {
+            if ($ri <= $hIdx) continue;
+            $it = []; foreach ($map as $k => $ci) $it[$k] = trim((string) ($r[$ci] ?? ''));
+            if (!array_filter($it, fn($v) => $v !== '')) continue;
+            $code = strtoupper($it['itemCode'] ?? ''); $p = null;
+            if ($code !== '') { try { $find->execute([$code]); $p = $find->fetch() ?: null; } catch (PDOException $e) {} }
+            $q = $num($it['quantity'] ?? '');
+            $line = ['productId' => $p['id'] ?? null, 'itemCode' => $p['itemCode'] ?? ($code ?: 'MANUAL'), 'productName' => ($it['productName'] ?? '') ?: ($p['productName'] ?? $code),
+                     'category' => ($it['category'] ?? '') ?: ($p['category'] ?? null), 'brand' => ($it['brand'] ?? '') ?: ($p['brand'] ?? null), 'unit' => ($it['unit'] ?? '') ?: ($p['unit'] ?? null),
+                     'quantity' => $q, 'unitPrice' => $num($it['unitPrice'] ?? ''), 'row' => $ri + 1];
+            if (!$line['productName']) $problems[] = 'Row ' . ($ri + 1) . ': no product / description';
+            if (!$q || $q <= 0) $problems[] = 'Row ' . ($ri + 1) . ': quantity missing';
+            $items[] = $line;
+        }
+        if (!$items) sendError('No item rows found under the heading row.', 400);
+        if (count($items) > 300) sendError('At most 300 items (the file has ' . count($items) . ').', 400);
+        sendSuccess(['items' => $items, 'problems' => $problems], count($items) . ' item' . (count($items) === 1 ? '' : 's') . ' read from the file');
+    }
+
     public function stockCheck(): void
     {
         authenticate();

@@ -243,6 +243,31 @@ class MeetingController
         sendSuccess(['meeting' => $meeting]);
     }
 
+    /** Within this distance of the customer's saved location a field engineer can log a visit. */
+    public const VISIT_RADIUS_M = 1000;
+    /** Logged from anywhere: a phone call or an online meeting. */
+    public const REMOTE_TYPES = ['CALL', 'ONLINE'];
+
+    /**
+     * Field engineers (Sales) log a visit only at the customer — within 1 km of the customer's saved location,
+     * using the live location every save carries (X-CRM-Geo). A phone call / online meeting can be logged anywhere.
+     * A customer with no saved location gets this one (the first visit pins it).
+     */
+    private static function mustBeAtCustomer(array $auth, string $customerId, array $customer, string $type): void
+    {
+        if (!in_array($auth['role'], LocationGuard::ROLES, true) || in_array(strtoupper($type), self::REMOTE_TYPES, true)) return;
+        $fix = LocationGuard::fix();
+        if (!$fix) sendError('Turn on your location to log a visit — a visit can be logged only at the customer. For a phone call, choose the type "Call".', 400);
+        [$lat, $lng, $acc] = $fix;
+        if ($customer['lat'] === null || $customer['lng'] === null) {
+            if ($acc <= 200) db()->prepare('UPDATE `Customer` SET lat=?, lng=?, updatedAt=? WHERE id=? AND lat IS NULL')->execute([$lat, $lng, now_sql(), $customerId]);
+            return;
+        }
+        $d = LocationHistoryController::meters($lat, $lng, (float) $customer['lat'], (float) $customer['lng']);
+        if ($d - min($acc, 300) > self::VISIT_RADIUS_M)
+            sendError('You are ' . number_format($d / 1000, 1) . ' km from ' . $customer['companyName'] . '. A visit can be logged only at the customer (within 1 km). For a phone call, choose the type "Call".', 400);
+    }
+
     // POST /api/meetings
     public function create(): void
     {
@@ -265,10 +290,11 @@ class MeetingController
         if (!in_array($status, self::statuses()))
             sendError('Invalid status.', 400);
 
-        $cs = db()->prepare('SELECT companyName FROM `Customer` WHERE id=? LIMIT 1');
+        $cs = db()->prepare('SELECT companyName, lat, lng FROM `Customer` WHERE id=? LIMIT 1');
         $cs->execute([$customerId]);
         $customer = $cs->fetch();
         if (!$customer) sendError('Customer not found.', 404);
+        self::mustBeAtCustomer($auth, $customerId, $customer, $meetingType);
 
         $id = gen_id();
         $nfu = to_dt($b['nextFollowUp'] ?? null);

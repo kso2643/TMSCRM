@@ -408,6 +408,17 @@ class AlertFeedController
             }
         }
 
+        // The person themselves: punched in but no location for 30+ minutes → remind them to turn it on.
+        foreach (self::rows(
+            "SELECT a.id, a.checkIn, (SELECT p.capturedAt FROM `LocationPing` p WHERE p.attendanceId=a.id ORDER BY p.capturedAt DESC LIMIT 1) AS lastAt
+             FROM `Attendance` a WHERE a.userId=? AND a.date>=? AND a.checkIn IS NOT NULL AND a.checkOut IS NULL", [$me, start_of_day()]) as $r) {
+            $last = $r['lastAt'] ?: $r['checkIn'];
+            $at = date('Y-m-d H:i:s', strtotime($last) + 1800);
+            if ($at > now_sql() || $at <= $since) continue;
+            $add('my-no-loc-' . $r['id'] . '-' . strtotime($last), 'LOCATION_OFF', '📵 Your location is not reaching the CRM',
+                'No location from your phone since ' . date('g:i a', strtotime($last)) . '. Turn on Location / GPS and open the CRM app so your route and km are recorded.', '/attendance/', $at);
+        }
+
         // Stock reminders (Manager and up): an item that just fell to / below its
         // minimum or ran out, plus one morning summary per day while any are low.
         if (is_admin_tier($auth['role'])) {

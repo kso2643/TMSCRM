@@ -1,3 +1,32 @@
+# Update — 6 Nov (b): order page items like price requests, leave days + one-tap reasons, red pins, location-off alert to the engineer, log meeting only at the customer
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Phone app:** install the new APK from the `crm-apps` release (location-off notification).
+
+1. **Order page**
+   - **Items like the price-request page:** each item is a card (Item 1, Item 2…) with Product, Item code, Category, Brand, Quantity, Unit, Price ₹/unit and Amount.
+     - Type a name or code and pick from the suggestions (stock shown), or keep it as typed for a new product.
+     - **+ Add item**, **Upload items from Excel** and **Template** work as on the price-request page.
+     - Empty cards are ignored when saving. The items total and the order value update as you type.
+   - **Professional look:** clean line icons replace the emoji (new order, copy, edit, PDF, stock reminders, close).
+   - **Fixed:**
+     - A new pending order showed a red "Reason for non-delivery (required)" box straight away. Now the items are ticked as supplied, and **Not delivered…** asks for the reason.
+     - Before TMS / APJ was chosen, an order number without the company was shown. It now says to choose TMS or APJ first.
+     - The default order date could be yesterday before 5:30 am. It now uses Indian time.
+2. **Leave:**
+   - Choosing the dates shows **how many days** (e.g. "3 days · Fri 6 Nov → Sun 8 Nov"; "½ day" for a half day).
+   - One-tap reasons fill the reason and the right leave type: Not feeling well, Hospital / doctor visit, Family function, Personal work, Going to native place, Bank / office work (few hours).
+3. **Location history:** all pins are red. The symbol inside still shows start ▶, the stop number, a customer 📍 or the end ■.
+4. **Location turned off → the engineer is alerted.**
+   - **Phone app (new APK):** a notification the moment GPS is switched off while punched in. Tapping it opens the location settings; it disappears when location is back on.
+   - **All phones:** an alert in the CRM ("Your location is turned off"), and another if no location has arrived for 30+ minutes.
+   - The CEO alerts stay as before.
+5. **Log meeting only at the customer.**
+   - Sales engineers can log a visit only within **1 km of the customer's saved location**. The GPS accuracy is allowed for.
+   - Otherwise the message says how far away they are.
+   - **Phone calls** (type "Call") and **online meetings** can be logged from anywhere.
+   - A customer with no saved location gets this visit's location (the first visit pins the customer).
+   - Office staff (Admin / Manager / Super Admin) are not limited.
+
 # Update — 6 Nov: PO with our delivery address + customer GSTIN; location history by pins (customers reached, km per leg); punch-out grace till 7:30 pm
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed.
