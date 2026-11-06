@@ -122,6 +122,46 @@
     };
   })();
 
+  // ── Hosting firewalls that refuse DELETE / PUT / PATCH ("Failed to fetch") ──
+  // Every page's delete / edit call to the CRM API goes as POST with "X-HTTP-Method-Override",
+  // which the API treats as the real method. Covers fetch() and XMLHttpRequest (axios).
+  (function methodOverride() {
+    if (window.__crmMethodOverride) return;
+    window.__crmMethodOverride = true;
+    var OV = { DELETE: 1, PUT: 1, PATCH: 1 };
+    function isApi(u) { return /\/api\//.test(String(u || '')) && !/\/api\/payroll\//.test(String(u || '')); }
+    var of = window.fetch;
+    if (of) window.fetch = function (input, init) {
+      try {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        var m = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        if (OV[m] && isApi(url)) {
+          init = Object.assign({}, init || {}, { method: 'POST' });
+          var h = new Headers((init && init.headers) || (input && input.headers) || {});
+          h.set('X-HTTP-Method-Override', m);
+          init.headers = h;
+          if (typeof input !== 'string' && input && input.url) input = input.url;
+        }
+      } catch (e) {}
+      return of.call(this, input, init);
+    };
+    var XHR = window.XMLHttpRequest;
+    if (XHR && !XHR.prototype.__crmOv) {
+      XHR.prototype.__crmOv = true;
+      var open = XHR.prototype.open;
+      XHR.prototype.open = function (m, u) {
+        var mm = String(m || '').toUpperCase();
+        if (OV[mm] && isApi(u)) {
+          var args = Array.prototype.slice.call(arguments); args[0] = 'POST';
+          var r = open.apply(this, args);
+          try { this.setRequestHeader('X-HTTP-Method-Override', mm); } catch (e) {}
+          return r;
+        }
+        return open.apply(this, arguments);
+      };
+    }
+  })();
+
   // Android app: signed out → stop the background alerts on the phone.
   try { if (window.CRMNative && window.CRMNative.clearSession && !localStorage.getItem('crm_token')) window.CRMNative.clearSession(); } catch (e) {}
   if (/^\/(login|trial-sheet)(\/|$)/.test(path) || /^\/404/.test(path)) return;

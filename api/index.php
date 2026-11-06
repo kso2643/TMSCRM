@@ -127,7 +127,7 @@ function sendCorsHeaders(): void
     }
     header('Access-Control-Allow-Credentials: true');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-CRM-Geo');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-CRM-Geo, X-HTTP-Method-Override');
     // Let the CRM (a different origin) read download file names.
     header('Access-Control-Expose-Headers: Content-Disposition');
     header('Vary: Origin');
@@ -173,6 +173,12 @@ if (str_starts_with($path, '/uploads/')) {
 }
 
 // ── API router ────────────────────────────────────────────────────────
+// Some hosting firewalls refuse DELETE / PUT / PATCH (the browser then shows "Failed to fetch"). The pages send
+// those as POST with "X-HTTP-Method-Override: DELETE" (crm-global.js); treat them as the real method.
+if (strtoupper($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    $ov = strtoupper(trim((string) ($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'] ?? '')));
+    if (in_array($ov, ['DELETE', 'PUT', 'PATCH'], true)) $_SERVER['REQUEST_METHOD'] = $ov;
+}
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
 // Strip /api prefix

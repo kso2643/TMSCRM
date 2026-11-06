@@ -1,3 +1,12 @@
+# Update — 6 Nov (c): delete / edit no longer fails with "Failed to fetch"
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once (on every computer / phone that uses the CRM). No app update is needed.
+
+- Many hosting servers have a firewall that refuses **DELETE** (and sometimes **PUT / PATCH**) requests. The browser then only shows **"Failed to fetch"**, so old records could not be removed.
+- Now every delete and edit is sent as a normal **POST** with a note `X-HTTP-Method-Override: DELETE` (or PUT / PATCH), and the server treats it as the real delete / edit.
+- Permissions are unchanged: who may delete what stays the same.
+- This works on all pages, including the older ones (customers, orders, quotations, meetings, price requests, …).
+
 # Update — 6 Nov (b): order page items like price requests, leave days + one-tap reasons, red pins, location-off alert to the engineer, log meeting only at the customer
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Phone app:** install the new APK from the `crm-apps` release (location-off notification).
