@@ -130,17 +130,19 @@
     window.__crmMethodOverride = true;
     var OV = { DELETE: 1, PUT: 1, PATCH: 1 };
     function isApi(u) { return /\/api\//.test(String(u || '')) && !/\/api\/payroll\//.test(String(u || '')); }
+    // the real method rides in the address (?_method=DELETE): no extra header, so the browser's
+    // cross-site pre-flight check stays exactly as for any other save
+    function withMethod(u, m) { u = String(u); var h = u.indexOf('#'), tail = h >= 0 ? u.slice(h) : ''; if (h >= 0) u = u.slice(0, h); return u + (u.indexOf('?') >= 0 ? '&' : '?') + '_method=' + m + tail; }
     var of = window.fetch;
     if (of) window.fetch = function (input, init) {
       try {
         var url = typeof input === 'string' ? input : (input && input.url) || '';
-        var m = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        var m = String((init && init.method) || (input && typeof input !== 'string' && input.method) || 'GET').toUpperCase();
         if (OV[m] && isApi(url)) {
+          var hdr = (init && init.headers) || (input && typeof input !== 'string' && input.headers) || undefined;
           init = Object.assign({}, init || {}, { method: 'POST' });
-          var h = new Headers((init && init.headers) || (input && input.headers) || {});
-          h.set('X-HTTP-Method-Override', m);
-          init.headers = h;
-          if (typeof input !== 'string' && input && input.url) input = input.url;
+          if (hdr && !init.headers) init.headers = hdr;
+          input = withMethod(url, m);
         }
       } catch (e) {}
       return of.call(this, input, init);
@@ -152,10 +154,8 @@
       XHR.prototype.open = function (m, u) {
         var mm = String(m || '').toUpperCase();
         if (OV[mm] && isApi(u)) {
-          var args = Array.prototype.slice.call(arguments); args[0] = 'POST';
-          var r = open.apply(this, args);
-          try { this.setRequestHeader('X-HTTP-Method-Override', mm); } catch (e) {}
-          return r;
+          var args = Array.prototype.slice.call(arguments); args[0] = 'POST'; args[1] = withMethod(u, mm);
+          return open.apply(this, args);
         }
         return open.apply(this, arguments);
       };
@@ -1540,23 +1540,44 @@
     var u = typeof url === 'string' ? url : (url && url.url ? String(url.url) : '');
     return u.indexOf(API) === 0 || u.indexOf('//' + API_HOST + '/') > 0;
   }
+  // Logging a meeting / visit checks the distance to the customer, so it needs a fresh, precise GPS
+  // fix — not the low-power tower / Wi-Fi fix kept for the other saves (that can be 1–3 km off).
+  function needsPrecise(method, url) { return String(method || 'GET').toUpperCase() === 'POST' && /\/api\/meetings\/?(\?|$)/.test(String(url || '')); }
+  function preciseFix() {
+    return new Promise(function (res) {
+      if (!navigator.geolocation) return res(null);
+      var done = false, t = setTimeout(function () { if (!done) { done = true; res(null); } }, 13000);
+      navigator.geolocation.getCurrentPosition(function (p) { if (done) return; done = true; clearTimeout(t); geoOk(p); res(geo.fix); },
+        function () { if (done) return; done = true; clearTimeout(t); res(null); }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 12000 });
+    });
+  }
   (function patchRequests() {
     if (window.__crmGeoPatched) return; window.__crmGeoPatched = true;
     var of = window.fetch;
     if (of) window.fetch = function (input, init) {
-      var h = geoRole() && isApi(input) ? geoHeader() : null;
-      if (h) {
-        init = Object.assign({}, init || {});
-        var hd = new Headers(init.headers || (input && input.headers) || {});
-        hd.set('X-CRM-Geo', h); init.headers = hd;
+      var self = this, url = typeof input === 'string' ? input : (input && input.url) || '';
+      function go() {
+        var h = geoRole() && isApi(input) ? geoHeader() : null;
+        if (h) {
+          init = Object.assign({}, init || {});
+          var hd = new Headers(init.headers || (input && input.headers) || {});
+          hd.set('X-CRM-Geo', h); init.headers = hd;
+        }
+        return of.call(self, input, init).then(function (r) { if (r && r.status === 423 && geoRole()) geoCheck(true); return r; });
       }
-      return of.call(this, input, init).then(function (r) { if (r && r.status === 423 && geoRole()) geoCheck(true); return r; });
+      if (geoRole() && isApi(input) && needsPrecise((init && init.method) || (input && input.method), url)) return preciseFix().then(go);
+      return go();
     };
     var oo = XMLHttpRequest.prototype.open, os = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.open = function (m, url) { this.__crmApi = isApi(String(url)); return oo.apply(this, arguments); };
+    XMLHttpRequest.prototype.open = function (m, url) { this.__crmApi = isApi(String(url)); this.__crmPrecise = needsPrecise(m, url); return oo.apply(this, arguments); };
     XMLHttpRequest.prototype.send = function () {
-      if (this.__crmApi && geoRole()) { var h = geoHeader(); if (h) try { this.setRequestHeader('X-CRM-Geo', h); } catch (e) {} }
-      return os.apply(this, arguments);
+      var x = this, args = arguments;
+      function go() {
+        if (x.__crmApi && geoRole()) { var h = geoHeader(); if (h) try { x.setRequestHeader('X-CRM-Geo', h); } catch (e) {} }
+        return os.apply(x, args);
+      }
+      if (x.__crmApi && x.__crmPrecise && geoRole()) { preciseFix().then(go); return; }
+      return go();
     };
   })();
   function geoOk(p) {

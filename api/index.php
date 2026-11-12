@@ -174,9 +174,10 @@ if (str_starts_with($path, '/uploads/')) {
 
 // ── API router ────────────────────────────────────────────────────────
 // Some hosting firewalls refuse DELETE / PUT / PATCH (the browser then shows "Failed to fetch"). The pages send
-// those as POST with "X-HTTP-Method-Override: DELETE" (crm-global.js); treat them as the real method.
+// those as POST with "?_method=DELETE" (crm-global.js); treat them as the real method.
 if (strtoupper($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
-    $ov = strtoupper(trim((string) ($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'] ?? '')));
+    // "?_method=DELETE" in the address (no extra header, so no change to the browser's pre-flight check), or the header
+    $ov = strtoupper(trim((string) ($_GET['_method'] ?? $_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'] ?? '')));
     if (in_array($ov, ['DELETE', 'PUT', 'PATCH'], true)) $_SERVER['REQUEST_METHOD'] = $ov;
 }
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');

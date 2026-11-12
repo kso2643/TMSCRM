@@ -264,8 +264,10 @@ class MeetingController
             return;
         }
         $d = LocationHistoryController::meters($lat, $lng, (float) $customer['lat'], (float) $customer['lng']);
-        if ($d - min($acc, 300) > self::VISIT_RADIUS_M)
-            sendError('You are ' . number_format($d / 1000, 1) . ' km from ' . $customer['companyName'] . '. A visit can be logged only at the customer (within 1 km). For a phone call, choose the type "Call".', 400);
+        if ($d - min($acc, 300) <= self::VISIT_RADIUS_M) return;
+        // a rough tower / Wi-Fi fix: say so, rather than "you are far away"
+        if ($acc > 300) sendError('Your location is not accurate enough (±' . number_format($acc / 1000, 1) . ' km) to check that you are at ' . $customer['companyName'] . '. Turn on GPS / "Precise location" for the CRM, step outside for a moment and try again. For a phone call, choose the type "Call".', 400);
+        sendError('You are ' . number_format($d / 1000, 1) . ' km from ' . $customer['companyName'] . '. A visit can be logged only at the customer (within 1 km). If the customer\'s saved location is wrong, ask an admin to correct it on the Customer map. For a phone call, choose the type "Call".', 400);
     }
 
     // POST /api/meetings
