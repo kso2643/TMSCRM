@@ -1035,10 +1035,12 @@
       var b = a.querySelector('.crm-unread');
       if (!unread) { if (b) b.remove(); return; }
       if (!b) { b = document.createElement('span'); b.className = 'crm-unread'; b.style.cssText = 'margin-left:auto;min-width:1.25rem;height:1.25rem;padding:0 .35rem;border-radius:999px;background:#dc2626;color:#fff;font:700 .7rem/1.25rem system-ui,sans-serif;text-align:center;display:inline-block'; a.appendChild(b); }
+      if (a.closest('header') && !a.closest('nav')) { a.style.position = 'relative'; b.style.cssText = 'position:absolute;top:-2px;right:-4px;min-width:1.05rem;height:1.05rem;padding:0 .25rem;border-radius:999px;background:#dc2626;color:#fff;font:700 .62rem/1.05rem system-ui,sans-serif;text-align:center;pointer-events:none'; }
       b.textContent = label; b.title = unread + ' unread alert' + (unread === 1 ? '' : 's');
     });
     var bell = document.getElementById('crm-bell');
-    if (!bell && document.body) {
+    var hdrBell = Array.prototype.filter.call(document.querySelectorAll('header a[href="/alerts/"], header a[href="/alerts"]'), function (x) { return x.id !== 'crm-bell' && !x.closest('nav'); })[0];
+    if (!bell && document.body && !hdrBell) {
       var qsBtn = Array.prototype.filter.call(document.querySelectorAll('header button, header a'), function (x) { return /Quick search/i.test(x.textContent || ''); })[0];
       if (qsBtn && qsBtn.parentNode) {
         bell = document.createElement('a'); bell.id = 'crm-bell'; bell.href = '/alerts/'; bell.setAttribute('aria-label', 'Alerts');

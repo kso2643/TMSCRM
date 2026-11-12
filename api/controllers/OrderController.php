@@ -226,6 +226,9 @@ class OrderController
                     'suppliedQty' => 'DECIMAL(14,2) NULL',
                     // price per unit on the customer's PO (optional)
                     'unitPrice'   => 'DECIMAL(14,2) NULL',
+                    // a typed-in item not in Products: PENDING until a Manager / Admin / Super Admin confirms the code,
+                    // then it is added to Products and Stock (CONFIRMED)
+                    'reviewStatus' => 'VARCHAR(10) NULL', 'reviewedById' => 'VARCHAR(30) NULL', 'reviewedAt' => 'DATETIME NULL',
                 ],
             ],
         ];
@@ -339,6 +342,7 @@ class OrderController
                 'suppliedQty' => self::suppliedQty($i), 'pendingQty' => max(0, round((float) $i['quantity'] - self::suppliedQty($i), 2)),
                 'stock' => $i['_stock'] ?? null,
                 'procurementStatus' => $i['procurementStatus'], 'expectedDeliveryDate' => $i['expectedDeliveryDate'],
+                'reviewStatus' => $i['reviewStatus'] ?? null,
             ], $items) : null,
             'invoices'           => $items !== null ? $this->invoicesOf($row['id']) : null,
             'createdAt'          => $row['createdAt'],
@@ -632,11 +636,23 @@ class OrderController
                 (id,orderId,productId,itemCode,productName,unit,category,brand,quantity,supplied,suppliedAt,procurementStatus,expectedDeliveryDate,createdAt,suppliedQty,unitPrice)
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
-        foreach ($items as $it) {
-            if (!$it['productId']) {   // typed in by hand → also added to Products and Stock
-                $reg = product_register($it['itemCode'], (string) $it['productName'], ['brand' => $it['brand'], 'unit' => $it['unit'], 'category' => $it['category']]);
-                if ($reg['id']) { $it['productId'] = $reg['id']; $it['itemCode'] = $reg['itemCode']; }
+        // typed-in items: an item code that is already in Products is linked at once; anything new waits for a
+        // Manager / Admin / Super Admin to confirm the code before it goes into Products and Stock
+        $find = db()->prepare('SELECT id, itemCode FROM `Product` WHERE UPPER(itemCode)=? LIMIT 1');
+        $prevReview = [];
+        foreach ($this->fetchItems($orderId) as $old) if (!$old['productId'] && ($old['reviewStatus'] ?? null) === 'PENDING') $prevReview[strtolower(trim((string) $old['productName']))] = true;
+        $pendingNew = 0;
+        foreach ($items as &$it) {
+            $it['reviewStatus'] = null;
+            if (!$it['productId']) {
+                $code = strtoupper(trim((string) $it['itemCode']));
+                if ($code !== '' && $code !== 'MANUAL') { $find->execute([$code]); if ($p = $find->fetch()) { $it['productId'] = $p['id']; $it['itemCode'] = $p['itemCode']; } }
+                if (!$it['productId']) { $it['reviewStatus'] = 'PENDING'; if (empty($prevReview[strtolower(trim((string) $it['productName']))])) $pendingNew++; }
             }
+        }
+        unset($it);
+        $this->lastPendingNew = $pendingNew;
+        foreach ($items as $it) {
             $carry = $prev[$it['productId']] ?? null;
             $ins->execute([
                 gen_id(), $orderId, $it['productId'], $it['itemCode'], $it['productName'], $it['unit'], $it['category'], $it['brand'], $it['quantity'],
@@ -648,6 +664,62 @@ class OrderController
                 $it['unitPrice'] ?? null,
             ]);
         }
+        if (in_array(true, array_map(fn($x) => $x['reviewStatus'] === 'PENDING', $items), true))
+            db()->prepare("UPDATE `CustomerOrderItem` SET reviewStatus='PENDING' WHERE orderId=? AND productId IS NULL")->execute([$orderId]);
+    }
+    private int $lastPendingNew = 0;
+
+    /** Tell Managers / Admins / Super Admin: new items on an order need their code confirmed. */
+    private function noticePending(string $orderId, array $auth): void
+    {
+        if ($this->lastPendingNew < 1) return;
+        try {
+            ChangeNotice::ensure();
+            $o = $this->fetchRow($orderId);
+            $to = db()->prepare("SELECT id FROM `User` WHERE isActive=1 AND role IN ('SUPER_ADMIN','ADMIN','MANAGER') AND id<>?"); $to->execute([$auth['id']]);
+            $n = $this->lastPendingNew;
+            $title = mb_substr('🆕 ' . $n . ' new item' . ($n === 1 ? '' : 's') . ' on ' . ($o['orderNo'] ?? 'an order') . ' — confirm the code', 0, 255);
+            $body = mb_substr(($o['companyName'] ?? '') . ' · typed in by ' . ($auth['name'] ?? '') . '. They go into Stock once the code is confirmed.', 0, 500);
+            $ins = db()->prepare('INSERT INTO `ChangeNotice` (id,userId,byId,title,body,link,createdAt) VALUES (?,?,?,?,?,?,?)');
+            foreach ($to->fetchAll(PDO::FETCH_COLUMN) as $u) $ins->execute([gen_id(), $u, $auth['id'], $title, $body, '/orders/#confirm-items', now_sql()]);
+        } catch (Throwable $e) { error_log('Pending items notice: ' . $e->getMessage()); }
+    }
+
+    // GET /api/orders/pending-items — typed-in items waiting for their code to be confirmed (Manager and up)
+    public function pendingItems(): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('For Managers, Admins and the Super Admin.', 403);
+        $s = db()->query("SELECT i.id, i.orderId, i.itemCode, i.productName, i.unit, i.category, i.brand, i.quantity, o.orderNo, o.firm, c.companyName, u.name AS engineerName, i.createdAt
+            FROM `CustomerOrderItem` i JOIN `CustomerOrder` o ON o.id=i.orderId LEFT JOIN `Customer` c ON c.id=o.customerId LEFT JOIN `User` u ON u.id=o.engineerId
+            WHERE i.reviewStatus='PENDING' AND i.productId IS NULL ORDER BY i.createdAt DESC LIMIT 200");
+        sendSuccess(['items' => array_map(function ($r) { $r['quantity'] = (float) $r['quantity']; if ($r['itemCode'] === 'MANUAL') $r['itemCode'] = ''; return $r; }, $s->fetchAll())]);
+    }
+
+    // PATCH /api/orders/:id/items/:itemId/confirm  { itemCode, productName, brand?, category?, unit? }
+    // The code is checked / corrected, then the item goes into Products and Stock and the order line is linked to it.
+    public function confirmItem(string $orderId, string $itemId): void
+    {
+        $auth = authenticate();
+        if (!is_admin_tier($auth['role'])) sendError('Only a Manager, Admin or the Super Admin can confirm new items.', 403);
+        $s = db()->prepare('SELECT * FROM `CustomerOrderItem` WHERE id=? AND orderId=?'); $s->execute([$itemId, $orderId]);
+        $it = $s->fetch();
+        if (!$it) sendError('Order item not found.', 404);
+        if ($it['productId']) sendError('This item is already in Products.', 400);
+        $b = request_body();
+        $code = strtoupper(trim((string) ($b['itemCode'] ?? $it['itemCode'] ?? '')));
+        if ($code === 'MANUAL') $code = '';
+        $name = trim((string) ($b['productName'] ?? $it['productName'] ?? ''));
+        if ($name === '') sendError('Enter the product name.', 400);
+        $brand = trim((string) ($b['brand'] ?? $it['brand'] ?? '')) ?: null;
+        $cat = trim((string) ($b['category'] ?? $it['category'] ?? '')) ?: null;
+        $unit = trim((string) ($b['unit'] ?? $it['unit'] ?? '')) ?: null;
+        $reg = product_register($code, $name, ['brand' => $brand, 'unit' => $unit, 'category' => $cat]);
+        if (!$reg['id']) sendError('Could not add the item to Products.', 500);
+        db()->prepare("UPDATE `CustomerOrderItem` SET productId=?, itemCode=?, productName=?, brand=?, category=?, unit=?, reviewStatus='CONFIRMED', reviewedById=?, reviewedAt=? WHERE id=?")
+            ->execute([$reg['id'], $reg['itemCode'], mb_substr($name, 0, 255), $brand, $cat, $unit, $auth['id'], now_sql(), $itemId]);
+        log_activity($auth['id'], 'ORDER_ITEM_CONFIRMED', 'CustomerOrder', $orderId, ['from' => $it['itemCode'] . ' ' . $it['productName'], 'to' => $reg['itemCode'] . ' ' . $name]);
+        sendSuccess(['item' => ['id' => $itemId, 'productId' => $reg['id'], 'itemCode' => $reg['itemCode'], 'productName' => $name]], 'Confirmed — ' . $reg['itemCode'] . ' is in Products and Stock');
     }
 
     /** Sets every line on the order to supplied (true) or not (false). */
@@ -863,6 +935,7 @@ class OrderController
         if (($ov = self::orderValue($b)) !== null) db()->prepare('UPDATE `CustomerOrder` SET orderValue=? WHERE id=?')->execute([$ov, $id]);
         if (($pn = mb_substr(trim((string) ($b['poNumber'] ?? '')), 0, 80)) !== '') db()->prepare('UPDATE `CustomerOrder` SET poNumber=? WHERE id=?')->execute([$pn, $id]);
         $this->replaceItems($id, $items);
+        $this->noticePending($id, $auth);
 
         StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)
         log_activity($auth['id'], 'ORDER_CREATED', 'CustomerOrder', $id, ['customer' => $customer['companyName'], 'orderType' => $orderType]);
@@ -932,6 +1005,7 @@ class OrderController
             $items = $this->parseItems($b['items']);
             if (!$items) sendError('Add at least one product to the order.', 400);
             $this->replaceItems($id, $items);
+            $this->noticePending($id, $auth);
         }
 
         StockLedger::syncOrder($id, $auth['id']); // supplied lines come out of stock (undo puts them back)

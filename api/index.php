@@ -409,6 +409,8 @@ try {
             $method === 'GET'   && $c1 === 'engineers'                     => $ctrl->engineers(),
             $method === 'GET'   && $c1 === 'stock-check'                   => $ctrl->stockCheck(),
             $method === 'GET'   && $c1 === 'items-template'                => $ctrl->itemsTemplate(),
+            $method === 'GET'   && $c1 === 'pending-items'                 => $ctrl->pendingItems(),
+            $method === 'PATCH' && $c1 !== '' && $c2 === 'items' && $c3 !== '' && $c4 === 'confirm' => $ctrl->confirmItem($c1, $c3),
             $method === 'POST'  && $c1 === 'items-parse'                   => $ctrl->itemsParse(),
             $method === 'GET'   && $c1 !== '' && $c2 === 'pdf'             => $ctrl->pdf($c1),
             $method === 'GET'   && $c1 !== '' && $c2 === 'document'        => $ctrl->downloadDocument($c1),

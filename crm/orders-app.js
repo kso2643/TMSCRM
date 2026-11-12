@@ -277,6 +277,7 @@
     var filters = el('div', { class: 'ox-filters' });
     var flashBox = el('div');
     var regBox = el('div');
+    var confirmBox = el('div', { id: 'confirm-items' });
     // Plain wrapper — loading/error/table each render their own card inside it.
     var body = el('div', {}, [el('div', { class: 'card p-10 text-center text-muted', text: 'Loading…' })]);
 
@@ -288,8 +289,46 @@
           el('button', { class: 'btn-primary', onclick: function () { openOrderDialog(null, load); } }, [ic('plus'), ' New order'])
         ])
       ]),
-      regBox, stats, filters, flashBox, body
+      regBox, confirmBox, stats, filters, flashBox, body
     ]));
+    // ── typed-in items waiting for their code to be confirmed (Manager / Admin / Super Admin) ──
+    function loadPending() {
+      if (!isAdmin()) return;
+      api('GET', '/orders/pending-items').then(function (r) {
+        var rows = (r.data && r.data.items) || [];
+        confirmBox.innerHTML = '';
+        if (!rows.length) return;
+        var tb = el('tbody');
+        rows.forEach(function (it) {
+          var codeI = el('input', { class: INPUT, 'data-ci-code': it.id, placeholder: 'Item code', value: it.itemCode || '', style: 'min-width:9rem' });
+          var nameI = el('input', { class: INPUT, 'data-ci-name': it.id, value: it.productName || '', style: 'min-width:14rem' });
+          var brandI = el('input', { class: INPUT, 'data-ci-brand': it.id, placeholder: 'Brand', value: it.brand || '', style: 'min-width:7rem' });
+          var catI = el('input', { class: INPUT, 'data-ci-cat': it.id, placeholder: 'Category', value: it.category || '', style: 'min-width:7rem' });
+          var go = el('button', { class: 'btn-primary btn-sm', type: 'button', 'data-ci-confirm': it.id, onclick: function () {
+            if (!nameI.value.trim()) { alert('Enter the product name.'); return; }
+            go.disabled = true;
+            api('PATCH', '/orders/' + encodeURIComponent(it.orderId) + '/items/' + encodeURIComponent(it.id) + '/confirm',
+              { itemCode: codeI.value.trim(), productName: nameI.value.trim(), brand: brandI.value.trim(), category: catI.value.trim(), unit: it.unit || '' })
+              .then(function (j) { showFlash(j.message || 'Confirmed'); loadPending(); load(); })
+              .catch(function (e) { alert(e.message); go.disabled = false; });
+          } }, [ic('check'), ' Confirm & add to Stock']);
+          tb.appendChild(el('tr', { class: 'table-row', 'data-ci-row': it.id }, [
+            el('td', { class: 'px-3 py-2 whitespace-nowrap' }, [el('span', { class: 'ox-no', text: it.orderNo || '—' }), el('div', { class: 'text-xs text-muted', text: (it.companyName || '') + (it.engineerName ? ' · ' + it.engineerName : '') })]),
+            el('td', { class: 'px-3 py-2' }, [codeI]), el('td', { class: 'px-3 py-2' }, [nameI]), el('td', { class: 'px-3 py-2' }, [brandI]), el('td', { class: 'px-3 py-2' }, [catI]),
+            el('td', { class: 'px-3 py-2 text-right whitespace-nowrap', text: fmtQty(it.quantity) + (it.unit ? ' ' + it.unit : '') }),
+            el('td', { class: 'px-3 py-2' }, [go])
+          ]));
+        });
+        confirmBox.appendChild(el('div', { class: 'card overflow-hidden', style: 'border:1px solid #fcd34d' }, [
+          el('div', { class: 'px-4 py-3', style: 'background:#fffbeb' }, [el('b', { text: rows.length + ' new item' + (rows.length === 1 ? '' : 's') + ' typed in on orders — confirm the code' }),
+            el('span', { class: 'text-xs text-muted', style: 'margin-left:.5rem', text: 'Check the item code (correct it if it is wrong), then confirm: only then it goes into Products and Stock.' })]),
+          el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm' }, [
+            el('thead', {}, [el('tr', {}, ['Order', 'Item code', 'Product / description', 'Brand', 'Category', 'Qty', ''].map(function (h) { return el('th', { class: 'table-head px-3 py-2 text-left', text: h }); }))]), tb])])
+        ]));
+        if (location.hash === '#confirm-items') setTimeout(function () { confirmBox.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 300);
+      }).catch(function () {});
+    }
+    loadPending();
     function toggleReg(force) {
       var open = force !== undefined ? force : !regBox.firstChild;
       regBox.innerHTML = '';
@@ -1068,7 +1107,7 @@
             metaBits ? el('span', { class: 'block text-xs text-muted', text: metaBits }) : null,
             done > 0 && i.suppliedAt ? el('span', { class: 'block text-xs text-muted', text: 'Supplied ' + fmtDate(i.suppliedAt) }) : null,
             el('span', { class: 'block text-xs text-muted', text: procLine }),
-            stockLine(i)
+            i.reviewStatus === 'PENDING' ? el('span', { class: 'ox-stock ox-stock-low', 'data-review-pending': i.id, text: 'New item — code to be confirmed before it goes into Stock' }) : stockLine(i)
           ]),
           el('span', { class: 'ox-supbox' }, [
             el('span', { class: 'text-xs text-muted', text: 'Supplied' }), qi,
