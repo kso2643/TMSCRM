@@ -292,6 +292,78 @@ class LocationHistoryController
         return $out;
     }
 
+    /** A point delivered this much later than it was taken = it waited on the phone for network. */
+    private const LATE_DELIVERY_MIN = 5;
+    /** No point at all for this long (and not explained by GPS off / no network) = phone off or app closed. */
+    private const SILENT_MIN = 20;
+
+    /**
+     * Network / GPS problems in a day, in order: NO_NETWORK (points kept on the phone and sent later),
+     * GPS_OFF (location switched off until the next point) and NO_DATA (nothing at all for 20+ min).
+     * Each: type, from, to, minutes, where it started and where it was back (lat, lng, nearest customer).
+     */
+    public static function issues(?array $att, array $pts, array $events): array
+    {
+        $out = [];
+        if (!$att || empty($att['checkIn'])) return $out;
+        $endT = $att['checkOut'] ?: now_sql();
+        $use = array_values(array_filter($pts, fn($p) => $p['lat'] !== null));
+        // customers to name the places
+        $custs = [];
+        if ($use) {
+            $la = array_column($use, 'lat'); $lo = array_column($use, 'lng');
+            try {
+                $c = db()->prepare('SELECT companyName, lat, lng FROM `Customer` WHERE isActive=1 AND lat IS NOT NULL AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?');
+                $c->execute([min($la) - 0.03, max($la) + 0.03, min($lo) - 0.03, max($lo) + 0.03]);
+                $custs = $c->fetchAll();
+            } catch (PDOException $e) {}
+        }
+        $place = function (?array $p) use ($custs): ?array {
+            if (!$p) return null;
+            $best = null; $bd = 2000;
+            foreach ($custs as $c) { $d = self::meters((float) $p['lat'], (float) $p['lng'], (float) $c['lat'], (float) $c['lng']); if ($d < $bd) { $bd = $d; $best = $c['companyName']; } }
+            return ['lat' => round((float) $p['lat'], 6), 'lng' => round((float) $p['lng'], 6), 'near' => $best ? ($bd < 300 ? 'at ' : 'near ') . $best : null];
+        };
+        $before = function (string $t) use ($use) { $q = null; foreach ($use as $p) { if ($p['capturedAt'] <= $t) $q = $p; else break; } return $q; };
+        $after = function (string $t) use ($use) { foreach ($use as $p) if ($p['capturedAt'] > $t) return $p; return null; };
+        $mins = fn($a, $b) => max(0, (int) round((strtotime($b) - strtotime($a)) / 60));
+        // 1. no network: runs of points that reached the server late
+        $run = null;
+        foreach ($use as $p) {
+            $late = !empty($p['receivedAt']) && strtotime($p['receivedAt']) - strtotime($p['capturedAt']) >= self::LATE_DELIVERY_MIN * 60;
+            if ($late) {
+                if (!$run) $run = ['from' => $p['capturedAt'], 'first' => $p, 'back' => $p['receivedAt'], 'last' => $p];
+                else { $run['last'] = $p; if ($p['receivedAt'] > $run['back']) $run['back'] = $p['receivedAt']; }
+            } elseif ($run) { $out[] = $run; $run = null; }
+        }
+        if ($run) $out[] = $run;
+        $out = array_map(function ($r) use ($place, $before, $mins) {
+            $to = $r['back'];   // the network was back when the kept points reached the server
+            return ['type' => 'NO_NETWORK', 'from' => $r['from'], 'to' => $to, 'minutes' => $mins($r['from'], $to),
+                    'start' => $place($before($r['from']) ?: $r['first']), 'end' => $place($r['last'])];
+        }, $out);
+        // 2. GPS switched off → until the next point
+        foreach ($events as $e) {
+            if (($e['type'] ?? '') !== 'LOCATION_OFF') continue;
+            $t = $e['detectedAt']; $nx = $after($t);
+            $to = $nx ? $nx['capturedAt'] : $endT;
+            $out[] = ['type' => 'GPS_OFF', 'from' => $t, 'to' => $to, 'minutes' => $mins($t, $to),
+                      'start' => $place($before($t) ?: ($e['lat'] !== null ? ['lat' => $e['lat'], 'lng' => $e['lng']] : null)), 'end' => $place($nx)];
+        }
+        // 3. nothing at all for 20+ min, not already explained
+        $times = array_merge([['t' => $att['checkIn'], 'p' => null]], array_map(fn($p) => ['t' => $p['capturedAt'], 'p' => $p], $use), [['t' => $endT, 'p' => null]]);
+        for ($i = 1; $i < count($times); $i++) {
+            $a = $times[$i - 1]['t']; $b = $times[$i]['t'];
+            if ($mins($a, $b) < self::SILENT_MIN) continue;
+            $covered = false;
+            foreach ($out as $o) if ($o['from'] <= $b && $o['to'] >= $a && $mins(max($a, $o['from']), min($b, $o['to'])) >= $mins($a, $b) / 2) { $covered = true; break; }
+            if ($covered) continue;
+            $out[] = ['type' => 'NO_DATA', 'from' => $a, 'to' => $b, 'minutes' => $mins($a, $b), 'start' => $place($times[$i - 1]['p'] ?: $before($a)), 'end' => $place($times[$i]['p'])];
+        }
+        usort($out, fn($x, $y) => strcmp($x['from'], $y['from']));
+        return array_values(array_filter($out, fn($o) => $o['minutes'] >= 1));
+    }
+
     private function requireViewer(array $auth): void
     {
         if (!is_admin_tier($auth['role'])) sendError('Only Super Admin, Admin or Manager can view location history.', 403);
@@ -319,7 +391,9 @@ class LocationHistoryController
         $att = db()->prepare("SELECT a.id, a.userId, a.date, a.manualKm, a.checkIn, a.checkInLat, a.checkInLng, a.checkOut, a.checkOutLat, a.checkOutLng, u.name, u.role FROM `Attendance` a JOIN `User` u ON u.id=a.userId
                               WHERE a.date>=? AND a.date<? AND a.checkIn IS NOT NULL ORDER BY u.name, a.date");
         $att->execute([$from . ' 00:00:00', $end]);
-        $pp = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
+        try { new AttendanceController(); } catch (Throwable $e) {}
+        $pp = db()->prepare('SELECT lat, lng, accuracy, capturedAt, receivedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
+        $ev = db()->prepare("SELECT eventType AS type, detectedAt, lat, lng FROM `StationaryLog` WHERE attendanceId=? AND eventType='LOCATION_OFF' ORDER BY detectedAt");
         $odo = [];
         try {
             $o = db()->prepare("SELECT userId, SUM(COALESCE(officialKm, IF(closingMeter IS NOT NULL, closingMeter-openingMeter, 0))) AS km FROM `FuelExpense` WHERE date>=? AND date<? GROUP BY userId");
@@ -336,7 +410,10 @@ class LocationHistoryController
             $pts = $pp->fetchAll();
             $km = self::distanceKm($pts, $a);
             $x = &$people[$a['userId']];
-            $x = $x ?? ['id' => $a['userId'], 'name' => $a['name'], 'role' => $a['role'], 'days' => 0, 'km' => 0.0, 'manualKm' => 0.0, 'points' => 0, 'perDay' => []];
+            $x = $x ?? ['id' => $a['userId'], 'name' => $a['name'], 'role' => $a['role'], 'days' => 0, 'km' => 0.0, 'manualKm' => 0.0, 'points' => 0, 'perDay' => [], 'issueMinutes' => 0, 'issues' => 0];
+            $ev->execute([$a['id']]);
+            $iss = self::issues($a, array_map(fn($r) => $r + ['lat' => (float) $r['lat']], $pts), $ev->fetchAll());
+            $x['issues'] += count($iss); $x['issueMinutes'] += array_sum(array_column($iss, 'minutes'));
             $mk = $a['manualKm'] !== null ? (float) $a['manualKm'] : 0.0;   // km typed at punch out for the time GPS was off
             $x['days']++; $x['km'] += $km; $x['manualKm'] += $mk; $x['points'] += count($pts);
             $x['perDay'][] = ['date' => substr($a['date'], 0, 10), 'km' => round($km, 2), 'manualKm' => $mk ?: null, 'points' => count($pts)];
@@ -393,10 +470,11 @@ class LocationHistoryController
 
         $pts = []; $breaks = []; $events = [];
         if ($att) {
-            $p = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
+            try { new AttendanceController(); } catch (Throwable $e) {}   // receivedAt column
+            $p = db()->prepare('SELECT lat, lng, accuracy, capturedAt, receivedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
             $p->execute([$att['id']]);
             $pts = array_map(fn($r) => ['lat' => (float) $r['lat'], 'lng' => (float) $r['lng'],
-                'accuracy' => $r['accuracy'] !== null ? (float) $r['accuracy'] : null, 'capturedAt' => $r['capturedAt']], $p->fetchAll());
+                'accuracy' => $r['accuracy'] !== null ? (float) $r['accuracy'] : null, 'capturedAt' => $r['capturedAt'], 'receivedAt' => $r['receivedAt']], $p->fetchAll());
         }
         $b = db()->prepare("SELECT * FROM `AttendanceBreak` WHERE userId=? AND startedAt>=? AND startedAt<? ORDER BY startedAt");
         $b->execute([$uid, $date . ' 00:00:00', date('Y-m-d 00:00:00', strtotime($date . ' +1 day'))]);
@@ -421,9 +499,13 @@ class LocationHistoryController
             ] : null,
             'points' => $pts, 'breaks' => $breaks, 'events' => $events, 'stops' => ($stops = self::stops(self::withEnds($pts, $att))),
             'pins' => ($pp = self::pins($att, $pts, $uid, $date))['pins'], 'path' => $pp['path'], 'customers' => $pp['customers'],
+            'issues' => ($iss = self::issues($att, $pts, $events)),
             'stats' => [
                 'points' => count($pts), 'distanceKm' => round(self::distanceKm($pts, $att), 2), 'pinKm' => $pp['pinKm'], 'customersReached' => count($pp['customers']),
                 'manualKm' => $att && isset($att['manualKm']) && $att['manualKm'] !== null ? (float) $att['manualKm'] : null,
+                'issueMinutes' => ['NO_NETWORK' => array_sum(array_map(fn($x) => $x['type'] === 'NO_NETWORK' ? $x['minutes'] : 0, $iss)),
+                                   'GPS_OFF' => array_sum(array_map(fn($x) => $x['type'] === 'GPS_OFF' ? $x['minutes'] : 0, $iss)),
+                                   'NO_DATA' => array_sum(array_map(fn($x) => $x['type'] === 'NO_DATA' ? $x['minutes'] : 0, $iss))],
                 'stops' => count($stops), 'stoppedMinutes' => array_sum(array_column($stops, 'minutes')), 'stopMinutes' => self::STOP_MINUTES,
                 'firstPoint' => $pts ? $pts[0]['capturedAt'] : null, 'lastPoint' => $pts ? end($pts)['capturedAt'] : null,
                 'breakSeconds' => array_sum(array_column($breaks, 'seconds')),

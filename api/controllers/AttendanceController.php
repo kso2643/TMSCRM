@@ -22,6 +22,8 @@ class AttendanceController
                 'lateOutType' => 'VARCHAR(12) NULL', 'lateOutReason' => 'TEXT NULL', 'travelFrom' => 'VARCHAR(160) NULL', 'travelTo' => 'VARCHAR(160) NULL',
                 'outRemindedAt' => 'DATETIME NULL',
             ]],
+            // when a point reached the server: much later than capturedAt = the phone had no network then
+            'LocationPing' => ['create' => '', 'columns' => ['receivedAt' => 'DATETIME NULL']],
             'PunchRequest' => ['create' => "CREATE TABLE IF NOT EXISTS `PunchRequest` (
   `id` VARCHAR(30) NOT NULL, `userId` VARCHAR(30) NOT NULL, `date` DATE NOT NULL, `reason` TEXT NOT NULL,
   `status` VARCHAR(12) NOT NULL DEFAULT 'PENDING', `adminNote` TEXT NULL, `decidedById` VARCHAR(30) NULL, `decidedAt` DATETIME NULL,
@@ -573,8 +575,8 @@ class AttendanceController
         $acc = isset($b['accuracy']) && is_numeric($b['accuracy']) ? (float) $b['accuracy'] : null;
         if ($acc !== null && $acc > 2000) sendSuccess(['ping' => null], 'Location too vague — not recorded');   // a tower guess kilometres off
         $id = gen_id();
-        db()->prepare('INSERT INTO `LocationPing` (id,attendanceId,lat,lng,accuracy,capturedAt) VALUES (?,?,?,?,?,?)')
-           ->execute([$id, $rec['id'], (float)$b['lat'], (float)$b['lng'], $acc, $at]);
+        db()->prepare('INSERT INTO `LocationPing` (id,attendanceId,lat,lng,accuracy,capturedAt,receivedAt) VALUES (?,?,?,?,?,?,?)')
+           ->execute([$id, $rec['id'], (float)$b['lat'], (float)$b['lng'], $acc, $at, now_sql()]);
         // 6:30 pm: remind once to punch out (shows as an alert on the phone too)
         if (date('H:i', self::nowTs()) >= self::OUT_FROM) {
             try {

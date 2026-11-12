@@ -87,6 +87,8 @@
       '.lh-p .t{font-size:.84rem;font-weight:600;color:#0f172a}.dark .lh-p .t{color:#f1f5f9}.lh-p .s{font-size:.74rem;color:#64748b}',
       '.lh-leg{font-size:.72rem;color:#2563eb;padding:0 0 0 2.6rem;margin:-.1rem 0}',
       '.lh-p .km{font-size:.78rem;font-weight:700;color:#2563eb;white-space:nowrap}',
+      '.lh-iss{display:grid;gap:.4rem;max-height:320px;overflow:auto}.lh-is{display:grid;grid-template-columns:auto 1fr;gap:.55rem;align-items:start;padding:.4rem .2rem;border-top:1px solid #f1f5f9;cursor:pointer}.lh-is:first-child{border-top:0}',
+      '.lh-is-b{color:#fff;border-radius:999px;padding:.12rem .5rem;font-size:.68rem;font-weight:700;white-space:nowrap}.lh-is-t{font-size:.84rem;font-weight:600}.lh-is-s{font-size:.75rem;color:#64748b}',
       '.lh-tot{display:flex;justify-content:space-between;border-top:2px solid #e2e8f0;margin-top:.4rem;padding-top:.5rem;font-weight:700}'
     ].join('\n');
     document.head.appendChild(st);
@@ -114,9 +116,10 @@
             el('td', { class: 'px-4 py-2 text-right', text: p.odometerKm != null ? p.odometerKm.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),
             el('td', { class: 'px-4 py-2 text-right', text: String(p.days) }),
             el('td', { class: 'px-4 py-2 text-right', text: p.days ? (p.km / p.days).toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),
-            el('td', { class: 'px-4 py-2 text-right', style: p.locationOff ? 'color:#b91c1c;font-weight:600' : '', text: p.locationOff ? '📵 ' + p.locationOff : '—' })
+            el('td', { class: 'px-4 py-2 text-right', style: p.locationOff ? 'color:#b91c1c;font-weight:600' : '', text: p.locationOff ? '📵 ' + p.locationOff : '—' }),
+            el('td', { class: 'px-4 py-2 text-right', 'data-km-issues': p.id, style: p.issues ? 'color:#b45309;font-weight:600' : '', text: p.issues ? p.issues + ' · ' + dur((p.issueMinutes || 0) * 60) : '—' })
           ]);
-          var det = el('tr', { style: 'display:none', 'data-km-days': p.id }, [el('td', { colspan: '6', class: 'px-4 pb-3' }, [el('div', { class: 'lh-days' }, p.perDay.map(function (x) {
+          var det = el('tr', { style: 'display:none', 'data-km-days': p.id }, [el('td', { colspan: '7', class: 'px-4 pb-3' }, [el('div', { class: 'lh-days' }, p.perDay.map(function (x) {
             return el('button', { type: 'button', class: 'lh-day has', title: x.points + ' points', onclick: function () { open(p.id, x.date); window.scrollTo({ top: box.getBoundingClientRect().bottom + window.scrollY, behavior: 'smooth' }); },
               text: new Date(x.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' · ' + x.km + ' km' });
           }))])]);
@@ -127,9 +130,9 @@
           el('td', { class: 'px-4 py-2 font-bold', text: 'Everyone' }),
           el('td', { class: 'px-4 py-2 text-right font-bold', text: d.totals.km.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' }),
           el('td', { class: 'px-4 py-2 text-right font-bold', text: d.totals.odometerKm ? d.totals.odometerKm.toLocaleString('en-IN', { maximumFractionDigits: 1 }) + ' km' : '—' }),
-          el('td', { class: 'px-4 py-2 text-right font-bold', text: String(d.totals.days) }), el('td', {}), el('td', {})]));
+          el('td', { class: 'px-4 py-2 text-right font-bold', text: String(d.totals.days) }), el('td', {}), el('td', {}), el('td', {})]));
         body.appendChild(el('div', { class: 'overflow-x-auto' }, [el('table', { class: 'w-full text-sm', id: 'lh-km-table' }, [
-          el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, ['Engineer', 'GPS route', 'Odometer (entered)', 'Days', 'Per day', 'Location off'].map(function (h, i) {
+          el('thead', { class: 'bg-slate-50 dark:bg-slate-800/50' }, [el('tr', {}, ['Engineer', 'GPS route', 'Odometer (entered)', 'Days', 'Per day', 'Location off', 'Network / GPS gaps'].map(function (h, i) {
             return el('th', { class: 'table-head px-4 py-2 ' + (i ? 'text-right' : 'text-left'), text: h }); }))]), tb])]));
         body.appendChild(el('p', { class: 'px-5 py-2 text-xs text-muted', text: 'GPS route = the road distance from the tracked points (vague points and GPS glitches are left out). Odometer = the readings entered at punch in / out. Click a name to see each day; click a day to replay it on the map.' }));
       }).catch(function (e) { body.innerHTML = ''; body.appendChild(el('p', { class: 'px-5 py-3 text-sm', style: 'color:#b91c1c', text: e.message })); });
@@ -283,6 +286,25 @@
         side.appendChild(el('div', { class: 'card p-4' }, [el('p', { class: 'font-semibold mb-2', text: 'Route by pins' }), pl]));
       }
 
+      // network / GPS problems: where, when and how long
+      var iss = d.issues || [];
+      var ISS = { NO_NETWORK: ['No network', '#b45309', 'location kept on the phone, sent when the network came back'], GPS_OFF: ['GPS turned off', '#b91c1c', 'location switched off on the phone'], NO_DATA: ['No location at all', '#6b21a8', 'phone off, app closed or no signal'] };
+      function placeTxt(pl) { if (!pl) return '—'; return pl.near || (pl.lat.toFixed(4) + ', ' + pl.lng.toFixed(4)); }
+      var ib = el('div', { class: 'lh-iss', id: 'lh-issues' });
+      if (!iss.length) ib.appendChild(el('p', { class: 'text-sm text-muted', text: a ? 'No network or GPS problems recorded.' : '—' }));
+      iss.forEach(function (x, k) {
+        var t = ISS[x.type] || [x.type, '#475569', ''];
+        ib.appendChild(el('div', { class: 'lh-is', 'data-issue': x.type, onclick: function () { if (map && x.start) map.setView([x.start.lat, x.start.lng], 15); } }, [
+          el('span', { class: 'lh-is-b', style: 'background:' + t[1], text: t[0] }),
+          el('div', {}, [
+            el('div', { class: 'lh-is-t', text: tm(x.from) + ' – ' + tm(x.to) + ' · ' + dur(x.minutes * 60) }),
+            el('div', { class: 'lh-is-s', text: 'From ' + placeTxt(x.start) + (x.end ? ' → back at ' + placeTxt(x.end) : '') }),
+            el('div', { class: 'lh-is-s', style: 'opacity:.75', text: t[2] })])
+        ]));
+      });
+      if (iss.length) ib.appendChild(el('div', { class: 'lh-tot' }, [el('span', { text: iss.length + ' gap' + (iss.length === 1 ? '' : 's') }), el('span', { text: dur(iss.reduce(function (a2, x) { return a2 + x.minutes; }, 0) * 60) })]));
+      side.appendChild(el('div', { class: 'card p-4' }, [el('p', { class: 'font-semibold mb-2', text: 'Network & GPS problems' }), ib]));
+
       // timeline
       var evs = [];
       if (a && a.checkIn) evs.push({ at: a.checkIn, i: '🟢', text: 'Punched in', lat: a.checkInLat, lng: a.checkInLng });
@@ -344,6 +366,12 @@
           .bindPopup('<b>' + escH(pinTitle(p)) + '</b><br>' + tm(p.from) + (p.minutes ? ' – ' + tm(p.to) + ' · ' + dur(p.minutes * 60) : '') + (p.n > 1 ? '<br>+' + p.kmFromPrev + ' km from the pin before' : '')).addTo(layers);
         if (p.kind === 'STOP' || p.kind === 'VISIT') L.circle([p.lat, p.lng], { radius: 60, color: PCOL[p.kind], fillColor: PCOL[p.kind], fillOpacity: .15, weight: 1.2 }).addTo(layers);
         bounds.push([p.lat, p.lng]);
+      });
+      (d.issues || []).forEach(function (x) {
+        if (!x.start) return;
+        var col = x.type === 'NO_NETWORK' ? '#b45309' : x.type === 'GPS_OFF' ? '#b91c1c' : '#6b21a8';
+        L.circleMarker([x.start.lat, x.start.lng], { radius: 9, color: col, weight: 3, fillColor: '#fff', fillOpacity: 1, dashArray: '3 3' })
+          .bindPopup('<b>' + (x.type === 'NO_NETWORK' ? 'No network' : x.type === 'GPS_OFF' ? 'GPS turned off' : 'No location') + '</b><br>' + tm(x.from) + ' – ' + tm(x.to) + ' (' + dur(x.minutes * 60) + ')').addTo(layers);
       });
       var rawCtl = L.control({ position: 'topright' });
       rawCtl.onAdd = function () {
