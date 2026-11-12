@@ -43,10 +43,14 @@ ob_start(static function (string $buf, int $phase): string {
     $checked = true;
     foreach (headers_list() as $h) {
         if (!preg_match('~^Content-Type:\s*(application/(vnd\.openxmlformats|pdf|zip|octet-stream))~i', $h)) continue;
+        // The file already starts cleanly → leave it alone (a zip may contain PDFs: never cut at those).
+        $first = null;
         foreach (["PK\x03\x04", '%PDF'] as $sig) {
             $p = strpos($buf, $sig);
-            if ($p !== false && $p > 0) return substr($buf, $p);
+            if ($p === 0) return $buf;
+            if ($p !== false && ($first === null || $p < $first)) $first = $p;
         }
+        if ($first !== null) return substr($buf, $first);
         break;
     }
     return $buf;

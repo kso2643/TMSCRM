@@ -175,7 +175,7 @@ class LocationHistoryController
                 if ($secs !== null && $d / $secs > 41.7) continue; // > 150 km/h: a glitch, not a drive
                 if ($d >= max(25, $acc)) $m += $d;
             }
-            $out[] = ['lat' => round((float) $p['lat'], 6), 'lng' => round((float) $p['lng'], 6), 'at' => $p['capturedAt'], 'until' => $p['until'] ?? $p['capturedAt'], 'km' => round($m / 1000, 3)];
+            $out[] = ['lat' => round((float) $p['lat'], 6), 'lng' => round((float) $p['lng'], 6), 'at' => $p['capturedAt'] ?? ($p['at'] ?? null), 'until' => $p['until'] ?? ($p['capturedAt'] ?? ($p['at'] ?? null)), 'km' => round($m / 1000, 3)];
             $prev = $p;
         }
         return $out;
