@@ -56,6 +56,44 @@ class AlertFeedController
         }
     }
 
+    // ── read state per person (kept on the server, so every device and the phone app agree) ──
+    private static function readKey(string $uid): string { return 'ar:' . $uid; }
+    public static function readAt(string $uid): ?string
+    {
+        try {
+            new AppSettingsController();
+            $s = db()->prepare('SELECT v FROM `AppSetting` WHERE k=?'); $s->execute([self::readKey($uid)]);
+            $v = json_decode((string) $s->fetchColumn(), true);
+            return is_array($v) && !empty($v['at']) ? (string) $v['at'] : null;
+        } catch (Throwable $e) { return null; }
+    }
+    /** Alerts after the person's "read" time (at most the last 7 days). */
+    private function unreadCount(array $auth): int
+    {
+        $floor = (new DateTime('-7 days'))->format('Y-m-d H:i:s');
+        $ra = self::readAt($auth['id']);
+        $since = $ra && $ra > $floor ? $ra : $floor;
+        return count(array_filter($this->collect($auth, $since, 100), fn($e) => ($e['at'] ?? '') > $since));
+    }
+
+    // GET /api/alerts-feed/unread → { count, readAt }
+    public function unread(): void
+    {
+        $auth = authenticate();
+        sendSuccess(['count' => $this->unreadCount($auth), 'readAt' => self::readAt($auth['id']), 'now' => now_sql()]);
+    }
+
+    // POST /api/alerts-feed/read-all — "Dismiss all" / opening the Alerts page: everything so far is read
+    public function readAll(): void
+    {
+        $auth = authenticate();
+        new AppSettingsController();
+        $now = now_sql();
+        db()->prepare('INSERT INTO `AppSetting` (k,v,updatedById,updatedAt) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE v=VALUES(v), updatedById=VALUES(updatedById), updatedAt=VALUES(updatedAt)')
+            ->execute([self::readKey($auth['id']), json_encode(['at' => $now]), $auth['id'], $now]);
+        sendSuccess(['readAt' => $now, 'count' => 0], 'All alerts marked as read');
+    }
+
     public function feed(): void
     {
         $auth = authenticate();
@@ -65,7 +103,9 @@ class AlertFeedController
         $floor = (new DateTime('-7 days'))->format('Y-m-d H:i:s');
         if ($since < $floor) $since = $floor;
         $now = now_sql();
-        sendSuccess(['now' => $now, 'events' => array_slice($this->collect($auth, $since, 20), 0, self::MAX_EVENTS)]);
+        $out = ['now' => $now, 'readAt' => self::readAt($auth['id']), 'events' => array_slice($this->collect($auth, $since, 20), 0, self::MAX_EVENTS)];
+        if (qp('count') === '1') $out['unread'] = $this->unreadCount($auth);
+        sendSuccess($out);
     }
 
     // GET /api/alerts-feed/history?days=30
@@ -74,7 +114,7 @@ class AlertFeedController
         $auth = authenticate();
         $days = max(1, min(60, (int) qp('days', 30)));
         $since = (new DateTime("-{$days} days"))->format('Y-m-d H:i:s');
-        sendSuccess(['now' => now_sql(), 'days' => $days, 'events' => $this->collect($auth, $since, 200)]);
+        sendSuccess(['now' => now_sql(), 'days' => $days, 'readAt' => self::readAt($auth['id']), 'events' => $this->collect($auth, $since, 200)]);
     }
 
     /** Every event since $since that concerns $auth, newest first. */

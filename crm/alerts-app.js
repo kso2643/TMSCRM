@@ -173,7 +173,9 @@
         api('GET', '/alerts-feed/history?days=' + days).then(function (r) {
           var seen = seenList();
           return ((r.data && r.data.events) || []).map(function (e) {
-            return { id: e.id, kind: 'feed', group: TYPE_GROUP[e.type] || 'tasks', isNew: seen.indexOf(e.id) === -1, at: e.at, title: e.title, body: e.body, link: e.link };
+            // unread = after the time you last read them (kept on the server: same on every device / the phone app)
+            var ra = r.data && r.data.readAt;
+            return { id: e.id, kind: 'feed', group: TYPE_GROUP[e.type] || 'tasks', isNew: ra ? String(e.at) > ra : seen.indexOf(e.id) === -1, at: e.at, title: e.title, body: e.body, link: e.link };
           });
         })
       ];
@@ -190,7 +192,7 @@
       else if (it.kind === 'appointment') api('PATCH', '/appointments/alerts/' + encodeURIComponent(it.rawId) + '/read').catch(function () {});
       else if (it.kind === 'feed') markSeen([it.id]);
     }
-    function readAll(list) { list.filter(function (x) { return x.isNew; }).forEach(readOne); render(); }
+    function readAll(list) { list.filter(function (x) { return x.isNew; }).forEach(readOne); if (window.CRMUnread) window.CRMUnread.markAllRead(); render(); }
 
     function render() {
       head.innerHTML = '';

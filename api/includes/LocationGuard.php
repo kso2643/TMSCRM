@@ -15,7 +15,7 @@ class LocationGuard
 {
     public const ROLES = ['SALES', 'SALES_ENGINEER'];
     private const MAX_AGE_SEC = 900;
-    private const OPEN = ['#^auth(/|$)#', '#^breaks/stationary$#', '#^attendance/ping$#'];
+    private const OPEN = ['#^auth(/|$)#', '#^breaks/stationary$#', '#^attendance/ping$#', '#^alerts-feed/read-all$#'];
 
     /** [lat, lng, accuracy, ageSec] from the header, or null. */
     public static function fix(): ?array

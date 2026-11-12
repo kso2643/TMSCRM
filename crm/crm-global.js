@@ -949,12 +949,11 @@
       dn.addEventListener('click', function () { Notification.requestPermission().then(refreshSoundHint); });
       acts.appendChild(dn);
     }
-    if (toasts > 1) {
-      var all = mk('button', 'a', 'Dismiss all');
-      all.style.marginLeft = '10px';
-      all.addEventListener('click', function () { box.querySelectorAll('.t').forEach(function (t) { t.remove(); }); hidden = 0; refreshSoundHint(); });
-      acts.appendChild(all);
-    }
+    var all = mk('button', 'a', toasts > 1 ? 'Dismiss all' : 'Dismiss');
+    all.style.marginLeft = '10px';
+    all.setAttribute('data-dismiss-all', '1');
+    all.addEventListener('click', function () { box.querySelectorAll('.t').forEach(function (t) { t.remove(); }); hidden = 0; markAllRead(); refreshSoundHint(); });
+    acts.appendChild(all);
     hintEl.appendChild(acts);
     box.insertBefore(hintEl, box.firstChild);
   }
@@ -1027,6 +1026,42 @@
     } catch (e) {}
   }
 
+  // ── unread count: a red badge on "Alerts & reminders" (sidebar / menu) and on the bell in the top bar ──
+  var unread = 0, readAt = null;
+  function setUnread(n) {
+    unread = Math.max(0, n | 0);
+    var label = unread > 99 ? '99+' : String(unread);
+    document.querySelectorAll('a[href="/alerts/"], a[href="/alerts"]').forEach(function (a) {
+      var b = a.querySelector('.crm-unread');
+      if (!unread) { if (b) b.remove(); return; }
+      if (!b) { b = document.createElement('span'); b.className = 'crm-unread'; b.style.cssText = 'margin-left:auto;min-width:1.25rem;height:1.25rem;padding:0 .35rem;border-radius:999px;background:#dc2626;color:#fff;font:700 .7rem/1.25rem system-ui,sans-serif;text-align:center;display:inline-block'; a.appendChild(b); }
+      b.textContent = label; b.title = unread + ' unread alert' + (unread === 1 ? '' : 's');
+    });
+    var bell = document.getElementById('crm-bell');
+    if (!bell && document.body) {
+      var qsBtn = Array.prototype.filter.call(document.querySelectorAll('header button, header a'), function (x) { return /Quick search/i.test(x.textContent || ''); })[0];
+      if (qsBtn && qsBtn.parentNode) {
+        bell = document.createElement('a'); bell.id = 'crm-bell'; bell.href = '/alerts/'; bell.setAttribute('aria-label', 'Alerts');
+        bell.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;width:2.25rem;height:2.25rem;border-radius:.6rem;color:inherit;margin-right:.4rem';
+        bell.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="dot" style="position:absolute;top:2px;right:2px;min-width:1.05rem;height:1.05rem;padding:0 .25rem;border-radius:999px;background:#dc2626;color:#fff;font:700 .62rem/1.05rem system-ui,sans-serif;text-align:center;display:none"></span>';
+        qsBtn.parentNode.insertBefore(bell, qsBtn);
+      }
+    }
+    if (bell) { var d = bell.querySelector('.dot'); d.style.display = unread ? '' : 'none'; d.textContent = label; bell.title = unread ? unread + ' unread alert' + (unread === 1 ? '' : 's') : 'Alerts'; }
+    try { document.title = document.title.replace(/^\(\d+\+?\) /, '') ; if (unread) document.title = '(' + label + ') ' + document.title; } catch (e) {}
+  }
+  function refreshUnread() {
+    if (!token()) return;
+    fetch(API + '/api/alerts-feed/unread', { headers: { Authorization: 'Bearer ' + token() } }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.data) { readAt = j.data.readAt || readAt; setUnread(j.data.count); } }).catch(function () {});
+  }
+  function markAllRead() {
+    setUnread(0);
+    return fetch(API + '/api/alerts-feed/read-all', { method: 'POST', headers: { Authorization: 'Bearer ' + token(), 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (j && j.data) readAt = j.data.readAt; }).catch(function () {});
+  }
+  window.CRMUnread = { refresh: refreshUnread, markAllRead: markAllRead, set: setUnread, get: function () { return unread; } };
+
   function seenList() { try { return JSON.parse(lsGet(SEEN_KEY) || '[]'); } catch (e) { return []; } }
 
   // Only one open tab polls at a time (the lock is refreshed every poll);
@@ -1046,20 +1081,28 @@
     if (force) lsSet(LOCK_KEY, JSON.stringify({ tab: TAB_ID, at: Date.now() })); // the tab you're looking at takes over
     else if (!holdLock()) return;
     polling = true;
-    var since = lsGet(SINCE_KEY);
-    fetch(API + '/api/alerts-feed' + (since ? '?since=' + encodeURIComponent(since) : ''), {
+    var since = lsGet(SINCE_KEY), firstRun = !since;
+    fetch(API + '/api/alerts-feed' + (since ? '?since=' + encodeURIComponent(since) : '?count=1'), {
       headers: { Authorization: 'Bearer ' + token() }
     }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
       polling = false;
       if (!j || !j.data) return;
       lsSet(SINCE_KEY, j.data.now);
+      if (j.data.readAt) readAt = j.data.readAt;
+      if (j.data.unread != null) setUnread(j.data.unread);
       var seen = seenList();
       var fresh = (j.data.events || []).filter(function (ev) { return seen.indexOf(ev.id) === -1; });
+      // first time on this device / after signing in: what came while you were away is counted
+      // (red badge) — not popped up all at once
+      if (firstRun) { lsSet(SEEN_KEY, JSON.stringify(seen.concat(fresh.map(function (ev) { return ev.id; })).slice(-300))); return; }
+      // already read (Dismiss all / Alerts page on any device) → no pop-up
+      if (readAt) fresh = fresh.filter(function (ev) { return !ev.at || String(ev.at) > readAt; });
       if (!fresh.length) return;
       lsSet(SEEN_KEY, JSON.stringify(seen.concat(fresh.map(function (ev) { return ev.id; })).slice(-300)));
       fresh = fresh.map(applyRule).filter(Boolean);   // types turned off are dropped, templates applied
       if (!fresh.length) return;
       fresh.slice().reverse().forEach(function (ev) { toast(ev); desktop(ev); });
+      setUnread(unread + fresh.length);
       refreshSoundHint();
       chime(soundFor(fresh));
       try { window.dispatchEvent(new CustomEvent('crm-alert', { detail: { events: fresh } })); } catch (e) {}
@@ -1172,6 +1215,12 @@
     setInterval(loadNotifySettings, 5 * 60000);
     poll(true);
     setInterval(function () { poll(false); }, POLL_MS);
+    // the unread badge: on load, every 5 minutes, and the menu re-drawn by the page keeps it
+    setTimeout(refreshUnread, 1500);
+    setInterval(refreshUnread, 300000);
+    setInterval(function () { if (unread) setUnread(unread); }, 2000);
+    // opening the Alerts page reads them all
+    if (/^\/alerts\/?$/.test(location.pathname)) setTimeout(markAllRead, 2500);
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') poll(true); });
   }
   // ── Sidebar sections (CRM, Sales, Reports, Operations, Admin) fold away ──

@@ -518,6 +518,8 @@ try {
         match (true) {
             $method === 'GET' && $c1 === '' => $ctrl->feed(),
             $method === 'GET' && $c1 === 'history' => $ctrl->history(),
+            $method === 'GET' && $c1 === 'unread' => $ctrl->unread(),
+            $method === 'POST' && $c1 === 'read-all' => $ctrl->readAll(),
             default => sendError("Route /api/alerts-feed/$c1 not found", 404),
         };
     }
@@ -858,6 +860,8 @@ try {
             $method === 'GET' && $c1 === 'users'   => $ctrl->users(),
             $method === 'GET' && $c1 === 'days'    => $ctrl->days(),
             $method === 'GET' && $c1 === 'history' => $ctrl->history(),
+            $method === 'GET' && $c1 === 'unread' => $ctrl->unread(),
+            $method === 'POST' && $c1 === 'read-all' => $ctrl->readAll(),
             $method === 'GET' && $c1 === 'summary' => $ctrl->summary(),
             default => sendError("Route /api/tracking/$c1 not found", 404),
         };
