@@ -750,6 +750,8 @@ try {
             $method === 'GET'    && $c1 === 'entries' && $c2 !== '' && $c3 === 'file'  => $ctrl->file($c2),
             $method === 'GET'    && $c1 === 'tally'                                 => $ctrl->tally(),
             $method === 'GET'    && $c1 === 'parties'                               => $ctrl->parties(),
+            $method === 'GET'    && $c1 === 'outstanding'                           => $ctrl->outstanding(),
+            $method === 'POST'   && $c1 === 'import-order-invoice' && $c2 !== ''    => $ctrl->importOrderInvoice($c2),
             $method === 'GET'    && $c1 === 'orders'                                => $ctrl->orders(),
             $method === 'GET'    && $c1 === 'claims'                                => $ctrl->claims(),
             $method === 'GET'    && $c1 === 'export'                                => $ctrl->export(),

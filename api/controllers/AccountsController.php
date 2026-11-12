@@ -382,6 +382,109 @@ class AccountsController
         ]);
     }
 
+    /**
+     * GET /api/accounts/outstanding — who owes us / whom we owe, party by party (v11.52).
+     *  Customers: Accounts invoices (less receipts) + invoices raised on the Orders page that are not in Accounts yet.
+     *  Suppliers: Accounts vendor bills (less payments) + Vendor POs sent but not billed yet (for planning).
+     */
+    public function outstanding(): void
+    {
+        self::auth();
+        $today = date('Y-m-d');
+        $cred = 30; // days, for Orders-page invoices that carry no due date
+        $cust = []; $sup = [];
+        $key = fn($id, $name) => $id ?: 'n:' . mb_strtolower(trim((string) $name));
+        foreach (self::query(['kind' => ['INVOICE']]) as $r) {
+            if ($r['balance'] <= 0) continue;
+            $k = $key($r['partyId'], $r['partyName']);
+            $cust[$k] = $cust[$k] ?? ['key' => $k, 'partyId' => $r['partyId'], 'party' => $r['partyName'] ?: '—', 'items' => []];
+            $cust[$k]['items'][] = ['src' => 'ACC', 'id' => $r['id'], 'docNo' => $r['docNo'], 'docDate' => $r['docDate'], 'dueDate' => $r['dueDate'], 'amount' => $r['amount'],
+                'paid' => $r['paid'], 'balance' => $r['balance'], 'daysOverdue' => $r['daysOverdue'], 'orderRef' => $r['orderRef'], 'company' => $r['company']];
+        }
+        // Orders-page invoices not in Accounts (same invoice no. not entered as an invoice there)
+        try {
+            new OrderController();
+            $have = array_flip(array_map(fn($x) => mb_strtolower(trim((string) $x)), db()->query("SELECT docNo FROM `AccEntry` WHERE kind='INVOICE' AND docNo IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN)));
+            $rows = db()->query("SELECT i.id, i.invoiceNo, COALESCE(i.invoiceDate, DATE(i.createdAt)) AS d, i.amount, o.id AS orderId, o.orderNo, o.firm, o.customerId, c.companyName
+                FROM `OrderInvoice` i JOIN `CustomerOrder` o ON o.id=i.orderId LEFT JOIN `Customer` c ON c.id=o.customerId
+                WHERE i.amount IS NOT NULL AND i.amount > 0 ORDER BY d")->fetchAll();
+            foreach ($rows as $r) {
+                if ($r['invoiceNo'] && isset($have[mb_strtolower(trim($r['invoiceNo']))])) continue;
+                $k = $key($r['customerId'], $r['companyName']);
+                $due = date('Y-m-d', strtotime($r['d'] . " +$cred days"));
+                $od = $due < $today ? (int) ((strtotime($today) - strtotime($due)) / 86400) : 0;
+                $cust[$k] = $cust[$k] ?? ['key' => $k, 'partyId' => $r['customerId'], 'party' => $r['companyName'] ?: '—', 'items' => []];
+                $cust[$k]['items'][] = ['src' => 'ORDER', 'id' => $r['id'], 'docNo' => $r['invoiceNo'], 'docDate' => $r['d'], 'dueDate' => $due, 'amount' => (float) $r['amount'],
+                    'paid' => 0.0, 'balance' => (float) $r['amount'], 'daysOverdue' => $od, 'orderRef' => $r['orderNo'], 'orderId' => $r['orderId'], 'company' => $r['firm'] ?: 'TMS'];
+            }
+        } catch (PDOException $e) { /* orders not set up */ }
+        foreach (self::query(['kind' => ['BILL']]) as $r) {
+            if ($r['balance'] <= 0) continue;
+            $k = $key($r['partyId'], $r['partyName']);
+            $sup[$k] = $sup[$k] ?? ['key' => $k, 'partyId' => $r['partyId'], 'party' => $r['partyName'] ?: '—', 'items' => [], 'pos' => []];
+            $sup[$k]['items'][] = ['src' => 'ACC', 'id' => $r['id'], 'docNo' => $r['docNo'], 'docDate' => $r['docDate'], 'dueDate' => $r['dueDate'], 'amount' => $r['amount'],
+                'paid' => $r['paid'], 'balance' => $r['balance'], 'daysOverdue' => $r['daysOverdue'], 'poRef' => $r['poRef']];
+        }
+        // Vendor POs sent but no vendor bill against them yet (bill's PO ref = PO number)
+        try {
+            $billed = array_flip(array_map(fn($x) => mb_strtolower(trim((string) $x)), db()->query("SELECT poRef FROM `AccEntry` WHERE kind='BILL' AND poRef IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN)));
+            $rows = db()->query("SELECT id, poNumber, poDate, vendorId, vendorName, totalAmount, company, status FROM `PurchaseOrder` WHERE status NOT IN ('DRAFT','CANCELLED') AND totalAmount > 0 ORDER BY poDate")->fetchAll();
+            foreach ($rows as $r) {
+                if ($r['poNumber'] && isset($billed[mb_strtolower(trim($r['poNumber']))])) continue;
+                $k = $key($r['vendorId'], $r['vendorName']);
+                $sup[$k] = $sup[$k] ?? ['key' => $k, 'partyId' => $r['vendorId'], 'party' => $r['vendorName'] ?: '—', 'items' => [], 'pos' => []];
+                $sup[$k]['pos'][] = ['id' => $r['id'], 'poNumber' => $r['poNumber'], 'poDate' => $r['poDate'], 'amount' => round((float) $r['totalAmount'], 2), 'company' => $r['company']];
+            }
+        } catch (PDOException $e) { /* no POs yet */ }
+        $roll = function (array $p): array {
+            $p['balance'] = round(array_sum(array_column($p['items'], 'balance')), 2);
+            $p['overdue'] = round(array_sum(array_map(fn($i) => $i['daysOverdue'] > 0 ? $i['balance'] : 0, $p['items'])), 2);
+            $p['maxDays'] = $p['items'] ? max(array_column($p['items'], 'daysOverdue')) : 0;
+            $due = array_filter(array_column($p['items'], 'dueDate'));
+            $p['oldestDue'] = $due ? min($due) : null;
+            $p['notInAccounts'] = count(array_filter($p['items'], fn($i) => $i['src'] === 'ORDER'));
+            if (isset($p['pos'])) $p['openPo'] = round(array_sum(array_column($p['pos'], 'amount')), 2);
+            usort($p['items'], fn($a, $b) => strcmp($a['dueDate'] ?: '9999', $b['dueDate'] ?: '9999'));
+            return $p;
+        };
+        $cust = array_map($roll, array_values($cust));
+        $sup = array_map($roll, array_values($sup));
+        usort($cust, fn($a, $b) => [$b['overdue'], $b['balance']] <=> [$a['overdue'], $a['balance']]);
+        usort($sup, fn($a, $b) => [$b['overdue'], $b['balance']] <=> [$a['overdue'], $a['balance']]);
+        sendSuccess([
+            'customers' => $cust, 'suppliers' => $sup, 'creditDays' => $cred, 'today' => $today,
+            'totals' => [
+                'receivable' => round(array_sum(array_column($cust, 'balance')), 2), 'receivableOverdue' => round(array_sum(array_column($cust, 'overdue')), 2),
+                'payable' => round(array_sum(array_column($sup, 'balance')), 2), 'payableOverdue' => round(array_sum(array_column($sup, 'overdue')), 2),
+                'openPo' => round(array_sum(array_map(fn($p) => $p['openPo'] ?? 0, $sup)), 2),
+                'notInAccounts' => array_sum(array_column($cust, 'notInAccounts')),
+            ],
+        ]);
+    }
+
+    /** POST /api/accounts/import-order-invoice/:id — puts an Orders-page invoice into Accounts (so receipts can be recorded against it). */
+    public function importOrderInvoice(string $id): void
+    {
+        $auth = self::auth();
+        new OrderController();
+        $s = db()->prepare("SELECT i.*, o.orderNo, o.firm, o.customerId, c.companyName FROM `OrderInvoice` i JOIN `CustomerOrder` o ON o.id=i.orderId LEFT JOIN `Customer` c ON c.id=o.customerId WHERE i.id=?");
+        $s->execute([$id]);
+        $r = $s->fetch();
+        if (!$r) sendError('Invoice not found.', 404);
+        if ($r['invoiceNo']) {
+            $e = db()->prepare("SELECT id FROM `AccEntry` WHERE kind='INVOICE' AND LOWER(TRIM(docNo))=LOWER(TRIM(?)) LIMIT 1"); $e->execute([$r['invoiceNo']]);
+            if ($x = $e->fetchColumn()) sendSuccess(['entry' => self::withBalances([self::entry($x)])[0]], 'Already in Accounts');
+        }
+        $d = $r['invoiceDate'] ?: substr($r['createdAt'], 0, 10);
+        $nid = gen_id();
+        db()->prepare("INSERT INTO `AccEntry` (id,kind,company,docNo,docDate,partyId,partyName,orderId,orderRef,amount,dueDate,notes,createdById,createdAt,updatedAt)
+            VALUES (?,'INVOICE',?,?,?,?,?,?,?,?,?,?,?,?,?)")
+            ->execute([$nid, $r['firm'] ?: 'TMS', $r['invoiceNo'] ?: ('ORD-' . $r['orderNo']), $d, $r['customerId'], $r['companyName'], $r['orderId'], $r['orderNo'],
+                round((float) $r['amount'], 2), date('Y-m-d', strtotime("$d +30 days")), 'From the Orders page', $auth['id'], now_sql(), now_sql()]);
+        log_activity($auth['id'], 'ACC_INVOICE_FROM_ORDER', 'AccEntry', $nid, ['orderInvoiceId' => $id]);
+        sendSuccess(['entry' => self::withBalances([self::entry($nid)])[0]], 'Added to Accounts', 201);
+    }
+
     // GET /api/accounts/parties?type=customer|vendor&q=
     public function parties(): void
     {

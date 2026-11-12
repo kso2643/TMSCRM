@@ -96,7 +96,7 @@
   var PAY = { PAID: ['Paid', '#16a34a'], PARTIAL: ['Part paid', '#d97706'], UNPAID: ['Unpaid', '#2563eb'], OVERDUE: ['Overdue', '#dc2626'] };
   var MODES = ['NEFT', 'RTGS', 'IMPS', 'UPI', 'CHEQUE', 'CASH', 'CARD', 'OTHER'];
   var VTYPES = ['Journal', 'Contra', 'Credit Note', 'Debit Note', 'Expense', 'Salary', 'Other'];
-  var TABS = [['', 'Overview'], ['invoices', 'Invoices'], ['receipts', 'Receipts'], ['bills', 'Vendor bills'], ['payments', 'Vendor payments'], ['tally', 'Tally works'], ['vouchers', 'Vouchers'], ['claims', 'Staff claims']];
+  var TABS = [['', 'Overview'], ['outstanding', 'Outstanding'], ['invoices', 'Invoices'], ['receipts', 'Receipts'], ['bills', 'Vendor bills'], ['payments', 'Vendor payments'], ['tally', 'Tally works'], ['vouchers', 'Vouchers'], ['claims', 'Staff claims']];
 
   function injectCss() {
     if (document.getElementById('ac-css')) return;
@@ -166,7 +166,84 @@
     if (h === '') overview();
     else if (h === 'tally') tally();
     else if (h === 'claims') claims();
+    else if (h === 'outstanding') outstanding();
     else entries(Object.keys(KIND).filter(function (k) { return KIND[k].hash === h; })[0]);
+  }
+
+  // ── outstanding (v11.52): customers who owe us, suppliers we owe — party by party ──
+  function outstanding() {
+    body.appendChild(el('div', { class: 'ac-empty', text: 'Loading…' }));
+    var side = (function () { try { return sessionStorage.getItem('ac-os-side') || 'cust'; } catch (e) { return 'cust'; } })();
+    function load() {
+      api('GET', '/accounts/outstanding').then(function (j) { draw(j.data); }).catch(function (e) { clear(body).appendChild(el('div', { class: 'ac-empty', text: e.message })); });
+    }
+    function draw(d) {
+      clear(body);
+      var T = d.totals;
+      function kpi(label, val, sub, bad, s) {
+        return el('button', { type: 'button', class: 'ac-kpi' + (side === s ? ' on' : ''), 'data-os-side': s, style: side === s ? 'outline:2px solid var(--ac-p,#1e3a5f)' : '', onclick: function () { side = s; try { sessionStorage.setItem('ac-os-side', s); } catch (e) {} draw(d); } },
+          [el('span', { text: label }), el('b', { text: short(val) }), sub ? el('small', { class: bad ? 'bad' : '', text: sub }) : null]);
+      }
+      body.appendChild(el('div', { class: 'ac-kpis', id: 'ac-os-kpis' }, [
+        kpi('Customers owe us', T.receivable, T.receivableOverdue ? short(T.receivableOverdue) + ' overdue' : 'Nothing overdue', T.receivableOverdue > 0, 'cust'),
+        kpi('We owe suppliers', T.payable, T.payableOverdue ? short(T.payableOverdue) + ' overdue' : (T.openPo ? short(T.openPo) + ' more on POs not billed yet' : 'Nothing overdue'), T.payableOverdue > 0, 'sup')
+      ]));
+      var list = side === 'cust' ? d.customers : d.suppliers;
+      var head = side === 'cust'
+        ? ['Customer', 'Invoices', 'Outstanding', 'Overdue', 'Oldest due', '']
+        : ['Supplier', 'Bills', 'To pay', 'Overdue', 'POs not billed', ''];
+      var tb = el('tbody');
+      if (!list.length) tb.appendChild(el('tr', {}, [el('td', { colspan: '6', class: 'ac-empty', text: side === 'cust' ? 'No customer owes anything. 🎉' : 'Nothing to pay suppliers.' })]));
+      list.forEach(function (p) {
+        var open = false;
+        var detail = el('tr', { style: 'display:none', 'data-os-detail': p.key }, [el('td', { colspan: '6', style: 'background:rgba(148,163,184,.08);padding:.5rem 1rem' })]);
+        var tr = el('tr', { 'data-os-party': p.party, style: 'cursor:pointer', onclick: function () { open = !open; detail.style.display = open ? '' : 'none'; if (open) fill(detail.firstChild, p); } }, [
+          el('td', {}, [el('b', { text: (open ? '' : '') + p.party }), p.notInAccounts ? el('span', { class: 'ac-badge', style: '--c:#b45309;margin-left:.4rem', title: 'Invoices raised on the Orders page — not entered in Accounts yet', text: p.notInAccounts + ' from Orders' }) : null]),
+          el('td', { class: 'n', text: String(p.items.length) }),
+          el('td', { class: 'n', text: money(p.balance) }),
+          el('td', { class: 'n', style: p.overdue > 0 ? 'color:#b91c1c;font-weight:600' : '', text: p.overdue > 0 ? money(p.overdue) + ' · ' + p.maxDays + 'd' : '—' }),
+          el('td', { class: side === 'cust' ? '' : 'n', text: side === 'cust' ? (p.oldestDue ? dmy(p.oldestDue) : '—') : (p.openPo ? money(p.openPo) + ' (' + p.pos.length + ')' : '—') }),
+          el('td', { class: 'n', text: '▸' })
+        ]);
+        tb.appendChild(tr); tb.appendChild(detail);
+      });
+      body.appendChild(el('div', { class: 'ac-card' }, [
+        el('h2', {}, [side === 'cust' ? 'Customer outstanding — money to receive' : 'Supplier outstanding — money to pay',
+          side === 'cust' ? el('button', { class: 'ac-btn sm', type: 'button', text: '⤓ Excel', onclick: function () { download('/accounts/export?kind=OUTSTANDING'); } }) : null]),
+        side === 'cust' && T.notInAccounts ? el('p', { class: 'ac-note', style: 'margin:.2rem 0 .6rem;font-size:.8rem;color:#92400e', text: T.notInAccounts + ' invoice(s) raised on the Orders page are counted here (due ' + d.creditDays + ' days after the invoice date). Click “Receive payment” — they are added to Accounts automatically.' }) : null,
+        el('div', { class: 'ac-tw' }, [el('table', { class: 'ac-table', id: 'ac-os-table' }, [el('thead', {}, [el('tr', {}, head.map(function (h, i) { return el('th', { class: i && i < 5 && !(side === 'cust' && i === 4) ? 'n' : '', text: h }); }))]), tb])])
+      ]));
+    }
+    function fill(td, p) {
+      clear(td);
+      var t = el('table', { class: 'ac-table', style: 'margin:0' }, [el('thead', {}, [el('tr', {}, [side === 'cust' ? 'Invoice' : 'Bill', 'Date', 'Due', 'Amount', 'Paid', 'Balance', ''].map(function (h, i) { return el('th', { class: i >= 3 && i <= 5 ? 'n' : '', text: h }); }))])]);
+      var b = el('tbody');
+      p.items.forEach(function (it) {
+        var btn = el('button', { class: 'ac-btn sm pri', type: 'button', 'data-os-pay': it.id, text: side === 'cust' ? 'Receive payment' : 'Pay', onclick: function (e) {
+          e.stopPropagation();
+          var go = function (entryId) { editor(side === 'cust' ? 'RECEIPT' : 'PAYMENT', { linkId: entryId, partyName: p.party, partyId: p.partyId, amount: it.balance }, load); };
+          if (it.src === 'ORDER') api('POST', '/accounts/import-order-invoice/' + it.id).then(function (j) { go(j.data.entry.id); }).catch(function (x) { toast(x.message, 'err'); });
+          else go(it.id);
+        } });
+        b.appendChild(el('tr', {}, [
+          el('td', {}, [it.docNo || '—', it.orderRef ? el('small', { style: 'display:block;color:#64748b', text: 'Order ' + it.orderRef }) : null, it.src === 'ORDER' ? el('small', { style: 'display:block;color:#b45309', text: 'From Orders page' }) : null]),
+          el('td', { text: dmy(it.docDate) }),
+          el('td', {}, [it.dueDate ? dmy(it.dueDate) : '—', it.daysOverdue > 0 ? el('span', { class: 'ac-badge', style: '--c:#dc2626;margin-left:.3rem', text: it.daysOverdue + 'd overdue' }) : null]),
+          el('td', { class: 'n', text: money(it.amount) }), el('td', { class: 'n', text: money(it.paid) }), el('td', { class: 'n', text: money(it.balance) }),
+          el('td', { class: 'n' }, [btn])
+        ]));
+      });
+      (p.pos || []).forEach(function (po) {
+        b.appendChild(el('tr', { style: 'color:#64748b' }, [
+          el('td', {}, ['PO ' + po.poNumber, el('small', { style: 'display:block', text: 'Vendor PO — no bill yet' })]),
+          el('td', { text: dmy(po.poDate) }), el('td', { text: '—' }), el('td', { class: 'n', text: money(po.amount) }), el('td', { class: 'n', text: '' }), el('td', { class: 'n', text: '' }),
+          el('td', { class: 'n' }, [el('button', { class: 'ac-btn sm', type: 'button', 'data-os-bill': po.id, text: 'Enter bill', onclick: function (e) { e.stopPropagation(); editor('BILL', { partyName: p.party, partyId: p.partyId, poRef: po.poNumber }, load); } })])
+        ]));
+      });
+      t.appendChild(b);
+      td.appendChild(t);
+    }
+    load();
   }
 
   // ── overview ────────────────────────────────────────────────────────
