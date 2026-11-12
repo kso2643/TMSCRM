@@ -1,3 +1,64 @@
+# Update — 12 Nov: "Failed to fetch" fixed for good, 1 km meeting check, network / GPS gaps, odometer vs GPS, alerts unread count, order items confirmed before Stock, HR new employee, Accounts outstanding, quotation e-mail with approval
+
+**Upload:** `api/` **and** `crm/` (both — the fix needs the new server files too), then press **Ctrl+Shift+R** once on every computer (on phones: close and reopen the CRM). No app update is needed.
+- **Do not delete** `api/uploads/` or `api/.env` when you upload. Missing customer photos / PDFs / note files are usually caused by an `uploads` folder that was replaced.
+- **Database:** new tables and columns are added automatically (QuoteMail, EmployeeFile, and some columns on orders, attendance and users).
+- **E-mail (for quotation mails):** works with the hosting's own mail out of the box on most hosts. For reliable delivery add your mailbox to `api/.env`:
+  `SMTP_HOST=smtp.hostinger.com`, `SMTP_PORT=465`, `SMTP_USER=sales@yourdomain`, `SMTP_PASS=…`
+  Optional: `MAIL_FROM_TMS=…` and `MAIL_FROM_APJ=…` (the sender per company). Otherwise the e-mail on the TMS / APJ letterhead is used.
+
+1. **Customer delete, photos, PDFs, files and notes — "Failed to fetch"**
+   - The cause was the CRM's offline helper (service worker). It also handled the server calls, and a broken install kept an old copy running.
+   - It now never touches server calls, and the new copy takes over after one Ctrl+Shift+R.
+   - Delete / edit are sent as a plain POST (`?_method=DELETE`), which hosting firewalls let through.
+2. **Log meeting near the customer (1 km)**
+   - The visit form now takes a **fresh, precise GPS reading** (not an old cached one) before saving.
+   - Allowed when you are within 1 km of the customer's saved location. A rough phone-tower position gets "location not accurate enough — turn on Precise location".
+   - If the customer's pin itself is wrong, the message says to ask an admin to correct it on the Customer map.
+   - Calls / online meetings can be logged from anywhere.
+3. **Network and GPS problems** (Location history)
+   - New card **"Network & GPS problems"**: each gap shows **from – to, how long, and where** (the nearest customer):
+     - **No network:** the phone kept recording, but the points reached the server late.
+     - **GPS off:** location was switched off.
+     - **No location at all:** the phone sent nothing.
+   - Shown on the map with dashed circles, and as a column in the km table.
+4. **HR — Add new employee**
+   - **+ New employee** gives the next code automatically (**TMS-024**, or APJ-…).
+   - Enter all details (job, personal, address, emergency contact, Aadhaar, PAN, bank). Seven documents are **required**:
+     - Aadhaar
+     - PAN
+     - Bank passbook front page
+     - Passport-size photo
+     - 10th mark sheet
+     - 12th mark sheet
+     - Degree certificate
+   - Saving creates the **login**. The password is made automatically (or typed) and shown **once** with a Copy button.
+   - The employee can sign in with the **employee ID (TMS-024)** or the e-mail.
+   - Documents are private: only admins and the employee can open them. The HR list shows "✓ 7/7" or "⚠ n missing", and each profile has View / Replace for every document.
+5. **Accounts — Outstanding** (new tab)
+   - **Customers owe us:** customer by customer, the invoices not yet paid, with overdue days.
+     - This includes invoices raised on the **Orders page** (due 30 days after the invoice date).
+     - **Receive payment** records the receipt against that invoice.
+   - **We owe suppliers:** vendor bills not yet paid (**Pay**), plus Vendor POs sent but **not billed yet** (**Enter bill**).
+6. **Order — typed-in items go to Stock only after confirmation**
+   - An item typed by hand whose code is not in Products stays **"New item — code to be confirmed"**. It is not added to Products / Stock.
+   - Managers, Admins and the Super Admin get an alert. On the Orders page, **Confirm new items** lets them correct the code, name, brand and category, then **Confirm & add to Stock**.
+7. **Alerts**
+   - Opening the site no longer pops up the old alerts again. **Dismiss all** is remembered (on every device) and only new alerts pop up.
+   - Unread alerts show as a **red count** on the bell in the top bar and on "Alerts & reminders", and in the tab title, e.g. "(3)".
+   - Opening the Alerts page marks them read.
+8. **Punch out — odometer vs GPS**
+   - The km from the odometer (closing − opening) is compared with the GPS km.
+   - Up to **10 km apart is fine**. More than that asks for the **reason**, which admins see in the attendance list.
+9. **Quotation e-mail (TMS and APJ)**
+   - **✉ E-mail** on every saved quotation opens a ready-written mail: **Quotation mail** or **Quotation confirmation**.
+     - To = the customer's e-mail, CC = you. The subject and text can all be changed.
+     - The quotation PDF is attached. Tick catalogues to attach as well (online catalogues go in as links).
+   - It goes to a **Manager / Admin / Super Admin for approval**. They see "✉ N quotation mails waiting for your approval" at the top of the Quotations page (and get an alert).
+     - They can still correct the mail, then **Approve & send**, which e-mails it.
+     - Or **Send back** with a note; the person corrects it and sends it again.
+   - Approvers can send their own mails straight away. They can also save the text as the **standard wording** for TMS or APJ.
+
 # Update — 6 Nov (c): delete / edit no longer fails with "Failed to fetch"
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once (on every computer / phone that uses the CRM). No app update is needed.
