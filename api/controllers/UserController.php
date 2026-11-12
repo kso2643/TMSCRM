@@ -36,7 +36,15 @@ class UserController
             'deletedAt'   => 'DATETIME NULL',
             'fatherPhone' => 'VARCHAR(30) NULL',
             'spousePhone' => 'VARCHAR(30) NULL',
-        ]]], 'User removal / family contacts');
+            // module-1 HR fields (were only in database/migration_module1_employee_fields.sql)
+            'fatherName' => 'VARCHAR(150) NULL',
+            'permanentAddress' => 'TEXT NULL', 'permanentCity' => 'VARCHAR(100) NULL', 'permanentDistrict' => 'VARCHAR(100) NULL',
+            'permanentState' => 'VARCHAR(100) NULL', 'permanentPincode' => 'VARCHAR(12) NULL',
+            'presentAddress' => 'TEXT NULL', 'presentCity' => 'VARCHAR(100) NULL', 'presentDistrict' => 'VARCHAR(100) NULL',
+            'presentState' => 'VARCHAR(100) NULL', 'presentPincode' => 'VARCHAR(12) NULL',
+            'presentAddressSameAsPermanent' => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'bankBranchName' => 'VARCHAR(150) NULL', 'upiId' => 'VARCHAR(100) NULL',
+        ]]], 'User removal / family contacts / HR fields');
     }
 
     /** Only the Super Admin may change, remove or create a Super Admin. */
@@ -123,7 +131,13 @@ class UserController
     public function create(): void
     {
         $auth = authenticate(); require_admin($auth);
-        $body = request_body();
+        $id = $this->createUser($auth, request_body());
+        sendSuccess(['user' => $this->fetchSafe($id)], 'User created successfully', 201);
+    }
+
+    /** Validates + inserts a user (shared by POST /users and the HR "New employee" form). Returns the new id. */
+    public function createUser(array $auth, array $body): string
+    {
         $name    = trim($body['name'] ?? '');
         $email   = strtolower(trim($body['email'] ?? ''));
         $pass    = $body['password'] ?? '';
@@ -181,8 +195,10 @@ class UserController
         ]);
 
         log_activity($auth['id'], 'USER_CREATED', 'User', $id, ['name'=>$name,'email'=>$email,'role'=>$role]);
-        sendSuccess(['user' => $this->fetchSafe($id)], 'User created successfully', 201);
+        return $id;
     }
+
+    public function safeUser(string $id): ?array { return $this->fetchSafe($id); }
 
     /** Normalizes HR-profile fields from a request body. Every key is always present (null when absent/blank) so create() can bind positionally. */
     private function hrFieldsFromBody(array $body): array

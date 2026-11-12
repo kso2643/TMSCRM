@@ -72,6 +72,7 @@ require __DIR__ . '/includes/ChangeNotice.php';  // "✎ <name> changed your …
 
 require __DIR__ . '/controllers/AuthController.php';
 require __DIR__ . '/controllers/UserController.php';
+require __DIR__ . '/controllers/HrController.php';
 require __DIR__ . '/controllers/CustomerController.php';
 require __DIR__ . '/controllers/MeetingController.php';
 require __DIR__ . '/controllers/ProductController.php';
@@ -958,6 +959,18 @@ try {
     }
 
     // ── Employee Ledger ──────────────────────────────────────────
+    elseif ($c0 === 'hr') {
+        $ctrl = new HrController();
+        match (true) {
+            $method === 'GET'  && $c1 === 'next-code'                       => $ctrl->code(),
+            $method === 'GET'  && $c1 === 'missing-docs'                    => $ctrl->missing(),
+            $method === 'POST' && $c1 === 'employees' && $c2 === ''         => $ctrl->onboard(),
+            $method === 'GET'  && $c1 === 'employees' && $c3 === 'docs'     => $ctrl->docs($c2),
+            $method === 'POST' && $c1 === 'employees' && $c3 === 'docs'     => $ctrl->upload($c2),
+            $method === 'GET'  && $c1 === 'docs' && $c2 !== ''              => $ctrl->file($c2),
+            default => sendError("Route /api/hr/$c1 not found", 404),
+        };
+    }
     elseif ($c0 === 'employee-ledger') {
         $ctrl = new PayrollController();
         match (true) {

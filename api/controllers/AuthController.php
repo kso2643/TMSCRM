@@ -15,6 +15,13 @@ class AuthController
         $stmt = db()->prepare('SELECT * FROM `User` WHERE email = ? LIMIT 1');
         $stmt->execute([$email]);
         $user = $stmt->fetch();
+        // v11.52: the employee code (TMS-024) works as a user id too
+        if (!$user && strpos($email, '@') === false) {
+            $stmt = db()->prepare('SELECT * FROM `User` WHERE UPPER(employeeCode) = ? LIMIT 2');
+            $stmt->execute([strtoupper($email)]);
+            $rows = $stmt->fetchAll();
+            $user = count($rows) === 1 ? $rows[0] : false;
+        }
 
         if (!$user)                sendError('Invalid email or password.', 401);
         if (!(bool)$user['isActive']) sendError('Account deactivated. Contact your admin.', 403);

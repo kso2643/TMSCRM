@@ -88,7 +88,18 @@
       }
     });
   }
-  function tick() { if (build()) hideDemo(); }
-  new MutationObserver(tick).observe(document.documentElement, { childList: true, subtree: true });
+  // v11.52: sign in with the e-mail OR the employee ID (TMS-024)
+  function idField() {
+    var i = document.querySelector('form input[type="email"]') || document.querySelector('form input[autocomplete="username"]');
+    if (!i) return;
+    if (i.form) i.form.noValidate = true; // the browser's own e-mail check would block "TMS-024"
+    if (i.type !== 'text') i.type = 'text';
+    if (i.placeholder !== 'you@company.com or TMS-024') { i.placeholder = 'you@company.com or TMS-024'; i.setAttribute('autocapitalize', 'off'); i.setAttribute('autocomplete', 'username'); }
+    var wrap = i.closest('div') && i.closest('div').parentNode;
+    var lab = wrap && wrap.querySelector('label');
+    if (lab && lab.textContent === 'Email address') lab.textContent = 'Email or employee ID';
+  }
+  function tick() { idField(); if (build()) hideDemo(); }
+  new MutationObserver(tick).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['type'] });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick); else tick();
 })();
