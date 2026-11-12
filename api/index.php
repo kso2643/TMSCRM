@@ -73,6 +73,8 @@ require __DIR__ . '/includes/ChangeNotice.php';  // "✎ <name> changed your …
 require __DIR__ . '/controllers/AuthController.php';
 require __DIR__ . '/controllers/UserController.php';
 require __DIR__ . '/controllers/HrController.php';
+require __DIR__ . '/controllers/QuoteMailController.php';
+require_once __DIR__ . '/includes/Mailer.php';
 require __DIR__ . '/controllers/CustomerController.php';
 require __DIR__ . '/controllers/MeetingController.php';
 require __DIR__ . '/controllers/ProductController.php';
@@ -961,6 +963,20 @@ try {
     }
 
     // ── Employee Ledger ──────────────────────────────────────────
+    elseif ($c0 === 'quote-mail') {
+        $ctrl = new QuoteMailController();
+        match (true) {
+            $method === 'GET'  && $c1 === 'draft'                       => $ctrl->draft(),
+            $method === 'GET'  && $c1 === 'templates'                   => $ctrl->getTemplates(),
+            $method === 'PUT'  && $c1 === 'templates'                   => $ctrl->saveTemplate(),
+            $method === 'GET'  && $c1 === ''                            => $ctrl->index(),
+            $method === 'POST' && $c1 === ''                            => $ctrl->create(),
+            $method === 'PUT'  && $c1 !== '' && $c2 === ''              => $ctrl->update($c1),
+            $method === 'POST' && $c1 !== '' && $c2 === 'approve'       => $ctrl->approve($c1),
+            $method === 'POST' && $c1 !== '' && $c2 === 'reject'        => $ctrl->reject($c1),
+            default => sendError("Route /api/quote-mail/$c1 not found", 404),
+        };
+    }
     elseif ($c0 === 'hr') {
         $ctrl = new HrController();
         match (true) {

@@ -544,6 +544,26 @@ class QuotationController
     // items table, terms + signatory, etc). Any other/legacy company falls back to the
     // original generic layout further below — a pixel-accurate port of the old PDFKit code,
     // branched via brand() for colour/name/tagline only.
+    /** v11.52: the quotation PDF as bytes (for e-mailing) → [file name, bytes] or null for old letterheads. */
+    public static function pdfBytes(string $id): ?array
+    {
+        $s = db()->prepare(
+            'SELECT q.*, c.companyName, c.contactPerson, c.contactNumber, c.email AS c_email,
+                    c.location AS c_location, c.address AS c_address,
+                    u.name AS u_name, u.email AS u_email, u.phone AS u_phone
+             FROM `Quotation` q LEFT JOIN `Customer` c ON c.id=q.customerId LEFT JOIN `User` u ON u.id=q.userId WHERE q.id=? LIMIT 1');
+        $s->execute([$id]);
+        $q = $s->fetch();
+        if (!$q) return null;
+        $is = db()->prepare('SELECT qi.* FROM `QuotationItem` qi WHERE qi.quotationId=? ORDER BY qi.sortOrder ASC, qi.createdAt ASC, qi.id ASC');
+        $is->execute([$id]);
+        $q['items'] = $is->fetchAll();
+        $co = $q['company'] ?? 'TMS';
+        if ($co !== 'APJ' && $co !== 'TMS') return null;
+        $pdf = $co === 'APJ' ? (new ApjQuotationPdf($q, $q['items']))->render() : (new TMSQuotationPdf($q, $q['items']))->render();
+        return [str_replace('/', '-', $q['quotationNumber']) . '.pdf', $pdf->output()];
+    }
+
     public function generatePdf(string $id): void
     {
         authenticate();
