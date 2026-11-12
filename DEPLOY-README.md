@@ -1,3 +1,22 @@
+# Update — 12 Nov (c): pages that showed only after a refresh
+
+**Upload:** `crm/` (including the new hidden file `crm/.htaccess`; in the cPanel / Hostinger file manager turn on "Show hidden files" to check it is there), then press **Ctrl+Shift+R** once on each computer; on phones close and reopen the CRM / app. No `api/` change in this part.
+
+I clicked every menu link from the Dashboard, Attendance and Customers pages, as an admin and as a sales engineer, and loaded every page many times in fresh browsers. Four things could leave the old page on screen (or a blank page) until Refresh. All four are fixed:
+
+1. **Dashboard sometimes blank** (about 1 load in 10–20).
+   - One file of the Dashboard used a part of the app before that part had always finished loading. The Dashboard then stayed empty, and its menu links did nothing until a refresh.
+   - Fixed: the Dashboard now waits for that part. 40 loads in a row came out clean, and every other page was checked for the same problem.
+2. **Page-change animation** (the cross-fade between pages):
+   - While it ran, the browser kept showing the **old page** until the new one was "ready". On a slow phone or network that looked like "the page doesn't change until I refresh".
+   - It also failed on many pages. It is switched off; pages still fade in.
+3. **Offline helper:**
+   - If the server took more than 10 seconds to answer, the CRM showed the copy of the page it had saved earlier, i.e. the old page.
+   - Now it always waits for the server and uses the saved copy only when there is no internet at all.
+4. **Browser cache:**
+   - The server didn't tell browsers whether they could reuse pages, so they could show a stored old copy of a page or script for hours.
+   - The new `crm/.htaccess` makes the browser check with the server every time. An unchanged page comes back as a tiny "not modified", so it stays fast.
+
 # Update — 12 Nov (b): order invoices go to Accounts (before tax / GST / total, read from the PDF), out-of-stock alerts only when stock really runs out, sales report shows the billed amount
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed. Do not delete `api/uploads/` or `api/.env`.

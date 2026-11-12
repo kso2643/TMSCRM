@@ -4,12 +4,11 @@
    and switches off for people who ask their device for reduced motion.
    ════════════════════════════════════════════════════════════════════ */
 
-/* 1. Moving between pages: a quick cross-fade instead of a white flash.
-      The sidebar and top bar keep still while only the page content changes
-      (same-origin navigations, Chrome / Edge / Safari 18+; others just load). */
-@view-transition { navigation: auto; }
-aside.fixed.inset-y-0.left-0 { view-transition-name: crm-sidebar; }
-header.h-16.fixed { view-transition-name: crm-header; }
+/* 1. Moving between pages: the browser's page-to-page cross-fade is OFF (v11.53).
+      While it ran, the browser kept the old page on screen until the new one was
+      "ready" — on slower phones / networks the old page stayed until a refresh,
+      and it was aborted on many pages. Pages still fade in (section 2). */
+@view-transition { navigation: none; }
 ::view-transition-old(root) { animation: crm-vt-out .16s ease-in both; }
 ::view-transition-new(root) { animation: crm-vt-in .22s ease-out both; }
 ::view-transition-group(crm-sidebar),

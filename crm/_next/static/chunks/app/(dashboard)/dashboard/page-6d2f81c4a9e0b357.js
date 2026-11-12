@@ -139,8 +139,8 @@
         d = a(4322),
         m = a(13008),
         p = a(76637),
-        NL = a(61396),
-        NLd = a.n(NL);
+        // Link is loaded when a card is drawn, not when this chunk first runs (its chunk 5582 may still be on the way)
+        NLd = function () { return a.n(a(61396))(); };
       /**
        * @license lucide-react v0.303.0 - ISC
        *

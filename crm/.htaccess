@@ -1,0 +1,26 @@
+# CRM pages (v11.53) — always show the newest page, never a copy the browser kept.
+#
+# Without these headers browsers guess how long they may reuse a page and sometimes
+# showed an old page (or an old script) until Refresh. "no-cache" = the browser keeps the
+# file but asks the server each time; an unchanged file comes back as a tiny
+# "304 Not modified", so pages stay fast.
+<IfModule mod_headers.c>
+  # pages, React page data, the offline helper and every script / style
+  # (some React files are updated in place under the same name)
+  <FilesMatch "\.(html?|txt|js|mjs|css|json|webmanifest)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+    Header unset Expires
+  </FilesMatch>
+  # pictures, icons and fonts: keep a week
+  <FilesMatch "\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|mp3|wav|ogg)$">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+  # the offline helper itself is checked on every visit
+  <Files "sw.js">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Service-Worker-Allowed "/"
+  </Files>
+</IfModule>
+<IfModule mod_expires.c>
+  ExpiresActive Off
+</IfModule>
