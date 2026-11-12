@@ -10,6 +10,8 @@ class AttendanceController
     public const OUT_UNTIL = '19:30';
     // No location point for this long while punched in (field staff) = phone / GPS was off → reason + manual km.
     public const GAP_MINUTES = 20;
+    /** Odometer km and GPS km may differ by this much without a reason. */
+    public const KM_TOLERANCE = 10;
     public const LATE_OUT_TYPES = ['WORK' => 'Working late', 'TRAVEL' => 'Travelling', 'CUSTOMER' => 'At a customer', 'OTHER' => 'Other'];
 
     public function __construct()
@@ -21,6 +23,7 @@ class AttendanceController
                 'gpsKm' => 'DECIMAL(8,2) NULL', 'manualKm' => 'DECIMAL(8,2) NULL', 'manualKmReason' => 'TEXT NULL', 'gpsGaps' => 'TEXT NULL',
                 'lateOutType' => 'VARCHAR(12) NULL', 'lateOutReason' => 'TEXT NULL', 'travelFrom' => 'VARCHAR(160) NULL', 'travelTo' => 'VARCHAR(160) NULL',
                 'outRemindedAt' => 'DATETIME NULL',
+                'odoKm' => 'DECIMAL(8,2) NULL', 'kmDiffReason' => 'TEXT NULL',
             ]],
             // when a point reached the server: much later than capturedAt = the phone had no network then
             'LocationPing' => ['create' => '', 'columns' => ['receivedAt' => 'DATETIME NULL']],
@@ -165,6 +168,19 @@ class AttendanceController
             if ($mk !== '') { if (!is_numeric($mk) || (float) $mk < 0 || (float) $mk > 1500) sendError('Enter the km travelled while the GPS was off (0–1500).', 400); $manualKm = round((float) $mk, 2); }
             $manualReason = mb_substr($manualReason, 0, 1000);
         }
+        // Odometer vs GPS: up to 10 km apart is fine; more needs a reason.
+        $odoKm = null; $kmReason = null;
+        if ($closing !== null && $chk['openingMeter'] !== null) {
+            $odoKm = round($closing - $chk['openingMeter'], 2);
+            if ($chk['points'] >= 5) {
+                $gpsAll = $chk['gpsKm'] + ($manualKm ?? 0);
+                $diff = abs($odoKm - $gpsAll);
+                if ($diff > self::KM_TOLERANCE) {
+                    $kmReason = mb_substr(trim((string) ($b['kmDiffReason'] ?? '')), 0, 1000);
+                    if ($kmReason === '') sendError('Your odometer shows ' . self::km($odoKm) . ' km today but the GPS shows ' . self::km($gpsAll) . ' km — ' . self::km($diff) . ' km apart. Write the reason (e.g. GPS was off on the highway, personal trip, odometer typed wrong).', 400);
+                }
+            }
+        }
         // Photo is required at punch-out too.
         [$bin, $ext] = self::decodePhoto($b['photo'] ?? '', 'out');
         $outPhoto = self::savePhoto($record['id'] . '_out', $bin, $ext);
@@ -172,9 +188,9 @@ class AttendanceController
         LocationHistoryController::closeOpenBreaks($auth['id']);
 
         db()->prepare(
-            'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,checkOutPhoto=?,workingHours=?,gpsKm=?,manualKm=?,manualKmReason=?,gpsGaps=?,lateOutType=?,lateOutReason=?,travelFrom=?,travelTo=?,updatedAt=? WHERE id=?'
+            'UPDATE `Attendance` SET checkOut=?,checkOutLat=?,checkOutLng=?,checkOutPhoto=?,workingHours=?,gpsKm=?,manualKm=?,manualKmReason=?,gpsGaps=?,lateOutType=?,lateOutReason=?,travelFrom=?,travelTo=?,odoKm=?,kmDiffReason=?,updatedAt=? WHERE id=?'
         )->execute([now_sql(), $lat, $lng, $outPhoto, $hours, $chk['gpsKm'], $manualKm, $manualReason, $chk['gaps'] ? json_encode($chk['gaps']) : null,
-                    $lateType, $lateReason, $tFrom, $tTo, now_sql(), $record['id']]);
+                    $lateType, $lateReason, $tFrom, $tTo, $odoKm, $kmReason ?: null, now_sql(), $record['id']]);
         if ($lateType) log_activity($auth['id'], 'LATE_PUNCH_OUT', 'Attendance', $record['id'], ['type' => $lateType, 'reason' => $lateReason, 'from' => $tFrom, 'to' => $tTo]);
 
         if ($closing !== null && $fx) FuelExpenseController::recordClosing($fx, $closing);
@@ -284,7 +300,7 @@ class AttendanceController
         $s = db()->prepare(
             "SELECT a.id,a.userId,a.date,a.checkIn,a.checkOut,a.workingHours,a.status,
                     a.checkInLat,a.checkInLng,a.checkOutLat,a.checkOutLng,a.checkInPhoto,a.checkOutPhoto,
-                    a.gpsKm,a.manualKm,a.manualKmReason,a.lateOutType,a.lateOutReason,a.travelFrom,a.travelTo,
+                    a.gpsKm,a.manualKm,a.manualKmReason,a.lateOutType,a.lateOutReason,a.travelFrom,a.travelTo,a.odoKm,a.kmDiffReason,
                     u.name AS u_name, u.department
              FROM `Attendance` a LEFT JOIN `User` u ON u.id=a.userId
              $w ORDER BY a.date DESC, u.name ASC"
@@ -313,6 +329,8 @@ class AttendanceController
                 'gpsKm'             => $r['gpsKm'] !== null ? (float) $r['gpsKm'] : null,
                 'manualKm'          => $r['manualKm'] !== null ? (float) $r['manualKm'] : null,
                 'manualKmReason'    => $r['manualKmReason'],
+                'odoKm'             => $r['odoKm'] !== null ? (float) $r['odoKm'] : null,
+                'kmDiffReason'      => $r['kmDiffReason'],
                 'lateOut'           => $r['lateOutType'] ? ['type' => $r['lateOutType'], 'label' => self::LATE_OUT_TYPES[$r['lateOutType']] ?? $r['lateOutType'],
                                         'reason' => $r['lateOutReason'], 'from' => $r['travelFrom'], 'to' => $r['travelTo']] : null,
             ];
@@ -500,6 +518,8 @@ class AttendanceController
         readfile($path); exit;
     }
 
+    private static function km(float $v): string { return rtrim(rtrim(number_format($v, 1, '.', ''), '0'), '.'); }
+
     private static function ampm(string $hm): string { return date('g:i a', strtotime('2000-01-01 ' . $hm)); }
 
     /**
@@ -533,7 +553,7 @@ class AttendanceController
         return ['now' => date('H:i:s', self::nowTs()), 'outFrom' => self::OUT_FROM, 'outUntil' => self::OUT_UNTIL, 'phase' => $phase,
                 'gpsKm' => $km, 'points' => count($pts), 'fieldStaff' => $field, 'gaps' => $gaps, 'gapMinutes' => array_sum(array_column($gaps, 'minutes')),
                 'locationOff' => $off, 'openingMeter' => $opening, 'suggestedClosing' => $opening !== null ? round($opening + $km, 1) : null,
-                'lateOutTypes' => self::LATE_OUT_TYPES];
+                'lateOutTypes' => self::LATE_OUT_TYPES, 'kmTolerance' => self::KM_TOLERANCE];
     }
 
     // GET /api/attendance/punch-out-check — what the punch-out form has to ask (late reason, GPS-off reason / km)

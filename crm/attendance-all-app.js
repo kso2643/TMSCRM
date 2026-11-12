@@ -426,7 +426,7 @@
                 r.lateOut ? el('div', { class: 'text-xs', style: 'color:#b45309;max-width:16rem;white-space:normal', 'data-late-out': r.attendanceId,
                   text: '⏰ ' + r.lateOut.label + (r.lateOut.from || r.lateOut.to ? ': ' + (r.lateOut.from || '?') + ' → ' + (r.lateOut.to || '?') : '') + (r.lateOut.reason ? ' — ' + r.lateOut.reason : '') }) : null,
                 r.gpsKm != null || r.manualKm != null ? el('div', { class: 'text-xs text-muted', style: 'max-width:16rem;white-space:normal', 'data-km': r.attendanceId,
-                  text: '📍 GPS ' + (r.gpsKm != null ? r.gpsKm.toFixed(1) : '0') + ' km' + (r.manualKm != null ? ' + ' + r.manualKm.toFixed(1) + ' km typed' : '') + (r.manualKmReason ? ' (📵 ' + r.manualKmReason + ')' : '') }) : null]),
+                  text: '📍 GPS ' + (r.gpsKm != null ? r.gpsKm.toFixed(1) : '0') + ' km' + (r.manualKm != null ? ' + ' + r.manualKm.toFixed(1) + ' km typed' : '') + (r.manualKmReason ? ' (📵 ' + r.manualKmReason + ')' : '') + (r.odoKm != null ? ' · odometer ' + r.odoKm.toFixed(1) + ' km' : '') + (r.kmDiffReason ? ' — ⚠ differs: ' + r.kmDiffReason : '') }) : null]),
               el('td', { class: 'px-4 py-2.5' }, [r.checkOut ? mapCell(r.checkOutLat, r.checkOutLng) : el('span', { class: 'text-muted', text: '—' })]),
               el('td', { class: 'px-4 py-2.5' }, [photoBtns(r)]),
               el('td', { class: 'px-4 py-2.5', text: hrs }),

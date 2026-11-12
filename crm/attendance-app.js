@@ -172,6 +172,7 @@
       placeholder: kind === 'in' ? 'Starting odometer (km)' : 'Closing odometer (km)', 'aria-label': kind === 'in' ? 'Starting odometer reading' : 'Closing odometer reading' });
     inp.addEventListener('input', function () {
       state.odo = inp.value;
+      if (kind === 'out') { var ob = punchBox.querySelector('#at-outbox'); if (ob) ob.replaceWith(outBox()); }
       var b = punchBox.querySelector(kind === 'in' ? '#at-in' : '#at-out');
       if (b) b.disabled = !odoOk() || !state.photo || state.busy || (kind === 'in' && !(state.win || {}).canPunchIn);
     });
@@ -283,7 +284,13 @@
   }
   // ── punch out (v11.47): km by GPS, 6:30–7:00 pm window, late reason, phone / GPS-off reason + km ──
   // GET /attendance/punch-out-check says what to ask; the answers go with the punch out.
-  state.out = { type: '', reason: '', from: '', to: '', manualKm: '', manualReason: '' };
+  state.out = { type: '', reason: '', from: '', to: '', manualKm: '', manualReason: '', kmReason: '' };
+  /** Odometer km today vs GPS (+ typed) km → { odo, gps, diff } when both are known. */
+  function kmDiff() {
+    var c = state.outChk; if (!c || c.openingMeter == null || c.points < 5 || String(state.odo || '').trim() === '' || isNaN(Number(state.odo))) return null;
+    var odo = Number(state.odo) - c.openingMeter, gps = c.gpsKm + (Number(state.out.manualKm) || 0);
+    return { odo: Math.round(odo * 10) / 10, gps: Math.round(gps * 10) / 10, diff: Math.round(Math.abs(odo - gps) * 10) / 10, tol: c.kmTolerance || 10 };
+  }
   function loadOutCheck() {
     return api('GET', '/attendance/punch-out-check').then(function (j) { state.outChk = j.data; return j.data; }).catch(function () { state.outChk = null; return null; });
   }
@@ -296,6 +303,8 @@
       if (o.type !== 'TRAVEL' && !o.reason.trim()) return 'Write the reason for punching out late.';
     }
     if (c.gaps && c.gaps.length && !o.manualReason.trim()) return 'Write why your location was off (phone / GPS off).';
+    var k = kmDiff();
+    if (k && k.diff > k.tol && !o.kmReason.trim()) return 'Your odometer and the GPS differ by ' + k.diff + ' km — write the reason.';
     return '';
   }
   function outBox() {
@@ -339,6 +348,19 @@
       g.appendChild(mk); g.appendChild(mr);
       box.appendChild(g);
     }
+    // odometer vs GPS: fine within the tolerance (10 km), else the reason
+    var k = kmDiff();
+    if (k) {
+      var bad = k.diff > k.tol;
+      var kb = el('div', { class: 'at-msg ' + (bad ? 'warn' : 'ok') + ' at-f', id: 'at-km-check' }, [
+        el('b', { text: (bad ? '⚠ ' : '✓ ') + 'Odometer ' + k.odo + ' km · GPS ' + k.gps + ' km — ' + (bad ? k.diff + ' km apart (more than ' + k.tol + ' km)' : 'they match') })]);
+      if (bad) {
+        var kr = el('textarea', { id: 'at-km-reason', rows: 2, placeholder: 'Reason * (e.g. GPS was off on the highway, personal trip, odometer typed wrong)' });
+        kr.value = o.kmReason; kr.addEventListener('input', function () { o.kmReason = kr.value; upd(); });
+        kb.appendChild(kr);
+      }
+      box.appendChild(kb);
+    }
     function upd() { var b = punchBox.querySelector('#at-out'); if (b) b.disabled = !state.photo || state.busy || !odoOk() || !!outMissing(); }
     setTimeout(upd, 0);
     return box;
@@ -351,8 +373,6 @@
       var miss = outMissing();
       if (miss) { var ob = punchBox.querySelector('#at-outbox'); if (ob) ob.replaceWith(outBox()); toast(miss, 'err'); return; }
       var c = state.outChk;
-      if (c && c.suggestedClosing != null && state.odo && Math.abs(Number(state.odo) - c.suggestedClosing) > Math.max(15, c.gpsKm * 0.3) &&
-          !confirm('Your closing odometer (' + state.odo + ' km) is far from what the GPS shows (about ' + c.suggestedClosing + ' km). Punch out anyway?')) return;
       if (!confirm('Punch out now?')) return;
       doPunchOut();
     });
@@ -363,7 +383,7 @@
     getLocation().then(function (c) {
       return api('POST', '/attendance/checkout', { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, photo: state.photo, odometer: state.odo || undefined,
         lateOutType: o.type || undefined, lateOutReason: o.reason || undefined, travelFrom: o.from || undefined, travelTo: o.to || undefined,
-        manualKm: o.manualKm || undefined, manualKmReason: o.manualReason || undefined });
+        manualKm: o.manualKm || undefined, manualKmReason: o.manualReason || undefined, kmDiffReason: o.kmReason || undefined });
     })
       .then(function (j) { toast(j.message || 'Punched out'); state.photo = null; var hadOdo = state.odo; state.odo = ''; state.outChk = null; if (!hadOdo) meter('close'); return load(); })
       .catch(function (e) { locFail(e, 'out'); })
