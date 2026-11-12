@@ -93,6 +93,37 @@ $tail"],
             return $r;
         }, $s->fetchAll());
 
+        // v11.53: tax invoices added on the Orders page, by invoice date — what was actually billed
+        $invoices = [];
+        try {
+            new OrderController();
+            $w = 'COALESCE(i.invoiceDate, DATE(i.createdAt)) BETWEEN ? AND ?'; $p = [$from, $to];
+            if ($eng !== '') { $w .= ' AND o.engineerId=?'; $p[] = $eng; }
+            $s = db()->prepare("SELECT i.id, i.orderId, i.invoiceNo, COALESCE(i.invoiceDate, DATE(i.createdAt)) AS invoiceDate, i.amount, i.taxable, i.gstAmount, i.gstPercent,
+                    o.orderNo, o.engineerId, u.name AS engineerName, c.companyName AS customerName
+                FROM `OrderInvoice` i JOIN `CustomerOrder` o ON o.id=i.orderId LEFT JOIN `Customer` c ON c.id=o.customerId LEFT JOIN `User` u ON u.id=o.engineerId
+                WHERE $w ORDER BY invoiceDate DESC, i.createdAt DESC LIMIT 2000");
+            $s->execute($p);
+            foreach ($s->fetchAll() as $r) {
+                $amt = $r['amount'] !== null ? (float) $r['amount'] : null;
+                $tax = $r['taxable'] !== null ? (float) $r['taxable'] : null; $est = false;
+                if ($tax === null && $amt !== null && $r['gstAmount'] !== null) $tax = round($amt - (float) $r['gstAmount'], 2);
+                if ($tax === null && $amt !== null) { $tax = round($amt / 1.18, 2); $est = true; } // no split known: 18% GST assumed
+                $invoices[] = ['id' => $r['id'], 'orderId' => $r['orderId'], 'orderNo' => $r['orderNo'], 'invoiceNo' => $r['invoiceNo'], 'invoiceDate' => $r['invoiceDate'],
+                    'customerName' => $r['customerName'], 'engineerId' => $r['engineerId'], 'engineerName' => $r['engineerName'],
+                    'taxable' => $tax, 'gstAmount' => $amt !== null && $tax !== null ? round($amt - $tax, 2) : null, 'total' => $amt, 'estimated' => $est];
+            }
+        } catch (PDOException $e) { /* no invoices table yet */ }
+        // billed per order (all its invoices, any date) for the orders list
+        $billedBy = [];
+        if ($orders) {
+            $ids = array_column($orders, 'id');
+            $s = db()->prepare('SELECT orderId, COUNT(*) AS n, COALESCE(SUM(amount),0) AS total, COALESCE(SUM(COALESCE(taxable, amount - gstAmount, amount/1.18)),0) AS taxable FROM `OrderInvoice` WHERE orderId IN (' . implode(',', array_fill(0, count($ids), '?')) . ') GROUP BY orderId');
+            try { $s->execute($ids); foreach ($s->fetchAll() as $r) $billedBy[$r['orderId']] = $r; } catch (PDOException $e) {}
+            foreach ($orders as &$o) { $b = $billedBy[$o['id']] ?? null; $o['invoiceCount'] = $b ? (int) $b['n'] : 0; $o['billedTaxable'] = $b ? round((float) $b['taxable'], 2) : 0.0; $o['billedTotal'] = $b ? round((float) $b['total'], 2) : 0.0; }
+            unset($o);
+        }
+
         // engineers to show: every sales person (so 0s show too), or just me
         if ($all) {
             $us = db()->query("SELECT id, name, role FROM `User` WHERE isActive=1 AND role IN ('SALES_ENGINEER','SALES','MANAGER','ADMIN','SUPER_ADMIN') ORDER BY FIELD(role,'SALES_ENGINEER','SALES','MANAGER','ADMIN','SUPER_ADMIN'), name")->fetchAll();
@@ -102,7 +133,8 @@ $tail"],
         $sum = [];
         $blank = fn($id, $name, $role) => ['engineerId' => $id, 'name' => $name, 'role' => $role, 'orders' => 0, 'orderValue' => 0.0, 'unpricedOrders' => 0,
             'qty' => 0.0, 'suppliedQty' => 0.0, 'delivered' => 0, 'deliveredValue' => 0.0,
-            'manualCount' => 0, 'manualOrderValue' => 0.0, 'manualBilled' => 0.0, 'manualQty' => 0.0];
+            'manualCount' => 0, 'manualOrderValue' => 0.0, 'manualBilled' => 0.0, 'manualQty' => 0.0,
+            'invoiceCount' => 0, 'billedTaxable' => 0.0, 'billedGst' => 0.0, 'billedTotal' => 0.0, 'estimatedInvoices' => 0];
         foreach ($us as $u) $sum[$u['id']] = $blank($u['id'], $u['name'], $u['role']);
         foreach ($orders as $o) {
             $k = $o['engineerId'];
@@ -119,9 +151,17 @@ $tail"],
             $sum[$k] ??= $blank($k, $e['engineerName'] ?: '—', '');
             $sum[$k]['manualCount']++; $sum[$k]['manualOrderValue'] += $e['orderValue'] ?? 0; $sum[$k]['manualBilled'] += $e['billedValue'] ?? 0; $sum[$k]['manualQty'] += $e['quantity'] ?? 0;
         }
+        foreach ($invoices as $iv) {
+            $k = $iv['engineerId'];
+            $sum[$k] ??= $blank($k, $iv['engineerName'] ?: '—', '');
+            $sum[$k]['invoiceCount']++; $sum[$k]['billedTaxable'] += $iv['taxable'] ?? 0; $sum[$k]['billedGst'] += $iv['gstAmount'] ?? 0; $sum[$k]['billedTotal'] += $iv['total'] ?? 0;
+            if ($iv['estimated']) $sum[$k]['estimatedInvoices']++;
+        }
         foreach ($sum as &$x) {
             $x['totalGot'] = round($x['orderValue'] + $x['manualOrderValue'], 2);
-            $x['totalMade'] = round($x['deliveredValue'] + $x['manualBilled'], 2);
+            foreach (['billedTaxable', 'billedGst', 'billedTotal', 'deliveredValue'] as $kk) $x[$kk] = round($x[$kk], 2);
+            // "Made" = what was billed on tax invoices, before tax (Orders-page invoices + manual / imported tax invoices)
+            $x['totalMade'] = round($x['billedTaxable'] + $x['manualBilled'], 2);
             $x['totalOrders'] = $x['orders'] + $x['manualCount'];
         }
         unset($x);
@@ -129,7 +169,7 @@ $tail"],
         usort($rows, fn($a, $b) => $b['totalGot'] <=> $a['totalGot'] ?: $b['totalOrders'] <=> $a['totalOrders'] ?: strcmp($a['name'], $b['name']));
 
         sendSuccess(['from' => $from, 'to' => $to, 'seesAll' => $all, 'me' => $auth['id'], 'engineers' => $all ? $us : [],
-            'summary' => $rows, 'orders' => $orders, 'entries' => $entries]);
+            'summary' => $rows, 'orders' => $orders, 'entries' => $entries, 'invoices' => $invoices]);
     }
 
     // PATCH /api/sales-report/orders/:id — set the order value

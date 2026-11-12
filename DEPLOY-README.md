@@ -1,3 +1,46 @@
+# Update — 12 Nov (b): order invoices go to Accounts (before tax / GST / total, read from the PDF), out-of-stock alerts only when stock really runs out, sales report shows the billed amount
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. No app update is needed. Do not delete `api/uploads/` or `api/.env`.
+- **Database:** new columns are added automatically (amount before tax / GST on order invoices, a link from Accounts invoices to them).
+
+1. **Order invoice → Accounts → Invoices, with and without tax**
+   - On the order, under **Invoices supplied**, choose the **invoice PDF first**. The CRM reads it and fills in:
+     - Invoice no.
+     - Date
+     - Amount **before tax**
+     - GST %
+     - GST ₹
+     - **Total with GST**
+   - Works with the usual Tally invoice layout. Check the numbers, correct anything, then **+ Add invoice**.
+   - Typing also works: enter "Before tax" and GST %, and the GST and total are worked out.
+   - Each invoice appears in **Accounts → Invoices** by itself. It carries:
+     - the customer and their GSTIN
+     - the order no.
+     - before tax / GST / total
+     - a due date 30 days later
+     - the invoice PDF
+     - "Tally pending"
+   - Receipts can then be recorded against it.
+   - An invoice the accounts team already typed with the same number is linked, not doubled.
+   - Invoices added on orders before this update are brought into Accounts the first time Accounts is opened. Those carry only the total; add the amount before tax there with ✎ Edit.
+   - Removing an invoice on the order removes it from Accounts too, unless money was already received against it.
+2. **"Out of stock" alerts:**
+   - Now only when an item's stock really **went down** to its minimum or to zero, and **at most once per item per day**.
+   - Placing an order with a new item that was never in stock no longer sends "Out of stock" every time.
+   - The 9:30 am stock summary stays as it was.
+3. **Sales report — what was billed**
+   - "Made (delivered + invoiced)" was an estimate: the delivered share of the quantity × the order value (e.g. 32 of 52 Nos × ₹49,810 = ₹30,652, "62%").
+   - It is now **Billed (tax invoices, before tax)**: the invoices added on orders in the period (by invoice date) plus manual / imported tax invoices. The tile also shows the amount with GST and the number of invoices.
+   - The engineer table shows:
+     - Tax invoices
+     - Billed (before tax)
+     - GST
+     - Billed (with GST)
+     - Total billed and Billed %
+   - Each order row shows how much of it is billed.
+   - New tab **Tax invoices from Orders**: date, number, customer, engineer, order, before tax, GST, with GST.
+   - Invoices saved with only a total (before this update) are counted with 18% GST assumed and marked "≈ 18% assumed".
+
 # Update — 12 Nov: "Failed to fetch" fixed for good, 1 km meeting check, network / GPS gaps, odometer vs GPS, alerts unread count, order items confirmed before Stock, HR new employee, Accounts outstanding, quotation e-mail with approval
 
 **Upload:** `api/` **and** `crm/` (both — the fix needs the new server files too), then press **Ctrl+Shift+R** once on every computer (on phones: close and reopen the CRM). No app update is needed.

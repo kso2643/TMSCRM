@@ -945,7 +945,7 @@
       list.forEach(function (i) {
         box.appendChild(el('div', { class: 'flex items-center gap-2 flex-wrap text-sm', 'data-invoice': i.invoiceNo }, [
           el('span', { class: 'font-semibold', text: '🧾 ' + i.invoiceNo }),
-          el('span', { class: 'text-xs text-muted', text: [i.invoiceDate ? fmtDate(i.invoiceDate) : '', money(i.amount), i.note || ''].filter(Boolean).join(' · ') }),
+          el('span', { class: 'text-xs text-muted', text: [i.invoiceDate ? fmtDate(i.invoiceDate) : '', i.taxable != null ? money(i.taxable) + ' + GST ' + money(i.gstAmount) + (i.gstPercent ? ' (' + i.gstPercent + '%)' : '') + ' = ' + money(i.amount) : money(i.amount), i.note || ''].filter(Boolean).join(' · ') }),
           i.hasFile ? el('button', { class: 'btn-secondary btn-sm', type: 'button', 'data-inv-view': i.id, text: 'View', onclick: function (e) { e.stopPropagation(); open(i, false); } }) : el('span', { class: 'text-xs text-muted', text: 'no file' }),
           i.hasFile ? el('button', { class: 'btn-secondary btn-sm', type: 'button', title: 'Download invoice', text: '⬇', onclick: function (e) { e.stopPropagation(); open(i, true); } }) : null,
           can ? el('button', { class: 'text-xs', type: 'button', style: 'color:#b91c1c', title: 'Remove invoice', text: '✕', onclick: function (e) {
@@ -958,21 +958,55 @@
       if (!can) return;
       var no = el('input', { class: 'ox-sel', id: 'ox-inv-no', placeholder: 'Invoice no.', style: 'width:9rem' });
       var dt = el('input', { class: 'ox-sel', id: 'ox-inv-date', type: 'date', value: todayIso() });
-      var amt = el('input', { class: 'ox-sel', id: 'ox-inv-amt', type: 'number', min: '0', step: '0.01', placeholder: 'Amount ₹', style: 'width:8rem' });
+      var tx = el('input', { class: 'ox-sel', id: 'ox-inv-taxable', type: 'number', min: '0', step: '0.01', placeholder: 'Before tax ₹', title: 'Taxable value (before GST)', style: 'width:8rem' });
+      var gp = el('select', { class: 'ox-sel', id: 'ox-inv-gstp', title: 'GST %', style: 'width:5.5rem' }, [['', 'GST %'], ['0', '0 %'], ['5', '5 %'], ['12', '12 %'], ['18', '18 %'], ['28', '28 %']].map(function (x) { return el('option', { value: x[0], text: x[1] }); }));
+      var ga = el('input', { class: 'ox-sel', id: 'ox-inv-gst', type: 'number', min: '0', step: '0.01', placeholder: 'GST ₹', style: 'width:7rem' });
+      var amt = el('input', { class: 'ox-sel', id: 'ox-inv-amt', type: 'number', min: '0', step: '0.01', placeholder: 'Total with GST ₹', style: 'width:9rem' });
       var file = el('input', { type: 'file', id: 'ox-inv-file', accept: '.pdf,image/*', class: 'text-xs' });
       var err = el('p', { class: 'text-xs', style: 'color:#b91c1c' });
+      var hint = el('p', { class: 'text-xs', id: 'ox-inv-read', style: 'color:#047857' });
+      function r2(v) { return Math.round(v * 100) / 100; }
+      // typing: before tax + GST % → GST and total
+      function calc(src) {
+        var t = parseFloat(tx.value), p = parseFloat(gp.value), g = parseFloat(ga.value), a = parseFloat(amt.value);
+        if (src === 'tx' || src === 'gp') { if (!isNaN(t) && !isNaN(p)) { ga.value = r2(t * p / 100).toFixed(2); amt.value = Math.round(t + t * p / 100).toFixed(2); } }
+        else if (src === 'amt' && !isNaN(a) && isNaN(t) && !isNaN(p)) { tx.value = r2(a / (1 + p / 100)).toFixed(2); ga.value = r2(a - parseFloat(tx.value)).toFixed(2); }
+      }
+      tx.addEventListener('input', function () { calc('tx'); }); gp.addEventListener('change', function () { calc('gp'); }); amt.addEventListener('change', function () { calc('amt'); });
+      // choosing the invoice PDF reads the numbers out of it
+      file.addEventListener('change', function () {
+        hint.textContent = ''; var f = file.files[0];
+        if (!f || !window.InvoiceExtract) return;
+        hint.textContent = 'Reading the invoice…';
+        InvoiceExtract.fromFile(f).then(function (r) {
+          if (!r.ok) { hint.textContent = r.notPdf ? '' : (r.scanned ? 'This PDF is a scan — type the amounts.' : 'Could not read the amounts — type them.'); return; }
+          var got = [];
+          if (r.invoiceNo && !no.value.trim()) { no.value = r.invoiceNo; got.push('no.'); }
+          if (r.invoiceDate) { dt.value = r.invoiceDate; got.push('date'); }
+          if (r.taxable != null) { tx.value = r.taxable.toFixed(2); got.push('before tax'); }
+          if (r.gstPercent != null && [0, 5, 12, 18, 28].indexOf(r.gstPercent) !== -1) gp.value = String(r.gstPercent);
+          if (r.gstAmount != null) { ga.value = r.gstAmount.toFixed(2); got.push('GST'); }
+          if (r.total != null) { amt.value = r.total.toFixed(2); got.push('total'); }
+          hint.textContent = got.length ? '✓ Read from the PDF: ' + got.join(', ') + ' — please check before adding.' : 'Could not read the amounts — type them.';
+        }).catch(function () { hint.textContent = 'Could not read the PDF — type the amounts.'; });
+      });
       var add = el('button', { class: 'btn-primary btn-sm', type: 'button', id: 'ox-inv-add', text: '+ Add invoice' });
       add.addEventListener('click', function (e) {
         e.stopPropagation(); err.textContent = '';
         if (!no.value.trim()) { err.textContent = 'Enter the invoice number.'; return; }
         var fd = new FormData();
         fd.append('invoiceNo', no.value.trim()); fd.append('invoiceDate', dt.value); fd.append('amount', amt.value);
+        fd.append('taxable', tx.value); fd.append('gstPercent', gp.value); fd.append('gstAmount', ga.value);
         if (file.files[0]) fd.append('file', file.files[0]);
         add.disabled = true;
         api('POST', '/orders/' + o.id + '/invoices', fd).then(function (j) { draw(j.data.invoices); if (onChange) onChange(j.data.invoices); })
           .catch(function (er) { err.textContent = er.message; add.disabled = false; });
       });
-      box.appendChild(el('div', { class: 'flex items-center gap-2 flex-wrap pt-1', onclick: function (e) { e.stopPropagation(); } }, [no, dt, amt, file, add]));
+      function lab(t, i) { return el('label', { class: 'flex flex-col text-[11px] text-muted', style: 'gap:2px' }, [t, i]); }
+      box.appendChild(el('div', { class: 'pt-1', onclick: function (e) { e.stopPropagation(); } }, [lab('Invoice PDF (the amounts are read from it)', file)]));
+      box.appendChild(el('div', { class: 'flex items-end gap-2 flex-wrap', onclick: function (e) { e.stopPropagation(); } }, [lab('Invoice no.', no), lab('Invoice date', dt)]));
+      box.appendChild(el('div', { class: 'flex items-end gap-2 flex-wrap', onclick: function (e) { e.stopPropagation(); } }, [lab('Before tax ₹', tx), lab('GST %', gp), lab('GST ₹', ga), lab('Total with GST ₹', amt), add]));
+      box.appendChild(hint);
       box.appendChild(err);
     }
     draw(o.invoices || []);

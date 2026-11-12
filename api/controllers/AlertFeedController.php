@@ -464,12 +464,17 @@ class AlertFeedController
         if (is_admin_tier($auth['role'])) {
             try {
                 StockLedger::ensure();
+                // v11.53: only when stock really went DOWN (supplied / issued) to the minimum or to zero —
+                // not when an order or price request merely adds a new item that never had stock,
+                // and at most once per item per day.
                 foreach (self::rows(
-                    "SELECT id, itemCode, itemName, brand, availableStock, minimumStock, lastUpdated FROM `Stock`
-                     WHERE isActive=1 AND lastUpdated>? AND (availableStock<=0 OR (minimumStock>0 AND availableStock<=minimumStock))
+                    "SELECT s.id, s.itemCode, s.itemName, s.brand, s.availableStock, s.minimumStock, MAX(m.createdAt) AS lastUpdated
+                     FROM `Stock` s JOIN `StockMovement` m ON m.stockId=s.id AND m.qty<0 AND (m.balance - m.qty) > 0 AND m.createdAt>?
+                     WHERE s.isActive=1 AND (s.availableStock<=0 OR (s.minimumStock>0 AND s.availableStock<=s.minimumStock))
+                     GROUP BY s.id, s.itemCode, s.itemName, s.brand, s.availableStock, s.minimumStock
                      ORDER BY lastUpdated DESC LIMIT $per", [$since]) as $r) {
                     $out = (float) $r['availableStock'] <= 0;
-                    $add('stock-low-' . $r['id'] . '-' . $r['lastUpdated'], 'STOCK_LOW', $out ? 'Out of stock' : 'Low stock',
+                    $add('stock-low-' . $r['id'] . '-' . substr((string) $r['lastUpdated'], 0, 10), 'STOCK_LOW', $out ? 'Out of stock' : 'Low stock',
                         $r['itemCode'] . ' · ' . $r['itemName'] . ($r['brand'] ? ' (' . $r['brand'] . ')' : '') . ' — ' . rtrim(rtrim(number_format((float) $r['availableStock'], 2), '0'), '.') . ' left' . ((float) $r['minimumStock'] > 0 ? ', minimum ' . rtrim(rtrim(number_format((float) $r['minimumStock'], 2), '0'), '.') : ''),
                         '/stock/?status=' . ($out ? 'out' : 'low'), $r['lastUpdated']);
                 }

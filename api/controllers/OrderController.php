@@ -81,7 +81,8 @@ class OrderController
   `amount` DECIMAL(14,2) NULL, `note` VARCHAR(500) NULL, `fileName` VARCHAR(255) NULL, `storedName` VARCHAR(80) NULL, `size` INT NULL,
   `createdById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `OrderInvoice_order` (`orderId`), KEY `OrderInvoice_no` (`invoiceNo`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"]], 'Order invoices');
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", 'columns' => [
+            'taxable' => 'DECIMAL(14,2) NULL', 'gstPercent' => 'DECIMAL(5,2) NULL', 'gstAmount' => 'DECIMAL(14,2) NULL']]], 'Order invoices');
 
         // One-time catch-up for orders that reached Delivered/Partially
         // delivered before autoMarkProcured() existed, so they don't keep
@@ -356,7 +357,9 @@ class OrderController
         $s = db()->prepare('SELECT i.*, u.name AS byName FROM `OrderInvoice` i LEFT JOIN `User` u ON u.id=i.createdById WHERE i.orderId=? ORDER BY COALESCE(i.invoiceDate, DATE(i.createdAt)), i.createdAt');
         $s->execute([$orderId]);
         return array_map(fn($r) => ['id' => $r['id'], 'invoiceNo' => $r['invoiceNo'], 'invoiceDate' => $r['invoiceDate'],
-            'amount' => $r['amount'] !== null ? (float) $r['amount'] : null, 'note' => $r['note'], 'fileName' => $r['fileName'],
+            'amount' => $r['amount'] !== null ? (float) $r['amount'] : null, 'note' => $r['note'],
+            'taxable' => isset($r['taxable']) && $r['taxable'] !== null ? (float) $r['taxable'] : null, 'gstPercent' => isset($r['gstPercent']) && $r['gstPercent'] !== null ? (float) $r['gstPercent'] : null,
+            'gstAmount' => isset($r['gstAmount']) && $r['gstAmount'] !== null ? (float) $r['gstAmount'] : null, 'fileName' => $r['fileName'],
             'hasFile' => (bool) $r['storedName'], 'size' => (int) $r['size'], 'by' => $r['byName'], 'createdAt' => $r['createdAt']], $s->fetchAll());
     }
 
@@ -378,6 +381,21 @@ class OrderController
         $date = to_date_only((string) ($b['invoiceDate'] ?? '')) ?: null;
         $amt = str_replace([',', '₹', ' '], '', (string) ($b['amount'] ?? ''));
         if ($amt !== '' && (!is_numeric($amt) || (float) $amt < 0)) sendError('Enter the invoice amount as a number.', 400);
+        // v11.53: amount before tax / GST (read from the invoice PDF or typed); "amount" is the invoice total with tax
+        $numOr = function ($k, $what) use ($b) {
+            $v = str_replace([',', '₹', ' ', '%'], '', (string) ($b[$k] ?? ''));
+            if ($v === '') return null;
+            if (!is_numeric($v) || (float) $v < 0) sendError("Enter the $what as a number.", 400);
+            return round((float) $v, 2);
+        };
+        $taxable = $numOr('taxable', 'amount before tax'); $gstAmt = $numOr('gstAmount', 'GST amount'); $gstPct = $numOr('gstPercent', 'GST %');
+        if ($amt === '' && $taxable !== null) $amt = (string) round($taxable + ($gstAmt ?? ($gstPct !== null ? $taxable * $gstPct / 100 : 0)), 2);
+        if ($taxable === null && $amt !== '' && $gstAmt !== null) $taxable = round((float) $amt - $gstAmt, 2);
+        if ($taxable === null && $amt !== '' && $gstPct !== null) { $taxable = round((float) $amt / (1 + $gstPct / 100), 2); $gstAmt = round((float) $amt - $taxable, 2); }
+        if ($taxable !== null && $gstAmt === null && $gstPct !== null) $gstAmt = round($taxable * $gstPct / 100, 2);
+        if ($taxable !== null && $gstAmt === null && $amt !== '' && (float) $amt >= $taxable) $gstAmt = round((float) $amt - $taxable, 2);
+        if ($taxable !== null && $amt !== '' && $taxable > (float) $amt + 0.01) sendError('The amount before tax is more than the invoice total — check the two amounts.', 400);
+        if ($gstPct === null && $taxable && $gstAmt) foreach ([5, 12, 18, 28] as $r) if (abs($gstAmt / $taxable * 100 - $r) < 0.6) $gstPct = (float) $r;
         $dup = db()->prepare('SELECT COUNT(*) FROM `OrderInvoice` WHERE orderId=? AND invoiceNo=?'); $dup->execute([$id, $no]);
         if ((int) $dup->fetchColumn()) sendError("Invoice $no is already on this order.", 409);
         $fileName = $stored = null; $size = null;
@@ -392,9 +410,11 @@ class OrderController
             if (!move_uploaded_file($f['tmp_name'], "$dir/$stored") && !rename($f['tmp_name'], "$dir/$stored")) sendError('Could not save the invoice on the server.', 500);
             $fileName = mb_substr(preg_replace('/[^\w.\- ()]+/u', '_', (string) $f['name']), 0, 255); $size = (int) $f['size'];
         }
-        db()->prepare('INSERT INTO `OrderInvoice` (id,orderId,invoiceNo,invoiceDate,amount,note,fileName,storedName,size,createdById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-            ->execute([gen_id(), $id, $no, $date, $amt === '' ? null : round((float) $amt, 2), mb_substr(trim((string) ($b['note'] ?? '')), 0, 500) ?: null, $fileName, $stored, $size, $auth['id'], now_sql()]);
+        $iid = gen_id();
+        db()->prepare('INSERT INTO `OrderInvoice` (id,orderId,invoiceNo,invoiceDate,amount,taxable,gstPercent,gstAmount,note,fileName,storedName,size,createdById,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            ->execute([$iid, $id, $no, $date, $amt === '' ? null : round((float) $amt, 2), $taxable, $gstPct, $gstAmt, mb_substr(trim((string) ($b['note'] ?? '')), 0, 500) ?: null, $fileName, $stored, $size, $auth['id'], now_sql()]);
         log_activity($auth['id'], 'ORDER_INVOICE_ADDED', 'CustomerOrder', $id, ['invoiceNo' => $no]);
+        try { new AccountsController(); AccountsController::syncOrderInvoices($iid); } catch (Throwable $e) { error_log('accounts sync: ' . $e->getMessage()); }
         sendSuccess(['invoices' => $this->invoicesOf($id)], "Invoice $no added", 201);
     }
 
@@ -427,6 +447,7 @@ class OrderController
         if (!$r) sendError('Invoice not found.', 404);
         if ($r['storedName']) @unlink($this->storageDir() . '/invoices/' . basename($r['storedName']));
         db()->prepare('DELETE FROM `OrderInvoice` WHERE id=?')->execute([$iid]);
+        try { new AccountsController(); AccountsController::orderInvoiceRemoved($iid); } catch (Throwable $e) { error_log('accounts sync: ' . $e->getMessage()); }
         log_activity($auth['id'], 'ORDER_INVOICE_REMOVED', 'CustomerOrder', $id, ['invoiceNo' => $r['invoiceNo']]);
         sendSuccess(['invoices' => $this->invoicesOf($id)], 'Invoice ' . $r['invoiceNo'] . ' removed');
     }

@@ -49,7 +49,7 @@ class AccountsController
   `createdById` VARCHAR(30) NULL, `createdAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `updatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`), KEY `AccEntry_kind_date_idx` (`kind`, `docDate`), KEY `AccEntry_link_idx` (`linkId`),
   KEY `AccEntry_tally_idx` (`tallyStatus`), KEY `AccEntry_party_idx` (`partyName`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"]];
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", 'columns' => ['orderInvoiceId' => 'VARCHAR(30) NULL']]];
     }
 
     public function __construct()
@@ -57,10 +57,73 @@ class AccountsController
         ensure_schema(self::schema(), 'Accounts');
     }
 
+    /**
+     * v11.53: invoices added on the Orders page appear in Accounts → Invoices by themselves
+     * (with the amount before tax, GST and total, the customer, the order no. and the invoice file).
+     * An invoice already typed in Accounts with the same number is linked, not doubled.
+     */
+    public static function syncOrderInvoices(?string $onlyId = null): int
+    {
+        static $done = false;
+        if ($onlyId === null && $done) return 0;
+        $done = $done || $onlyId === null;
+        try { new OrderController(); } catch (Throwable $e) { return 0; }
+        $sql = "SELECT i.*, o.orderNo, o.firm, o.customerId, c.companyName, c.gstin AS cGstin
+            FROM `OrderInvoice` i JOIN `CustomerOrder` o ON o.id=i.orderId LEFT JOIN `Customer` c ON c.id=o.customerId
+            LEFT JOIN `AccEntry` e ON e.orderInvoiceId=i.id WHERE e.id IS NULL" . ($onlyId ? ' AND i.id=?' : '');
+        try { $s = db()->prepare($sql); $s->execute($onlyId ? [$onlyId] : []); $rows = $s->fetchAll(); }
+        catch (PDOException $e) { $s = db()->prepare(str_replace(', c.gstin AS cGstin', ', NULL AS cGstin', $sql)); $s->execute($onlyId ? [$onlyId] : []); $rows = $s->fetchAll(); }
+        $n = 0;
+        foreach ($rows as $r) {
+            $d = $r['invoiceDate'] ?: substr((string) $r['createdAt'], 0, 10);
+            $tax = $r['taxable'] !== null ? (float) $r['taxable'] : null;
+            $gst = $r['gstAmount'] !== null ? (float) $r['gstAmount'] : null;
+            $total = $r['amount'] !== null ? (float) $r['amount'] : ($tax !== null ? $tax + (float) $gst : 0.0);
+            $f = db()->prepare("SELECT * FROM `AccEntry` WHERE kind='INVOICE' AND orderInvoiceId IS NULL AND LOWER(TRIM(docNo))=LOWER(TRIM(?)) LIMIT 1");
+            $f->execute([$r['invoiceNo']]);
+            if ($e = $f->fetch()) { // typed in Accounts already → link it, fill what is missing
+                db()->prepare('UPDATE `AccEntry` SET orderInvoiceId=?, orderId=COALESCE(orderId,?), orderRef=COALESCE(orderRef,?), taxable=COALESCE(taxable,?), gstPercent=COALESCE(gstPercent,?), gstAmount=COALESCE(gstAmount,?), updatedAt=? WHERE id=?')
+                    ->execute([$r['id'], $r['orderId'], $r['orderNo'], $tax, $r['gstPercent'], $gst, now_sql(), $e['id']]);
+                $n++; continue;
+            }
+            $id = gen_id(); $fileName = null; $fileStored = null;
+            if ($r['storedName']) {
+                $src = UPLOADS_PATH . '/orders/invoices/' . basename($r['storedName']);
+                $dir = UPLOADS_PATH . '/accounts';
+                if (is_file($src) && (is_dir($dir) || @mkdir($dir, 0755, true))) {
+                    $stored = $id . '.' . strtolower(pathinfo($r['storedName'], PATHINFO_EXTENSION));
+                    if (@copy($src, "$dir/$stored")) { $fileStored = $stored; $fileName = $r['fileName']; }
+                }
+            }
+            db()->prepare("INSERT INTO `AccEntry` (id,kind,company,docNo,docDate,partyId,partyName,partyGstin,orderId,orderRef,taxable,gstPercent,gstAmount,amount,dueDate,notes,fileName,fileStored,orderInvoiceId,createdById,createdAt,updatedAt)
+                VALUES (?,'INVOICE',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                ->execute([$id, $r['firm'] ?: 'TMS', $r['invoiceNo'], $d, $r['customerId'], $r['companyName'], $r['cGstin'] ?? null, $r['orderId'], $r['orderNo'],
+                    $tax, $r['gstPercent'], $gst, round($total, 2), date('Y-m-d', strtotime("$d +30 days")), 'From the Orders page', $fileName, $fileStored, $r['id'], $r['createdById'], now_sql(), now_sql()]);
+            $n++;
+        }
+        return $n;
+    }
+
+    /** An Orders-page invoice was removed: drop its Accounts copy too, unless money was already received against it. */
+    public static function orderInvoiceRemoved(string $oiId): void
+    {
+        $s = db()->prepare("SELECT id, fileStored FROM `AccEntry` WHERE kind='INVOICE' AND orderInvoiceId=?"); $s->execute([$oiId]);
+        foreach ($s->fetchAll() as $e) {
+            $p = db()->prepare("SELECT COUNT(*) FROM `AccEntry` WHERE linkId=?"); $p->execute([$e['id']]);
+            if ((int) $p->fetchColumn()) {
+                db()->prepare("UPDATE `AccEntry` SET orderInvoiceId=NULL, notes=CONCAT(COALESCE(notes,''), ' · removed on the Orders page'), updatedAt=? WHERE id=?")->execute([now_sql(), $e['id']]);
+            } else {
+                if ($e['fileStored']) @unlink(UPLOADS_PATH . '/accounts/' . basename($e['fileStored']));
+                db()->prepare('DELETE FROM `AccEntry` WHERE id=?')->execute([$e['id']]);
+            }
+        }
+    }
+
     private static function auth(): array
     {
         $auth = authenticate();
         if (!in_array($auth['role'], self::ROLES, true)) sendError('Accounts is for the accounts team, Admins and the Super Admin.', 403);
+        try { self::syncOrderInvoices(); } catch (Throwable $e) { error_log('accounts sync: ' . $e->getMessage()); }
         return $auth;
     }
 

@@ -107,7 +107,8 @@
   }
 
   function totals(rows) {
-    var t = { orders: 0, orderValue: 0, qty: 0, suppliedQty: 0, delivered: 0, deliveredValue: 0, manualCount: 0, manualOrderValue: 0, manualBilled: 0, totalGot: 0, totalMade: 0, totalOrders: 0, unpricedOrders: 0 };
+    var t = { orders: 0, orderValue: 0, qty: 0, suppliedQty: 0, delivered: 0, deliveredValue: 0, manualCount: 0, manualOrderValue: 0, manualBilled: 0, totalGot: 0, totalMade: 0, totalOrders: 0, unpricedOrders: 0,
+      invoiceCount: 0, billedTaxable: 0, billedGst: 0, billedTotal: 0, estimatedInvoices: 0 };
     rows.forEach(function (r) { Object.keys(t).forEach(function (k) { t[k] += +r[k] || 0; }); });
     return t;
   }
@@ -117,7 +118,7 @@
     clear(tilesBox);
     [['Orders got', String(t.totalOrders), t.manualCount ? t.orders + ' from Orders · ' + t.manualCount + ' invoices / manual' : 'from the Orders page', '#1e3a8a'],
      ['Order value got', money(t.totalGot), t.unpricedOrders ? t.unpricedOrders + ' order(s) without a value' : 'orders + manual', '#2563eb'],
-     ['Made (delivered + invoiced)', money(t.totalMade), t.totalGot ? Math.round(t.totalMade / t.totalGot * 100) + '% of value got' : '', '#16a34a'],
+     ['Billed (tax invoices, before tax)', money(t.totalMade), !(t.invoiceCount + t.manualCount) ? 'No tax invoice in this period' : 'with GST ' + money(t.billedTotal) + (t.manualBilled ? ' + manual ' + money(t.manualBilled) : '') + ' · ' + (t.invoiceCount + t.manualCount) + ' invoice' + (t.invoiceCount + t.manualCount === 1 ? '' : 's') + (t.totalGot ? ' · ' + Math.round(t.totalMade / t.totalGot * 100) + '% of order value' : ''), '#16a34a'],
      ['Quantity ordered / supplied', num(t.qty + 0) + ' / ' + num(t.suppliedQty), t.delivered + ' order(s) fully delivered', '#7c3aed']
     ].forEach(function (x) { tilesBox.appendChild(el('div', { class: 'sr-tile', style: '--c:' + x[3] }, [el('span', { text: x[0] }), el('b', { text: x[1] }), el('small', { text: x[2] })])); });
 
@@ -126,7 +127,7 @@
     if (!rows.length) { sumBox.appendChild(el('div', { class: 'sr-empty', text: 'No engineers.' })); }
     else {
       var max = Math.max.apply(null, rows.map(function (r) { return r.totalGot; }).concat([1]));
-      var H = ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Delivered', 'Delivered value', 'Invoices (manual)', 'Manual order value', 'Invoiced sales', 'Total got', 'Total made', 'Made %'];
+      var H = ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Delivered', 'Tax invoices', 'Billed (before tax)', 'GST', 'Billed (with GST)', 'Manual invoices', 'Manual sales', 'Total got', 'Total billed', 'Billed %'];
       sumBox.appendChild(el('div', { class: 'sr-scroll' }, [el('table', { class: 'sr-table', id: 'sr-summary' }, [
         el('thead', {}, [el('tr', {}, H.map(function (h, i) { return el('th', { class: i ? 'n' : '', text: h }); }))]),
         el('tbody', {}, rows.map(function (r) {
@@ -137,9 +138,11 @@
             el('td', { class: 'n' }, [money(r.orderValue), r.unpricedOrders ? el('div', { class: 'sr-sub', text: r.unpricedOrders + ' without value' }) : null]),
             el('td', { class: 'n', text: num(r.qty) }),
             el('td', { class: 'n', text: String(r.delivered) }),
-            el('td', { class: 'n', text: money(r.deliveredValue) }),
+            el('td', { class: 'n', text: String(r.invoiceCount) }),
+            el('td', { class: 'n' }, [money(r.billedTaxable), r.estimatedInvoices ? el('div', { class: 'sr-sub', title: 'These invoices were saved with only the total — 18% GST assumed. Add the amount before tax on the Orders page / Accounts.', text: '≈ ' + r.estimatedInvoices + ' without tax split' }) : null]),
+            el('td', { class: 'n', text: money(r.billedGst) }),
+            el('td', { class: 'n', text: money(r.billedTotal) }),
             el('td', { class: 'n', text: String(r.manualCount) }),
-            el('td', { class: 'n', text: money(r.manualOrderValue) }),
             el('td', { class: 'n', text: money(r.manualBilled) }),
             el('td', { class: 'n' }, [el('b', { text: money(r.totalGot) })]),
             el('td', { class: 'n' }, [el('b', { style: 'color:#15803d', text: money(r.totalMade) })]),
@@ -147,8 +150,8 @@
           ]);
         })),
         rows.length > 1 ? el('tfoot', {}, [el('tr', {}, [el('td', { text: 'Total' }), el('td', { class: 'n', text: String(t.orders) }), el('td', { class: 'n', text: money(t.orderValue) }), el('td', { class: 'n', text: num(t.qty) }),
-          el('td', { class: 'n', text: String(t.delivered) }), el('td', { class: 'n', text: money(t.deliveredValue) }), el('td', { class: 'n', text: String(t.manualCount) }), el('td', { class: 'n', text: money(t.manualOrderValue) }),
-          el('td', { class: 'n', text: money(t.manualBilled) }), el('td', { class: 'n', text: money(t.totalGot) }), el('td', { class: 'n', text: money(t.totalMade) }), el('td', { class: 'n', text: t.totalGot ? Math.round(t.totalMade / t.totalGot * 100) + '%' : '—' })])]) : null
+          el('td', { class: 'n', text: String(t.delivered) }), el('td', { class: 'n', text: String(t.invoiceCount) }), el('td', { class: 'n', text: money(t.billedTaxable) }), el('td', { class: 'n', text: money(t.billedGst) }),
+          el('td', { class: 'n', text: money(t.billedTotal) }), el('td', { class: 'n', text: String(t.manualCount) }), el('td', { class: 'n', text: money(t.manualBilled) }), el('td', { class: 'n', text: money(t.totalGot) }), el('td', { class: 'n', text: money(t.totalMade) }), el('td', { class: 'n', text: t.totalGot ? Math.round(t.totalMade / t.totalGot * 100) + '%' : '—' })])]) : null
       ])]));
     }
     drawList();
@@ -156,7 +159,7 @@
 
   function drawTabs() {
     clear(tabsBox);
-    [['orders', 'Orders (' + S.data.orders.length + ')'], ['entries', 'Tax invoices / manual entries (' + S.data.entries.length + ')']].forEach(function (x) {
+    [['orders', 'Orders (' + S.data.orders.length + ')'], ['invoices', 'Tax invoices from Orders (' + (S.data.invoices || []).length + ')'], ['entries', 'Manual / imported invoices (' + S.data.entries.length + ')']].forEach(function (x) {
       tabsBox.appendChild(el('button', { type: 'button', class: 'sr-tab' + (S.tab === x[0] ? ' on' : ''), 'data-tab': x[0], text: x[1], onclick: function () { S.tab = x[0]; drawList(); } }));
     });
   }
@@ -169,7 +172,7 @@
       if (!d.orders.length) { listBox.appendChild(el('div', { class: 'sr-empty', text: 'No orders in this period.' })); return; }
       listBox.appendChild(el('p', { class: 'sr-sub', style: 'margin:0 0 .5rem', text: 'Type the order value (₹, before tax) for orders that do not have one — it saves when you leave the box.' }));
       listBox.appendChild(el('div', { class: 'sr-scroll' }, [el('table', { class: 'sr-table', id: 'sr-orders' }, [
-        el('thead', {}, [el('tr', {}, ['Date', 'Customer', 'Engineer', 'Type', 'Items', 'Qty ordered', 'Qty supplied', 'Status', 'Order value'].map(function (h, i) { return el('th', { class: i >= 4 && i !== 7 ? 'n' : '', text: h }); }))]),
+        el('thead', {}, [el('tr', {}, ['Date', 'Customer', 'Engineer', 'Type', 'Items', 'Qty ordered', 'Qty supplied', 'Status', 'Order value', 'Billed (before tax)'].map(function (h, i) { return el('th', { class: i >= 4 && i !== 7 ? 'n' : '', text: h }); }))]),
         el('tbody', {}, d.orders.map(function (o) {
           var st = DS[o.deliveryStatus] || [o.deliveryStatus, '#64748b'];
           var canSet = d.seesAll || o.engineerId === d.me;
@@ -183,7 +186,18 @@
           return el('tr', {}, [el('td', { text: dmy(o.orderDate) }), el('td', {}, [el('b', { text: o.customerName || '—' })]), el('td', { text: o.engineerName || '—' }),
             el('td', { text: o.orderType === 'PO' ? 'PO' : 'Verbal' }), el('td', { class: 'n', text: String(o.itemCount) }), el('td', { class: 'n', text: num(o.qty) }), el('td', { class: 'n', text: num(o.suppliedQty) }),
             el('td', {}, [el('span', { class: 'sr-badge', style: '--c:' + st[1], text: st[0] })]),
-            el('td', { class: 'n' }, [val || money(o.orderValue)])]);
+            el('td', { class: 'n' }, [val || money(o.orderValue)]),
+            el('td', { class: 'n' }, o.invoiceCount ? [money(o.billedTaxable), el('div', { class: 'sr-sub', text: o.invoiceCount + ' invoice' + (o.invoiceCount > 1 ? 's' : '') + ' · ' + money(o.billedTotal) + ' with GST' })] : [el('span', { class: 'sr-sub', text: 'not billed' })])]);
+        }))
+      ])]));
+    } else if (S.tab === 'invoices') {
+      var inv = d.invoices || [];
+      if (!inv.length) { listBox.appendChild(el('div', { class: 'sr-empty', text: 'No tax invoice added on the Orders page in this period (open an order → Invoices supplied → + Add invoice).' })); return; }
+      listBox.appendChild(el('div', { class: 'sr-scroll' }, [el('table', { class: 'sr-table', id: 'sr-invoices' }, [
+        el('thead', {}, [el('tr', {}, ['Invoice date', 'Invoice no.', 'Customer', 'Engineer', 'Order', 'Before tax', 'GST', 'With GST'].map(function (h, i) { return el('th', { class: i >= 5 ? 'n' : '', text: h }); }))]),
+        el('tbody', {}, inv.map(function (iv) {
+          return el('tr', { 'data-inv': iv.id }, [el('td', { text: dmy(iv.invoiceDate) }), el('td', {}, [el('b', { text: iv.invoiceNo })]), el('td', { text: iv.customerName || '—' }), el('td', { text: iv.engineerName || '—' }),
+            el('td', { text: iv.orderNo || '' }), el('td', { class: 'n' }, [money(iv.taxable), iv.estimated ? el('div', { class: 'sr-sub', text: '≈ 18% assumed' }) : null]), el('td', { class: 'n', text: money(iv.gstAmount) }), el('td', { class: 'n' }, [el('b', { text: money(iv.total) })])]);
         }))
       ])]));
     } else {
@@ -242,8 +256,10 @@
     var d = S.data; if (!d) return;
     function q(v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
     var lines = [['Sales report by engineer', d.from + ' to ' + d.to].map(q).join(','), '',
-      ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Qty supplied', 'Delivered orders', 'Delivered value', 'Invoices (manual)', 'Manual order value', 'Invoiced sales', 'Total got', 'Total made'].join(',')];
-    d.summary.forEach(function (r) { lines.push([r.name, r.orders, r.orderValue, r.qty, r.suppliedQty, r.delivered, r.deliveredValue, r.manualCount, r.manualOrderValue, r.manualBilled, r.totalGot, r.totalMade].map(q).join(',')); });
+      ['Engineer', 'Orders', 'Order value', 'Qty ordered', 'Qty supplied', 'Delivered orders', 'Tax invoices', 'Billed before tax', 'GST', 'Billed with GST', 'Manual invoices', 'Manual sales value', 'Total got', 'Total billed (before tax)'].join(',')];
+    d.summary.forEach(function (r) { lines.push([r.name, r.orders, r.orderValue, r.qty, r.suppliedQty, r.delivered, r.invoiceCount, r.billedTaxable, r.billedGst, r.billedTotal, r.manualCount, r.manualBilled, r.totalGot, r.totalMade].map(q).join(',')); });
+    lines.push('', 'Tax invoices from Orders', ['Invoice date', 'Invoice no', 'Customer', 'Engineer', 'Order', 'Before tax', 'GST', 'With GST'].join(','));
+    (d.invoices || []).forEach(function (iv) { lines.push([iv.invoiceDate, iv.invoiceNo, iv.customerName, iv.engineerName, iv.orderNo, iv.taxable, iv.gstAmount, iv.total].map(q).join(',')); });
     lines.push('', 'Orders', ['Date', 'Customer', 'Engineer', 'Type', 'Items', 'Qty ordered', 'Qty supplied', 'Status', 'Order value'].join(','));
     d.orders.forEach(function (o) { lines.push([o.orderDate, o.customerName, o.engineerName, o.orderType, o.itemCount, o.qty, o.suppliedQty, (DS[o.deliveryStatus] || [o.deliveryStatus])[0], o.orderValue].map(q).join(',')); });
     lines.push('', 'Tax invoices / manual entries', ['Tax invoice date', 'Engineer', 'Customer', 'Tax invoice no', 'Qty', 'Order value', 'Sales value', 'Note'].join(','));
