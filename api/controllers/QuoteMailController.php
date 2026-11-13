@@ -65,8 +65,9 @@ class QuoteMailController
            . "Request you to kindly confirm us your valuable feedback at the earliest.\n\n"
            . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}"; // no signature (v11.55)
         $c = "Kind Attn: {attn}\n\nDear Sir,\n\nGreetings From {COMPANY}….!\n\n"
-           . "We thank you for confirming our offer {quotationNo} for {quotationSubject}\n\n"
-           . "Kindly find the attached quotation for your reference. We will process the order right away and keep you informed about the delivery.\n\n"
+           . "We thank you for your valuable order confirmation given to us for {quotationSubject}\n\n"
+           . "Kindly find the attached order confirmation for the same (our offer ref. {quotationNo}).\n\n"
+           . "We will process your order at the earliest and keep you informed about the delivery.\n\n"
            . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}"; // no signature (v11.55)
         $out = [];
         foreach (['TMS', 'APJ'] as $co) $out[$co] = [

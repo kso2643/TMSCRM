@@ -90,16 +90,13 @@
   }
   // v11.52: sign in with the e-mail OR the employee ID (TMS-024)
   function idField() {
-    var i = document.querySelector('form input[type="email"]') || document.querySelector('form input[autocomplete="username"]');
-    if (!i) return;
-    if (i.form) i.form.noValidate = true; // the browser's own e-mail check would block "TMS-024"
-    if (i.type !== 'text') i.type = 'text';
-    if (i.placeholder !== 'you@company.com or TMS-024') { i.placeholder = 'you@company.com or TMS-024'; i.setAttribute('autocapitalize', 'off'); i.setAttribute('autocomplete', 'username'); }
-    var wrap = i.closest('div') && i.closest('div').parentNode;
-    var lab = wrap && wrap.querySelector('label');
-    if (lab && lab.textContent === 'Email address') lab.textContent = 'Email or employee ID';
+    // v11.55: the box itself is now a text box (login page file). Never change its type here —
+    // React sets it again on every key press and switching the type put the cursor back at the
+    // start, so letters came out reversed. Only switch off the browser's e-mail check.
+    var i = document.querySelector('form input[autocomplete="username"], form input[type="email"]');
+    if (i && i.form && !i.form.noValidate) i.form.noValidate = true;
   }
   function tick() { idField(); if (build()) hideDemo(); }
-  new MutationObserver(tick).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['type'] });
+  new MutationObserver(tick).observe(document.documentElement, { childList: true, subtree: true });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick); else tick();
 })();

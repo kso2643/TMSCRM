@@ -1,3 +1,28 @@
+# Update — 13 Nov (c): login box typed backwards; new confirmation mail wording
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once on each computer. On phones, close and reopen the app.
+
+1. **Login — letters came out reversed** ("admin@tms.com" became "moc.smt@nimda").
+   - Since the box was changed to accept an employee ID (TMS-024), the page switched the box type on every key press, and that put the cursor back at the start.
+   - The box is now a plain text box from the start and nothing switches it any more.
+   - Typing, moving the cursor and pasting work normally; both the e-mail and the employee ID still sign in.
+2. **Quotation confirmation mail** — same style as the quotation mail, no signature:
+   > Kind Attn: *(contact person)*
+   >
+   > Dear Sir,
+   >
+   > Greetings From APJ TECHNOLOGIES PRIVATE LIMITED….!   *(TMS: TULIPS MACHINING SOLUTIONS)*
+   >
+   > We thank you for your valuable order confirmation given to us for *(quotation subject)*
+   >
+   > Kindly find the attached order confirmation for the same (our offer ref. *(quotation no.)*).
+   >
+   > We will process your order at the earliest and keep you informed about the delivery.
+   >
+   > Please do not hesitate to contact us, in case of any doubts
+
+   Subject: "Order confirmation — *(quotation subject)*".
+
 # Update — 13 Nov (b): no signature in the quotation e-mail
 
 **Upload:** `api/`, then press **Ctrl+Shift+R** once.
