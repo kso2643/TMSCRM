@@ -52,9 +52,19 @@ class AccountsController
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", 'columns' => ['orderInvoiceId' => 'VARCHAR(30) NULL']]];
     }
 
+    /** v11.56: index for the Orders-invoice link (the sync looks it up on every Accounts page). */
+    private static function ensureIndex(): void
+    {
+        try {
+            $s = db()->query("SHOW INDEX FROM `AccEntry` WHERE Key_name='AccEntry_oi_idx'");
+            if (!$s->fetch()) db()->exec('ALTER TABLE `AccEntry` ADD INDEX `AccEntry_oi_idx` (`orderInvoiceId`)');
+        } catch (Throwable $e) { error_log('AccEntry index: ' . $e->getMessage()); }
+    }
+
     public function __construct()
     {
         ensure_schema(self::schema(), 'Accounts');
+        static $ix = false; if (!$ix) { $ix = true; self::ensureIndex(); }
     }
 
     /**

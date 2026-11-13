@@ -1,3 +1,16 @@
+# Update — 13 Nov (e): "504 Gateway Time-out" — lighter caching; Outlook buttons
+
+**Upload:** `crm/.htaccess` (hidden file — turn on "Show hidden files"), `crm/quote-mail.js` and `api/controllers/AccountsController.php` — or simply the whole `api/` and `crm/`. Then press **Ctrl+Shift+R** once.
+
+1. **504 Gateway Time-out.** The previous `crm/.htaccess` made every browser ask the server about every script and style on every page (40–60 requests per page). On shared hosting that can use up the number of requests the server handles at once, so pages waited and nginx showed 504.
+   - Now only the **pages** are always fetched fresh. Scripts and styles are reused for up to an hour; every update still arrives immediately because each update renames them (?v=…).
+   - Also a database index for the Orders → Accounts invoice link.
+   - **If you still see 504:** it comes from the hosting server itself. Check the hosting panel (Hostinger: Websites → Dashboard → resource usage / "Entry processes", and the PHP error log). As a test, temporarily rename `crm/.htaccess`. A 504 that comes and goes for everyone at once is usually the host's server being busy — their support can raise the limits.
+2. **Outlook buttons** (quotation e-mail on a computer). "Open in Outlook" gave "HTTP ERROR 500" because it used the address for company (Microsoft 365) accounts only. There are now three choices:
+   - **Outlook / mail app on this computer:** the installed Outlook app.
+   - **Outlook.com (web):** personal Outlook / Hotmail accounts.
+   - **Microsoft 365 Outlook (web):** company accounts.
+
 # Update — 13 Nov (d): quotation e-mail is sent from Gmail / Outlook
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Phone app:** install the new APK from the `crm-apps` release, which can hand the PDF to Gmail / Outlook.

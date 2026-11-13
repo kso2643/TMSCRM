@@ -1,26 +1,22 @@
-# CRM pages (v11.53) — always show the newest page, never a copy the browser kept.
+# CRM pages (v11.56) — fresh pages without overloading the hosting.
 #
-# Without these headers browsers guess how long they may reuse a page and sometimes
-# showed an old page (or an old script) until Refresh. "no-cache" = the browser keeps the
-# file but asks the server each time; an unchanged file comes back as a tiny
-# "304 Not modified", so pages stay fast.
+# Pages (.html / .txt / .json) are always checked with the server, so nobody sees an old page.
+# Scripts and styles are reused for up to 1 hour without asking: every update gives them a new
+# version tag (?v=…) in the pages, so a new update still arrives at once. (Asking the server for
+# every script on every page — the first version of this file — made 40–60 requests per page
+# and could exhaust the hosting's request limit: "504 Gateway Time-out".)
 <IfModule mod_headers.c>
-  # pages, React page data, the offline helper and every script / style
-  # (some React files are updated in place under the same name)
-  <FilesMatch "\.(html?|txt|js|mjs|css|json|webmanifest)$">
+  <FilesMatch "\.(html?|txt|json|webmanifest)$">
     Header set Cache-Control "no-cache, must-revalidate"
-    Header unset Expires
   </FilesMatch>
-  # pictures, icons and fonts: keep a week
+  <FilesMatch "\.(js|mjs|css)$">
+    Header set Cache-Control "public, max-age=3600"
+  </FilesMatch>
   <FilesMatch "\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|mp3|wav|ogg)$">
     Header set Cache-Control "public, max-age=604800"
   </FilesMatch>
   # the offline helper itself is checked on every visit
   <Files "sw.js">
     Header set Cache-Control "no-cache, no-store, must-revalidate"
-    Header set Service-Worker-Allowed "/"
   </Files>
-</IfModule>
-<IfModule mod_expires.c>
-  ExpiresActive Off
 </IfModule>
