@@ -978,6 +978,9 @@ try {
             $method === 'PUT'  && $c1 !== '' && $c2 === ''              => $ctrl->update($c1),
             $method === 'POST' && $c1 !== '' && $c2 === 'approve'       => $ctrl->approve($c1),
             $method === 'POST' && $c1 !== '' && $c2 === 'reject'        => $ctrl->reject($c1),
+            $method === 'GET'  && $c1 !== '' && $c2 === 'compose'       => $ctrl->composeMail($c1),
+            $method === 'GET'  && $c1 !== '' && $c2 === 'file' && $c3 !== '' => $ctrl->file($c1, $c3),
+            $method === 'POST' && $c1 !== '' && $c2 === 'sent'          => $ctrl->markSent($c1),
             default => sendError("Route /api/quote-mail/$c1 not found", 404),
         };
     }

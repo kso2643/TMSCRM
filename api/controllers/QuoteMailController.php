@@ -262,19 +262,14 @@ class QuoteMailController
         $this->doApprove($a, $id);
     }
 
-    private function doApprove(array $a, string $id): void
+    /** The final mail: to / cc / subject / text (with the attachment line) and the files (quotation PDF + catalogues). */
+    private static function compose(array $m, bool $withFiles): array
     {
-        $m = self::row($id);
-        if ($m['status'] === 'SENT') sendError('This mail is already sent.', 409);
         $q = self::quotation($m['quotationId']);
-        $co = $m['company'];
-        $prof = PurchaseOrderController::profile($co);
-        $from = (string) (env('MAIL_FROM_' . $co) ?: (env('SMTP_USER') ?: ($prof['email'] ?? '')));
-        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) sendError("No sender address for $co: add the e-mail on the $co letterhead (Vendors → Purchase orders) or MAIL_FROM_$co in api/.env.", 400);
-        $att = []; $size = 0; $links = [];
+        $att = []; $size = 0; $links = []; $catNames = [];
         if ($m['attachPdf']) {
             $pdf = QuotationController::pdfBytes($q['id']);
-            if ($pdf) { $att[] = [$pdf[0], 'application/pdf', $pdf[1]]; $size += strlen($pdf[1]); }
+            if ($pdf) { $att[] = [$pdf[0], 'application/pdf', $pdf[1], strlen($pdf[1])]; $size += strlen($pdf[1]); }
         }
         if ($m['catalogueIds']) {
             $in = implode(',', array_fill(0, count($m['catalogueIds']), '?'));
@@ -287,11 +282,11 @@ class QuoteMailController
                 if ($size > self::MAX_ATTACH) sendError('The attachments are bigger than 20 MB — pick fewer catalogues.', 400);
                 $ext = strtolower(pathinfo($f['storedName'], PATHINFO_EXTENSION));
                 $name = preg_replace('/[^\w.\- ()]+/u', '_', $f['title'] ?: pathinfo($f['fileName'], PATHINFO_FILENAME)) . '.' . $ext;
-                $att[] = [$name, $ext === 'pdf' ? 'application/pdf' : (mime_content_type($path) ?: 'application/octet-stream'), file_get_contents($path)];
+                $att[] = [$name, $ext === 'pdf' ? 'application/pdf' : (mime_content_type($path) ?: 'application/octet-stream'), $withFiles ? file_get_contents($path) : '', (int) filesize($path)];
+                $catNames[] = $name;
             }
         }
         $catLine = '';
-        $catNames = array_map(fn($x) => $x[0], array_slice($att, $m['attachPdf'] ? 1 : 0));
         if ($catNames) $catLine .= "\nAlso attached: " . implode(', ', $catNames) . '.';
         if ($links) $catLine .= "\nCatalogues online:\n" . implode("\n", $links);
         $body = $m['body'];
@@ -300,19 +295,68 @@ class QuoteMailController
             if ($pos === false) $pos = stripos($body, "\nRegards");
             $body = $pos === false ? $body . "\n" . $catLine : rtrim(substr($body, 0, $pos)) . "\n" . $catLine . "\n" . substr($body, $pos);
         }
-        $req = null;
-        if ($m['requestedById']) { $s = db()->prepare('SELECT email FROM `User` WHERE id=?'); $s->execute([$m['requestedById']]); $req = $s->fetchColumn() ?: null; }
-        $res = Mailer::send(['from' => $from, 'fromName' => (string) ($prof['name'] ?? $co), 'replyTo' => $req ?: null,
-            'to' => Mailer::list($m['toEmails']), 'cc' => Mailer::list($m['ccEmails'] ?? ''), 'subject' => $m['subject'], 'text' => trim($body), 'attachments' => $att]);
-        $st = $res['ok'] ? 'SENT' : 'FAILED';
-        db()->prepare('UPDATE `QuoteMail` SET status=?, reviewedById=?, reviewedAt=?, sentAt=?, sendError=?, driver=?, updatedAt=? WHERE id=?')
-            ->execute([$st, $a['id'], now_sql(), $res['ok'] ? now_sql() : null, $res['error'] ? mb_substr($res['error'], 0, 500) : null, $res['driver'], now_sql(), $id]);
-        log_activity($a['id'], $res['ok'] ? 'QUOTE_MAIL_SENT' : 'QUOTE_MAIL_FAILED', 'Quotation', $q['id'], ['mailId' => $id, 'error' => $res['error']]);
+        return ['to' => Mailer::list($m['toEmails']), 'cc' => Mailer::list($m['ccEmails'] ?? ''), 'subject' => $m['subject'], 'body' => trim($body),
+            'files' => array_map(fn($x) => ['name' => $x[0], 'mime' => $x[1], 'size' => $x[3], 'base64' => $withFiles ? base64_encode($x[2]) : null], $att)];
+    }
+
+    /** v11.56: approving no longer sends from the server — the mail is opened in Gmail / Outlook and sent from there. */
+    private function doApprove(array $a, string $id): void
+    {
+        $m = self::row($id);
+        if ($m['status'] === 'SENT') sendError('This mail is already sent.', 409);
+        self::compose($m, false); // checks the attachments (size) now, not when the mail app opens
+        db()->prepare("UPDATE `QuoteMail` SET status='APPROVED', reviewedById=?, reviewedAt=?, sendError=NULL, driver='APP', updatedAt=? WHERE id=?")
+            ->execute([$a['id'], now_sql(), now_sql(), $id]);
+        log_activity($a['id'], 'QUOTE_MAIL_APPROVED', 'Quotation', $m['quotationId'], ['mailId' => $id]);
         if ($m['requestedById'] && $m['requestedById'] !== $a['id'])
-            self::notify([$m['requestedById']], $a['id'], $res['ok'] ? '✅ Quotation mail sent — ' . $m['quotationNumber'] : '⚠ Quotation mail approved but not sent — ' . $m['quotationNumber'],
-                $res['ok'] ? 'Approved by ' . ($a['name'] ?? 'the approver') . ' and e-mailed to ' . $m['toEmails'] . '.' : (string) $res['error'], '/quotations/');
-        if (!$res['ok']) sendError('Approved, but the e-mail could not be sent: ' . $res['error'], 502, ['mail' => self::row($id)]);
-        sendSuccess(['mail' => self::row($id)], 'Approved and e-mailed to ' . $m['toEmails']);
+            self::notify([$m['requestedById']], $a['id'], '✅ Quotation mail approved — ' . $m['quotationNumber'],
+                'Approved by ' . ($a['name'] ?? 'the approver') . '. Open it on the Quotations page and press "Open in mail app" (Gmail / Outlook) to send it to ' . $m['toEmails'] . '.', '/quotations/#mail-approvals');
+        sendSuccess(['mail' => self::row($id)], 'Approved — now open it in Gmail / Outlook and send');
+    }
+
+    private static function canOpen(array $a, array $m): bool
+    {
+        return self::isApprover($a) || $m['requestedById'] === $a['id'];
+    }
+
+    // GET /api/quote-mail/:id/compose[?files=1] — everything the mail app needs (only once approved)
+    public function composeMail(string $id): void
+    {
+        $a = authenticate();
+        $m = self::row($id);
+        if (!self::canOpen($a, $m)) sendError('Access denied.', 403);
+        if (!in_array($m['status'], ['APPROVED', 'SENT'], true)) sendError('This mail is not approved yet.', 409);
+        sendSuccess(['compose' => self::compose($m, (bool) qp('files')), 'mail' => $m]);
+    }
+
+    // GET /api/quote-mail/:id/file/:n — one attachment (to download on a computer)
+    public function file(string $id, string $n): void
+    {
+        $a = authenticate();
+        $m = self::row($id);
+        if (!self::canOpen($a, $m)) sendError('Access denied.', 403);
+        if (!in_array($m['status'], ['APPROVED', 'SENT'], true)) sendError('This mail is not approved yet.', 409);
+        $c = self::compose($m, true);
+        $f = $c['files'][(int) $n] ?? null;
+        if (!$f) sendError('File not found.', 404);
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: ' . $f['mime']);
+        header('Content-Disposition: attachment; filename="' . str_replace('"', '', $f['name']) . '"');
+        $b = base64_decode($f['base64']);
+        header('Content-Length: ' . strlen($b));
+        echo $b; exit;
+    }
+
+    // POST /api/quote-mail/:id/sent — "I've sent it" from the mail app
+    public function markSent(string $id): void
+    {
+        $a = authenticate();
+        $m = self::row($id);
+        if (!self::canOpen($a, $m)) sendError('Access denied.', 403);
+        if ($m['status'] !== 'APPROVED' && $m['status'] !== 'SENT') sendError('Only an approved mail can be marked as sent.', 409);
+        db()->prepare("UPDATE `QuoteMail` SET status='SENT', sentAt=COALESCE(sentAt, ?), driver='APP', updatedAt=? WHERE id=?")->execute([now_sql(), now_sql(), $id]);
+        log_activity($a['id'], 'QUOTE_MAIL_SENT', 'Quotation', $m['quotationId'], ['mailId' => $id, 'via' => 'mail app']);
+        sendSuccess(['mail' => self::row($id)], 'Marked as e-mailed');
     }
 
     // POST /api/quote-mail/:id/reject

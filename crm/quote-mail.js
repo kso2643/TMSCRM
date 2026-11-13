@@ -42,7 +42,7 @@
   }
   function dt(s) { if (!s) return ''; var d = new Date(String(s).replace(' ', 'T')); return isNaN(d) ? s : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
   function kb(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
-  var ST = { PENDING: ['Waiting for approval', '#b45309', '#fef3c7'], REJECTED: ['Sent back', '#b91c1c', '#fee2e2'], SENT: ['E-mailed', '#047857', '#d1fae5'], FAILED: ['Not sent — error', '#b91c1c', '#fee2e2'] };
+  var ST = { PENDING: ['Waiting for approval', '#b45309', '#fef3c7'], REJECTED: ['Sent back', '#b91c1c', '#fee2e2'], APPROVED: ['Approved — open in mail app', '#1d4ed8', '#dbeafe'], SENT: ['E-mailed', '#047857', '#d1fae5'], FAILED: ['Not sent — error', '#b91c1c', '#fee2e2'] };
   function badge(s) { var x = ST[s] || [s, '#475569', '#e2e8f0']; return el('span', { class: 'qm-badge', 'data-qm-status': s, style: 'color:' + x[1] + ';background:' + x[2], text: x[0] }); }
 
   (function css() {
@@ -97,6 +97,7 @@
     var F = {};
     function draw(d) {
       dlg.innerHTML = '';
+      if (M && (M.status === 'APPROVED' || M.status === 'SENT')) { sendPanel(dlg, M, function () { modal.remove(); refresh(); }); return; }
       var Q = state.info || {};
       dlg.appendChild(el('h3', { text: '✉ E-mail ' + (Q.quotationNumber || M && M.quotationNumber || '') }));
       dlg.appendChild(el('div', { class: 'sub', text: (Q.customer || (M && M.customer) || '') + ' · ' + (Q.company || (M && M.company) || '') + (M ? ' · by ' + (M.requestedBy || '') : '') }));
@@ -143,19 +144,19 @@
       att.appendChild(srch); att.appendChild(box);
       dlg.appendChild(att);
       dlg.appendChild(el('div', { class: 'sub', style: 'margin:10px 0 0', text: state.canApprove
-        ? 'You can approve: “Approve & send” e-mails it now.' + (state.driver === 'log' ? ' (Test server: mails are saved, not sent.)' : '')
-        : 'It goes to a Manager / Admin / Super Admin for approval. It is e-mailed once they approve — you get an alert either way.' }));
+        ? 'You can approve: then it opens in Gmail / Outlook with everything filled in — you press Send there.'
+        : 'It goes to a Manager / Admin / Super Admin for approval. Once approved you get an alert, open it here and it opens in Gmail / Outlook to send.' }));
       var btns = el('div', { class: 'qm-btns' });
       btns.appendChild(el('button', { type: 'button', class: 'qm-btn', text: 'Cancel', onclick: function () { modal.remove(); } }));
       if (state.canApprove && !M) btns.appendChild(el('button', { type: 'button', class: 'qm-btn', 'data-qm-save-tpl': '1', title: 'Use this subject and text as the standard wording for every ' + (Q.company || '') + ' ' + (kind === 'QUOTATION' ? 'quotation' : 'confirmation') + ' mail', text: '☆ Save as standard wording', onclick: saveTpl }));
       if (M && state.canApprove && M.status !== 'SENT') {
         btns.appendChild(el('button', { type: 'button', class: 'qm-btn no', 'data-qm-reject': '1', text: '✖ Send back…', onclick: reject }));
-        btns.appendChild(el('button', { type: 'button', class: 'qm-btn ok', 'data-qm-approve': '1', text: '✔ Approve & send', onclick: function (e) { submit(e.target, 'approve'); } }));
+        btns.appendChild(el('button', { type: 'button', class: 'qm-btn ok', 'data-qm-approve': '1', text: '✔ Approve', onclick: function (e) { submit(e.target, 'approve'); } }));
       } else if (M) {
         btns.appendChild(el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-resubmit': '1', text: 'Save & send for approval again', onclick: function (e) { submit(e.target, 'update'); } }));
       } else {
         btns.appendChild(el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-request': '1', text: 'Send for approval', onclick: function (e) { submit(e.target, 'request'); } }));
-        if (state.canApprove) btns.appendChild(el('button', { type: 'button', class: 'qm-btn ok', 'data-qm-sendnow': '1', text: '✔ Approve & send now', onclick: function (e) { submit(e.target, 'sendNow'); } }));
+        if (state.canApprove) btns.appendChild(el('button', { type: 'button', class: 'qm-btn ok', 'data-qm-sendnow': '1', text: '✔ Approve & open mail app', onclick: function (e) { submit(e.target, 'sendNow'); } }));
       }
       dlg.appendChild(btns);
       var hist = el('div', { class: 'qm-hist' });
@@ -173,13 +174,16 @@
     function submit(btn, how) {
       var p = payload();
       if (!p.to.trim()) { toast('Enter the customer’s e-mail address (To).', true); F.to.focus(); return; }
-      btn.disabled = true; var old = btn.textContent; btn.textContent = how === 'request' || how === 'update' ? 'Sending…' : 'E-mailing…';
+      btn.disabled = true; var old = btn.textContent; btn.textContent = how === 'request' || how === 'update' ? 'Sending…' : 'Approving…';
       var call = how === 'approve' ? api('POST', '/quote-mail/' + M.id + '/approve', p)
         : how === 'update' ? api('PUT', '/quote-mail/' + M.id, p)
         : api('POST', '/quote-mail', Object.assign(p, { sendNow: how === 'sendNow' }));
       call.then(function (j) {
-        modal.remove();
         toast(j.message || 'Done');
+        var mm = j.data && j.data.mail;
+        // my own mail approved now → straight to the mail app
+        if (mm && mm.status === 'APPROVED' && (how === 'sendNow' || mm.requestedById === me().id)) { M = mm; draw(); refresh(); return; }
+        modal.remove();
         refresh();
       }).catch(function (e) { btn.disabled = false; btn.textContent = old; toast(e.message, true); if (e.data && e.data.errors && e.data.errors.mail) refresh(); });
     }
@@ -197,6 +201,65 @@
     if (M) load(M.kind).then(function () { draw({ to: M.toEmails, cc: M.ccEmails || '', subject: M.subject, body: M.body, attachPdf: M.attachPdf }); }).catch(function (e) { toast(e.message, true); modal.remove(); });
     else load(kind).then(draw).catch(function (e) { toast(e.message, true); modal.remove(); });
   }
+
+  // ── approved mail → Gmail / Outlook with everything filled in; the person presses Send there ──
+  function isPhoneApp() { return !!(window.CRMNative && typeof window.CRMNative.composeMail === 'function'); }
+  function downloadFile(M, n, name) {
+    return fetch(API + '/api/quote-mail/' + M.id + '/file/' + n, { headers: { Authorization: 'Bearer ' + token() } })
+      .then(function (r) { if (!r.ok) throw new Error('Could not get ' + name); return r.blob(); })
+      .then(function (b) { var u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 30000); });
+  }
+  function sendPanel(dlg, M, done) {
+    dlg.innerHTML = '';
+    dlg.appendChild(el('h3', { text: '✉ ' + M.kindLabel + ' — ' + M.quotationNumber }));
+    dlg.appendChild(el('div', { class: 'sub', text: (M.customer || '') + ' · approved by ' + (M.reviewedBy || '—') + (M.status === 'SENT' ? ' · e-mailed ' + dt(M.sentAt) : '') }));
+    var info = el('div', { class: 'qm-att', id: 'qm-send-panel' }, [el('div', { text: 'Loading…' })]);
+    dlg.appendChild(info);
+    var btns = el('div', { class: 'qm-btns' });
+    dlg.appendChild(btns);
+    api('GET', '/quote-mail/' + M.id + '/compose').then(function (j) {
+      var c = j.data.compose; info.innerHTML = '';
+      function line(l, v) { info.appendChild(el('div', { class: 'qm-row' }, [el('label', { text: l }), el('div', { text: v || '—' })])); }
+      line('To', c.to.join(', ')); line('CC', c.cc.join(', ')); line('Subject', c.subject);
+      info.appendChild(el('pre', { id: 'qm-final-body', style: 'white-space:pre-wrap;font:13.5px system-ui;background:rgba(148,163,184,.1);border-radius:8px;padding:10px;margin:8px 0;max-height:260px;overflow:auto', text: c.body }));
+      info.appendChild(el('div', { style: 'font-size:13px' }, ['📎 ', c.files.length ? c.files.map(function (f) { return f.name; }).join(', ') : 'No attachments']));
+      var phone = isPhoneApp();
+      info.appendChild(el('p', { class: 'sub', style: 'margin:8px 0 0', text: phone
+        ? 'Opens Gmail / Outlook (choose one) with To, CC, subject, text and the attachments filled in — check it and press Send there.'
+        : 'Opens the mail with To, CC, subject and text filled in. A link cannot carry files, so the attachments are downloaded — drag them into the mail, then press Send.' }));
+      function opened() {
+        var mark = btns.querySelector('[data-qm-mark-sent]');
+        if (mark) { mark.classList.add('ok'); mark.style.outline = '3px solid #86efac'; }
+      }
+      function enc(x) { return encodeURIComponent(x); }
+      var to = c.to.join(','), cc = c.cc.join(',');
+      btns.appendChild(el('button', { type: 'button', class: 'qm-btn', text: 'Close', onclick: done }));
+      if (phone) {
+        btns.appendChild(el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-open-app': '1', text: '✉ Open in mail app (Gmail / Outlook)', onclick: function (e) {
+          var b = e.target; b.disabled = true; b.textContent = 'Opening…';
+          api('GET', '/quote-mail/' + M.id + '/compose?files=1').then(function (k) {
+            window.CRMNative.composeMail(JSON.stringify(k.data.compose));
+            b.disabled = false; b.textContent = '✉ Open in mail app again'; opened();
+          }).catch(function (x) { b.disabled = false; b.textContent = '✉ Open in mail app (Gmail / Outlook)'; toast(x.message, true); });
+        } }));
+      } else {
+        var dl = function () { c.files.reduce(function (p, f, n) { return p.then(function () { return downloadFile(M, n, f.name); }); }, Promise.resolve()).catch(function (x) { toast(x.message, true); }); };
+        var go = function (url) { return function () { window.open(url, '_blank'); dl(); opened(); }; };
+        btns.appendChild(el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-gmail': '1', text: 'Open in Gmail',
+          onclick: go('https://mail.google.com/mail/?view=cm&fs=1&to=' + enc(to) + (cc ? '&cc=' + enc(cc) : '') + '&su=' + enc(c.subject) + '&body=' + enc(c.body)) }));
+        btns.appendChild(el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-outlook': '1', text: 'Open in Outlook',
+          onclick: go('https://outlook.office.com/mail/deeplink/compose?to=' + enc(to) + (cc ? '&cc=' + enc(cc) : '') + '&subject=' + enc(c.subject) + '&body=' + enc(c.body)) }));
+        btns.appendChild(el('a', { class: 'qm-btn', 'data-qm-mailto': '1', style: 'text-decoration:none', text: 'Mail app on this device',
+          href: 'mailto:' + c.to.map(enc).join(',') + '?' + (cc ? 'cc=' + enc(cc) + '&' : '') + 'subject=' + enc(c.subject) + '&body=' + enc(c.body),
+          onclick: function () { dl(); opened(); } }));
+        if (c.files.length) btns.appendChild(el('button', { type: 'button', class: 'qm-btn', 'data-qm-download': '1', text: '⤓ Attachments only', onclick: dl }));
+      }
+      if (M.status !== 'SENT') btns.appendChild(el('button', { type: 'button', class: 'qm-btn', 'data-qm-mark-sent': '1', text: '✓ I\'ve sent it', onclick: function (e) {
+        e.target.disabled = true;
+        api('POST', '/quote-mail/' + M.id + '/sent').then(function (k) { toast(k.message); done(); }).catch(function (x) { e.target.disabled = false; toast(x.message, true); });
+      } }));
+    }).catch(function (e) { info.innerHTML = ''; info.appendChild(el('div', { text: e.message })); btns.appendChild(el('button', { type: 'button', class: 'qm-btn', text: 'Close', onclick: done })); });
+  }
   window.openQuoteMail = openMail;
 
   // ── buttons on the saved quotation cards + last mail status ──
@@ -213,7 +276,7 @@
         wrap.appendChild(btn);
       }
       var last = lastByQ[id], cur = wrap.querySelector('[data-qm-status]');
-      if (last && (!cur || cur.getAttribute('data-qm-status') !== last.status)) { if (cur) cur.remove(); var bd = badge(last.status); bd.title = last.kindLabel + ' → ' + last.toEmails; wrap.appendChild(bd); }
+      if (last && (!cur || cur.getAttribute('data-qm-status') !== last.status)) { if (cur) cur.remove(); var bd = badge(last.status); bd.title = last.kindLabel + ' → ' + last.toEmails + ' — click to open'; bd.style.cursor = 'pointer'; bd.addEventListener('click', function (lm) { return function (e) { e.stopPropagation(); openMail({ mail: lm }); }; }(last)); wrap.appendChild(bd); }
     });
   }
   // approvals bar (approvers) / my sent-back mails (everyone)
@@ -224,8 +287,8 @@
       lastByQ = {};
       mails.forEach(function (m) { if (!lastByQ[m.quotationId]) lastByQ[m.quotationId] = m; });
       decorate();
-      var todo = APPROVER ? mails.filter(function (m) { return m.status === 'PENDING' || m.status === 'FAILED'; })
-                          : mails.filter(function (m) { return m.status === 'REJECTED' || m.status === 'FAILED'; });
+      var mine = function (m) { return m.requestedById === me().id; };
+      var todo = mails.filter(function (m) { return (APPROVER && m.status === 'PENDING') || (m.status === 'APPROVED' && (mine(m) || APPROVER)) || (mine(m) && m.status === 'REJECTED'); });
       drawBar(todo);
     }).catch(function () {});
   }
@@ -239,18 +302,21 @@
     bar.innerHTML = '';
     if (!todo.length) { bar.style.display = 'none'; return; }
     bar.style.display = '';
-    var open = /mail-approvals/.test(location.hash) || bar._open;
+    var open = bar._open !== false; // shown unless folded away (short list, each item needs action)
     var list = el('div', { class: 'qm-list', style: open ? '' : 'display:none' });
     bar.appendChild(el('div', { class: 'qm-bar', 'data-qm-bar': '1', onclick: function () { bar._open = list.style.display === 'none'; list.style.display = bar._open ? '' : 'none'; } }, [
-      '✉ ' + todo.length + (APPROVER ? ' quotation mail' + (todo.length > 1 ? 's' : '') + ' waiting for your approval' : ' of your quotation mails sent back / not sent — correct and send again'),
-      el('span', { style: 'margin-left:auto;font-weight:500', text: 'Show ▾' })
+      (function () {
+        var p = todo.filter(function (m) { return m.status === 'PENDING'; }).length, a = todo.filter(function (m) { return m.status === 'APPROVED'; }).length, r = todo.length - p - a;
+        return '✉ ' + [p ? p + ' quotation mail' + (p > 1 ? 's' : '') + ' waiting for your approval' : '', a ? a + ' approved — open in Gmail / Outlook to send' : '', r ? r + ' sent back — correct and send again' : ''].filter(Boolean).join(' · ');
+      })(),
+      el('span', { style: 'margin-left:auto;font-weight:500', text: open ? 'Hide ▴' : 'Show ▾' })
     ]));
     todo.forEach(function (m) {
       list.appendChild(el('div', { class: 'qm-item', 'data-qm-item': m.id }, [
         el('div', { class: 'grow' }, [el('b', { text: m.quotationNumber + ' — ' + (m.customer || '') }), el('small', { text: m.kindLabel + ' → ' + m.toEmails + ' · by ' + (m.requestedBy || '') + ' · ' + dt(m.createdAt) }),
           m.status === 'REJECTED' && m.reviewNote ? el('small', { style: 'color:#b91c1c', text: '✖ ' + m.reviewNote }) : null]),
         badge(m.status),
-        el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-review': m.id, text: APPROVER ? 'Review' : 'Correct', onclick: function () { openMail({ mail: m }); } })
+        el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-review': m.id, text: m.status === 'APPROVED' ? '✉ Open in mail app' : m.status === 'PENDING' ? 'Review' : 'Correct', onclick: function () { openMail({ mail: m }); } })
       ]));
     });
     bar.appendChild(list);

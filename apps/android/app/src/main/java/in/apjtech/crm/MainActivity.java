@@ -6,6 +6,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.Ringtone;
@@ -58,6 +59,9 @@ import androidx.core.app.NotificationManagerCompat;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
@@ -626,6 +630,68 @@ public class MainActivity extends AppCompatActivity {
             AlertNotifier.prefs(MainActivity.this).edit().remove("token").remove("userId").remove("since").remove("seen").apply();
             AlertNotifier.clearAll(MainActivity.this);
             runOnUiThread(() -> AlertService.stop(MainActivity.this));
+        }
+
+        /**
+         * Quotation e-mail (v11.56): opens Gmail / Outlook (any e-mail app the person picks) with To, CC,
+         * subject, text and the attachments filled in — the person presses Send there.
+         * json = {"to":[..],"cc":[..],"subject":"..","body":"..","files":[{"name":"..","mime":"..","base64":".."}]}
+         */
+        @JavascriptInterface
+        public void composeMail(String json) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl))) return;
+            try {
+                JSONObject o = new JSONObject(json);
+                String[] to = strings(o.optJSONArray("to")), cc = strings(o.optJSONArray("cc"));
+                String subject = o.optString("subject", ""), body = o.optString("body", "");
+                JSONArray files = o.optJSONArray("files");
+                ArrayList<Uri> uris = new ArrayList<>();
+                File dir = new File(getCacheDir(), "mail");
+                if (dir.exists()) { File[] old = dir.listFiles(); if (old != null) for (File f : old) f.delete(); }
+                if (files != null && files.length() > 0) {
+                    if (!dir.exists() && !dir.mkdirs()) throw new Exception("Storage not available");
+                    for (int k = 0; k < files.length(); k++) {
+                        JSONObject f = files.getJSONObject(k);
+                        String b64 = f.optString("base64", "");
+                        if (b64.isEmpty()) continue;
+                        String nm = f.optString("name", "file").replaceAll("[\\\\/:*?\"<>|]", "_");
+                        File out = new File(dir, nm);
+                        try (FileOutputStream os = new FileOutputStream(out)) { os.write(Base64.decode(b64, Base64.DEFAULT)); }
+                        uris.add(FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", out));
+                    }
+                }
+                Intent i;
+                if (uris.isEmpty()) {
+                    i = new Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"));
+                } else {
+                    i = new Intent(uris.size() == 1 ? Intent.ACTION_SEND : Intent.ACTION_SEND_MULTIPLE);
+                    i.setType(uris.size() == 1 ? files.getJSONObject(0).optString("mime", "application/pdf") : "*/*");
+                    if (uris.size() == 1) i.putExtra(Intent.EXTRA_STREAM, uris.get(0)); else i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+                    ClipData clip = ClipData.newRawUri("attachment", uris.get(0));
+                    for (int k = 1; k < uris.size(); k++) clip.addItem(new ClipData.Item(uris.get(k)));
+                    i.setClipData(clip);
+                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    i.setSelector(new Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))); // only e-mail apps
+                }
+                i.putExtra(Intent.EXTRA_EMAIL, to);
+                if (cc.length > 0) i.putExtra(Intent.EXTRA_CC, cc);
+                i.putExtra(Intent.EXTRA_SUBJECT, subject);
+                i.putExtra(Intent.EXTRA_TEXT, body);
+                final Intent send = i;
+                runOnUiThread(() -> {
+                    try { startActivity(Intent.createChooser(send, "Send the mail with")); }
+                    catch (ActivityNotFoundException e) { Toast.makeText(MainActivity.this, "No e-mail app found — install Gmail or Outlook.", Toast.LENGTH_LONG).show(); }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Could not open the mail app: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }
+
+        private String[] strings(JSONArray a) {
+            if (a == null) return new String[0];
+            String[] r = new String[a.length()];
+            for (int k = 0; k < a.length(); k++) r[k] = a.optString(k, "");
+            return r;
         }
 
         @JavascriptInterface

@@ -1,3 +1,18 @@
+# Update — 13 Nov (d): quotation e-mail is sent from Gmail / Outlook
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Phone app:** install the new APK from the `crm-apps` release, which can hand the PDF to Gmail / Outlook.
+
+How it works now:
+1. **✉ E-mail** on a quotation → check the text → **Send for approval**.
+   - A Manager / Admin / Super Admin can press **✔ Approve & open mail app** straight away.
+2. The Manager / Admin / Super Admin checks it and presses **✔ Approve**. The CRM no longer sends it itself.
+3. The engineer gets an alert, and the Quotations page shows "✉ … approved — open in Gmail / Outlook to send". Press **✉ Open in mail app**:
+   - **Phone app:** the phone asks which mail app to use (Gmail, Outlook…). It opens with To, CC, subject, text **and the quotation PDF + ticked catalogues attached** — check it and press **Send** there.
+   - **Computer:** **Open in Gmail**, **Open in Outlook** or **Mail app on this device**. These open with To, CC, subject and text filled in. A web link cannot carry files, so the quotation PDF and catalogues are **downloaded** at the same moment: drag them into the mail and press Send.
+4. Back in the CRM press **✓ I've sent it**. The quotation card then shows "E-mailed".
+- The old phone app (without the update) still opens the mail app with the text, but without the PDF. Install the new APK for attachments.
+- The SMTP settings in `api/.env` are no longer needed for quotation mails.
+
 # Update — 13 Nov (c): login box typed backwards; new confirmation mail wording
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once on each computer. On phones, close and reopen the app.
