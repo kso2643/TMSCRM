@@ -247,11 +247,17 @@
         var go = function (url) { return function () { window.open(url, '_blank'); dl(); opened(); }; };
         btns.appendChild(el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-gmail': '1', text: 'Open in Gmail',
           onclick: go('https://mail.google.com/mail/?view=cm&fs=1&to=' + enc(to) + (cc ? '&cc=' + enc(cc) : '') + '&su=' + enc(c.subject) + '&body=' + enc(c.body)) }));
-        btns.appendChild(el('button', { type: 'button', class: 'qm-btn pri', 'data-qm-outlook': '1', text: 'Open in Outlook',
-          onclick: go('https://outlook.office.com/mail/deeplink/compose?to=' + enc(to) + (cc ? '&cc=' + enc(cc) : '') + '&subject=' + enc(c.subject) + '&body=' + enc(c.body)) }));
-        btns.appendChild(el('a', { class: 'qm-btn', 'data-qm-mailto': '1', style: 'text-decoration:none', text: 'Mail app on this device',
+        // Outlook: the installed app takes mailto links; the two web Outlooks need different addresses
+        // (outlook.office.com only works for work / Microsoft 365 accounts — personal accounts got "HTTP ERROR 500").
+        var q = 'to=' + enc(to) + (cc ? '&cc=' + enc(cc) : '') + '&subject=' + enc(c.subject) + '&body=' + enc(c.body);
+        btns.appendChild(el('a', { class: 'qm-btn pri', 'data-qm-mailto': '1', style: 'text-decoration:none', text: 'Outlook / mail app on this computer',
+          title: 'Opens the Outlook app (or the mail program set on this computer) with everything filled in',
           href: 'mailto:' + c.to.map(enc).join(',') + '?' + (cc ? 'cc=' + enc(cc) + '&' : '') + 'subject=' + enc(c.subject) + '&body=' + enc(c.body),
           onclick: function () { dl(); opened(); } }));
+        btns.appendChild(el('button', { type: 'button', class: 'qm-btn', 'data-qm-outlook-live': '1', text: 'Outlook.com (web)', title: 'Personal Outlook / Hotmail account in the browser',
+          onclick: go('https://outlook.live.com/mail/0/deeplink/compose?' + q) }));
+        btns.appendChild(el('button', { type: 'button', class: 'qm-btn', 'data-qm-outlook': '1', text: 'Microsoft 365 Outlook (web)', title: 'Company (work) Outlook account in the browser',
+          onclick: go('https://outlook.office.com/mail/0/deeplink/compose?' + q) }));
         if (c.files.length) btns.appendChild(el('button', { type: 'button', class: 'qm-btn', 'data-qm-download': '1', text: '⤓ Attachments only', onclick: dl }));
       }
       if (M.status !== 'SENT') btns.appendChild(el('button', { type: 'button', class: 'qm-btn', 'data-qm-mark-sent': '1', text: '✓ I\'ve sent it', onclick: function (e) {
