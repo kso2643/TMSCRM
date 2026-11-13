@@ -1,3 +1,10 @@
+# Update — 13 Nov (b): no signature in the quotation e-mail
+
+**Upload:** `api/`, then press **Ctrl+Shift+R** once.
+
+- The quotation and confirmation mails now end with "Please do not hesitate to contact us, in case of any doubts". The "Thanks & regards" / name / phone block is no longer added.
+- Attached catalogues are still listed after the last line.
+
 # Update — 13 Nov: quotation e-mail wording for APJ and TMS
 
 **Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
@@ -17,8 +24,6 @@
   > Request you to kindly confirm us your valuable feedback at the earliest.
   >
   > Please do not hesitate to contact us, in case of any doubts
-  >
-  > Thanks & regards, *(name, designation, company, phone, e-mail)*
 - The confirmation mail uses the same style: "We thank you for confirming our offer *(no.)* for *(subject)*…".
 - Everything can still be changed in the mail before sending.
 - **Note:** if a Manager / Admin had pressed "☆ Save as standard wording" before, that saved text is still used. To get this new wording, open a mail, paste the text you want, and press "☆ Save as standard wording" again.

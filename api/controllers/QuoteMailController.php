@@ -59,16 +59,15 @@ class QuoteMailController
     {
         // v11.54: the company's own wording (same for TMS and APJ, the company name changes);
         // the subject is the quotation's own subject.
-        $sign = "\n\nThanks & regards,\n{signName}\n{signDesignation}\n{company}\n{companyPhone}  {companyEmail}";
         $q = "Kind Attn: {attn}\n\nDear Sir,\n\nGreetings From {COMPANY}….!\n\n"
            . "We thank you for your valuable enquiry given to us for {quotationSubject}\n\n"
            . "Kindly find the attached best final offer for the same.\n\n"
            . "Request you to kindly confirm us your valuable feedback at the earliest.\n\n"
-           . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}" . $sign;
+           . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}"; // no signature (v11.55)
         $c = "Kind Attn: {attn}\n\nDear Sir,\n\nGreetings From {COMPANY}….!\n\n"
            . "We thank you for confirming our offer {quotationNo} for {quotationSubject}\n\n"
            . "Kindly find the attached quotation for your reference. We will process the order right away and keep you informed about the delivery.\n\n"
-           . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}" . $sign;
+           . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}"; // no signature (v11.55)
         $out = [];
         foreach (['TMS', 'APJ'] as $co) $out[$co] = [
             'QUOTATION' => ['subject' => '{quotationSubject}', 'body' => $q],
