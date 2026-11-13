@@ -57,16 +57,22 @@ class QuoteMailController
     // ── wording ─────────────────────────────────────────────────────────
     private static function defaults(): array
     {
-        $q = "Dear {attn},\n\nGreetings from {company}.\n\nThank you for your enquiry{enquiryRef}. Please find attached our quotation {quotationNo} dated {date}{subjectLine}.\n\n"
-           . "Quotation value: Rs. {total} (GST extra as applicable). The offer is valid for {validity}.\n{catalogueLine}\n"
-           . "We look forward to your valued order. Please feel free to contact us for any clarification.\n\nThanks & regards,\n{signName}\n{signDesignation}\n{company}\n{companyPhone}  {companyEmail}";
-        $c = "Dear {attn},\n\nGreetings from {company}.\n\nThank you for confirming our quotation {quotationNo} dated {date}{subjectLine}. We are pleased to confirm the order "
-           . "as per the attached quotation (value Rs. {total}, GST extra as applicable).\n\nWe will process it right away and keep you informed about the delivery.\n{catalogueLine}\n"
-           . "Thanks & regards,\n{signName}\n{signDesignation}\n{company}\n{companyPhone}  {companyEmail}";
+        // v11.54: the company's own wording (same for TMS and APJ, the company name changes);
+        // the subject is the quotation's own subject.
+        $sign = "\n\nThanks & regards,\n{signName}\n{signDesignation}\n{company}\n{companyPhone}  {companyEmail}";
+        $q = "Kind Attn: {attn}\n\nDear Sir,\n\nGreetings From {COMPANY}….!\n\n"
+           . "We thank you for your valuable enquiry given to us for {quotationSubject}\n\n"
+           . "Kindly find the attached best final offer for the same.\n\n"
+           . "Request you to kindly confirm us your valuable feedback at the earliest.\n\n"
+           . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}" . $sign;
+        $c = "Kind Attn: {attn}\n\nDear Sir,\n\nGreetings From {COMPANY}….!\n\n"
+           . "We thank you for confirming our offer {quotationNo} for {quotationSubject}\n\n"
+           . "Kindly find the attached quotation for your reference. We will process the order right away and keep you informed about the delivery.\n\n"
+           . "Please do not hesitate to contact us, in case of any doubts{catalogueLine}" . $sign;
         $out = [];
         foreach (['TMS', 'APJ'] as $co) $out[$co] = [
-            'QUOTATION' => ['subject' => 'Quotation {quotationNo} — {company}', 'body' => $q],
-            'CONFIRMATION' => ['subject' => 'Order confirmation — quotation {quotationNo} — {company}', 'body' => $c],
+            'QUOTATION' => ['subject' => '{quotationSubject}', 'body' => $q],
+            'CONFIRMATION' => ['subject' => 'Order confirmation — {quotationSubject}', 'body' => $c],
         ];
         return $out;
     }
@@ -92,9 +98,10 @@ class QuoteMailController
             $total = (float) $s->fetchColumn();
         }
         $v = [
-            '{attn}' => trim((string) ($q['kindAttn'] ?: ($q['contactPerson'] ?: 'Sir / Madam'))),
+            '{attn}' => trim((string) ($q['kindAttn'] ?: ($q['contactPerson'] ?: ($q['toName'] ?: ($q['companyName'] ?: 'Sir / Madam'))))),
             '{customer}' => (string) ($q['toName'] ?: $q['companyName']),
-            '{company}' => (string) ($p['name'] ?? $co), '{companyPhone}' => (string) ($p['phone'] ?? ''), '{companyEmail}' => (string) ($p['email'] ?? ''),
+            '{company}' => (string) ($p['name'] ?? $co), '{COMPANY}' => mb_strtoupper((string) ($p['name'] ?? $co)),
+            '{quotationSubject}' => trim((string) ($q['subject'] ?? '')) !== '' ? trim((string) $q['subject']) : 'Quotation ' . $q['quotationNumber'], '{companyPhone}' => (string) ($p['phone'] ?? ''), '{companyEmail}' => (string) ($p['email'] ?? ''),
             '{quotationNo}' => (string) $q['quotationNumber'], '{date}' => $d ? date('d-m-Y', strtotime($d)) : '',
             '{enquiryRef}' => $q['enquiryRef'] ? ' (your ref: ' . $q['enquiryRef'] . ')' : '',
             '{subjectLine}' => $q['subject'] ? ' for ' . $q['subject'] : '',
@@ -326,7 +333,7 @@ class QuoteMailController
     {
         $a = authenticate();
         if (!self::isApprover($a)) sendError('Access denied.', 403);
-        sendSuccess(['templates' => self::templates(), 'placeholders' => ['{attn}', '{customer}', '{company}', '{quotationNo}', '{date}', '{enquiryRef}', '{subjectLine}', '{total}', '{validity}', '{catalogueLine}', '{signName}', '{signDesignation}', '{companyPhone}', '{companyEmail}']]);
+        sendSuccess(['templates' => self::templates(), 'placeholders' => ['{attn}', '{quotationSubject}', '{COMPANY}', '{customer}', '{company}', '{quotationNo}', '{date}', '{enquiryRef}', '{subjectLine}', '{total}', '{validity}', '{catalogueLine}', '{signName}', '{signDesignation}', '{companyPhone}', '{companyEmail}']]);
     }
 
     public function saveTemplate(): void

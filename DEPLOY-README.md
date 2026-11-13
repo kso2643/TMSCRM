@@ -1,3 +1,28 @@
+# Update — 13 Nov: quotation e-mail wording for APJ and TMS
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once.
+
+- **Subject** = the quotation's own subject (e.g. "Quotation for ZECHA Endmills"). A confirmation mail gets "Order confirmation — " in front of it.
+- **Text** of the quotation mail:
+  > Kind Attn: *(contact person)*
+  >
+  > Dear Sir,
+  >
+  > Greetings From APJ TECHNOLOGIES PRIVATE LIMITED….!   *(TMS quotations: TULIPS MACHINING SOLUTIONS)*
+  >
+  > We thank you for your valuable enquiry given to us for *(quotation subject)*
+  >
+  > Kindly find the attached best final offer for the same.
+  >
+  > Request you to kindly confirm us your valuable feedback at the earliest.
+  >
+  > Please do not hesitate to contact us, in case of any doubts
+  >
+  > Thanks & regards, *(name, designation, company, phone, e-mail)*
+- The confirmation mail uses the same style: "We thank you for confirming our offer *(no.)* for *(subject)*…".
+- Everything can still be changed in the mail before sending.
+- **Note:** if a Manager / Admin had pressed "☆ Save as standard wording" before, that saved text is still used. To get this new wording, open a mail, paste the text you want, and press "☆ Save as standard wording" again.
+
 # Update — 12 Nov (c): pages that showed only after a refresh
 
 **Upload:** `crm/` (including the new hidden file `crm/.htaccess`; in the cPanel / Hostinger file manager turn on "Show hidden files" to check it is there), then press **Ctrl+Shift+R** once on each computer; on phones close and reopen the CRM / app. No `api/` change in this part.
