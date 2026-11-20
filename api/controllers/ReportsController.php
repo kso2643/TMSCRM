@@ -363,14 +363,17 @@ class ReportsController extends ExportController
         $auth = authenticate(); require_manager($auth);
         [$w, $p] = $this->where('a.date', ['a.checkIn IS NOT NULL']);
         $rows = $this->rows(
-            "SELECT a.id, a.date, a.checkIn, a.checkOut, a.workingHours, a.checkInLat, a.checkOutLat, u.name AS who
+            "SELECT a.id, a.date, a.checkIn, a.checkOut, a.workingHours, a.checkInLat, a.checkInLng, a.checkOutLat, a.checkOutLng, u.name AS who
              FROM `Attendance` a LEFT JOIN `User` u ON u.id=a.userId $w ORDER BY a.date DESC, u.name", $p);
-        $ping = db()->prepare('SELECT lat,lng FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
+        // v11.57: with the times (and accuracy) like everywhere else — without them the km check for
+        // impossible jumps could not work (PHP warnings, km too high on this report)
+        $ping = db()->prepare('SELECT lat, lng, accuracy, capturedAt FROM `LocationPing` WHERE attendanceId=? ORDER BY capturedAt');
         foreach ($rows as &$r) {
             $ping->execute([$r['id']]);
             $pts = $ping->fetchAll();
             $r['points'] = count($pts);
-            $r['km'] = round(LocationHistoryController::distanceKm($pts), 2);
+            $r['km'] = round(LocationHistoryController::distanceKm($pts, $r), 2);
+            unset($r['checkInLng'], $r['checkOutLng']);
             $b = $this->rows("SELECT COUNT(*) AS n, COALESCE(SUM(durationSeconds),0) AS s FROM `AttendanceBreak` WHERE attendanceId=?", [$r['id']]);
             $r['breaks'] = $b ? (int) $b[0]['n'] : 0;
             $r['breakSec'] = $b ? (int) $b[0]['s'] : 0;

@@ -9,6 +9,15 @@
      - its prefetches of other pages are refused (else it would switch from its cache)
      - last resort: if the address still changes to another page without a load, reload.
 */
+// v11.57: the customer page without a customer (old bookmark, back after a delete) → the customer list
+(function () {
+  try {
+    if (/^\/customers\/detail\/?$/.test(location.pathname)) {
+      var id = new URLSearchParams(location.search).get('id');
+      if (!id || id === 'null' || id === 'undefined') location.replace('/customers/');
+    }
+  } catch (e) {}
+})();
 (function hardNavigations() {
     if (!window.fetch || window.__crmHardNav) return;
     window.__crmHardNav = true;
