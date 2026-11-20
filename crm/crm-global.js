@@ -131,6 +131,34 @@
     };
   })();
 
+  // ── Photos open in the CRM's viewer (⬇ Download, ↗ Share), not as a download (v11.57) ──
+  (function photoViewer() {
+    if (window.__crmPhotoViewer) return;
+    window.__crmPhotoViewer = true;
+    var me = document.currentScript || document.querySelector('script[src*="crm-global.js"]');
+    var v = me && /[?&]v=([^&]+)/.exec(me.getAttribute('src') || '');
+    var sc = document.createElement('script'); sc.src = '/image-view.js' + (v ? '?v=' + v[1] : '');
+    (document.head || document.documentElement).appendChild(sc);
+    // remember which page-made file links are photos
+    var photos = {};
+    var mkUrl = URL.createObjectURL;
+    URL.createObjectURL = function (o) {
+      var u = mkUrl.apply(URL, arguments);
+      try { if (o && /^image\//.test(o.type || '')) photos[u] = o; } catch (e) {}
+      return u;
+    };
+    window.CRMIsPhotoUrl = function (u) { return !!photos[String(u || '')]; };
+    var open0 = window.open;
+    window.open = function (u) {
+      var s0 = String(u || '');
+      if (photos[s0] && window.CRMImageView) {
+        window.CRMImageView.show({ src: s0, blob: photos[s0], name: photos[s0].name || 'photo' });
+        return { closed: false, close: function () {}, focus: function () {}, document: { write: function () {}, close: function () {} }, location: {} };
+      }
+      return open0.apply(window, arguments);
+    };
+  })();
+
   // ── Hosting firewalls that refuse DELETE / PUT / PATCH ("Failed to fetch") ──
   // Every page's delete / edit call to the CRM API goes as POST with "X-HTTP-Method-Override",
   // which the API treats as the real method. Covers fetch() and XMLHttpRequest (axios).

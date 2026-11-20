@@ -116,7 +116,7 @@
     var k = m.fileKind || 'FILE', box = el('div', { class: 'ch-att ch-att-' + k.toLowerCase(), 'data-att': m.id });
     if (k === 'IMAGE') {
       var img = el('img', { alt: m.fileName || 'Photo', class: 'ch-img' });
-      img.onclick = function () { fileBlob(m.id).then(function (u) { window.open(u, '_blank'); }); };
+      img.onclick = function () { fileBlob(m.id).then(function (u) { if (window.CRMImageView) window.CRMImageView.show({ src: u, name: m.fileName || 'photo' }); else window.open(u, '_blank'); }); };
       fileBlob(m.id).then(function (u) { img.src = u; }).catch(function () { img.alt = '⚠ ' + (m.fileName || 'photo'); });
       box.appendChild(img);
     } else if (k === 'AUDIO' || k === 'VIDEO') {

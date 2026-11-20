@@ -746,6 +746,7 @@
           if (f.kind === 'PDF' && window.PdfView) return PdfView.show(fileUrl(i.id, f), { title: f.fileName, fileName: f.fileName });
           if (f.kind !== 'IMAGE') return download();
           var shown = function (u) {
+            if (window.CRMImageView) return window.CRMImageView.show({ src: u, name: f.fileName });
             var lb = el('div', { class: 'md-lb', id: 'md-lightbox' }, [el('div', { class: 'bar' }, [el('b', { text: f.fileName }),
               el('button', { type: 'button', class: 'md-btn sm', text: '⬇ Download', onclick: download }),
               el('button', { type: 'button', class: 'md-btn sm', text: '✕ Close', onclick: function () { lb.remove(); } })]),

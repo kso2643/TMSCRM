@@ -687,6 +687,36 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        /** Photo viewer (v11.57): "Share → Other apps" — the phone's share sheet (WhatsApp, Gmail, …) with the file. */
+        @JavascriptInterface
+        public void shareFile(String dataUrl, String name, String mime, String text) {
+            if (!isAllowed(Uri.parse(currentUrl == null ? "" : currentUrl))) return;
+            try {
+                int comma = dataUrl.indexOf(',');
+                byte[] bytes = Base64.decode(dataUrl.substring(comma + 1), Base64.DEFAULT);
+                File dir = new File(getCacheDir(), "share");
+                if (dir.exists()) { File[] old = dir.listFiles(); if (old != null) for (File f : old) f.delete(); }
+                if (!dir.exists() && !dir.mkdirs()) throw new Exception("Storage not available");
+                String safe = (name == null || name.trim().isEmpty()) ? "photo.jpg" : name.replaceAll("[\\\\/:*?\"<>|]", "_");
+                File out = new File(dir, safe);
+                try (FileOutputStream os = new FileOutputStream(out)) { os.write(bytes); }
+                Uri uri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", out);
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType(mime == null || mime.isEmpty() ? "image/*" : mime);
+                i.putExtra(Intent.EXTRA_STREAM, uri);
+                if (text != null && !text.isEmpty()) i.putExtra(Intent.EXTRA_TEXT, text);
+                i.setClipData(ClipData.newRawUri("photo", uri));
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                final Intent send = i;
+                runOnUiThread(() -> {
+                    try { startActivity(Intent.createChooser(send, "Share with")); }
+                    catch (ActivityNotFoundException e) { Toast.makeText(MainActivity.this, "No app to share with.", Toast.LENGTH_LONG).show(); }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Could not share: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }
+
         private String[] strings(JSONArray a) {
             if (a == null) return new String[0];
             String[] r = new String[a.length()];
