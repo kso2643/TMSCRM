@@ -1,3 +1,49 @@
+# Update — 20 Nov: Excel templates + upload on the pages, alert Dismiss fixed, photo viewer with Download / Share, map in the customer form, bug fixes
+
+**Upload:** `api/` and `crm/`, then press **Ctrl+Shift+R** once. **Phone app:** install **APJ-CRM-1.0.14** (photo "Share → Other apps").
+- **Also delete these two old files on the server, if they are there:** `api/controllers/AttendanceControlledr.php` and `api/controllers/AttendanceControlledr1.php`. They were leftover copies; uploading doesn't remove them.
+- Keep `api/uploads/` and `api/.env`.
+
+1. **Excel template + upload** (**⬇ Template** and **⬆ Upload Excel** next to the page title):
+
+   | Page | One row per | Required columns | An existing row is… |
+   |---|---|---|---|
+   | **Vendors** | vendor | Vendor name | updated (same name) |
+   | **Customers** | customer company | Company name, Contact person, Contact number | updated (same name) |
+   | **HR** | employee | Employee ID or Login e-mail | filled in (only existing employees) |
+   | **CEO Desk → Tasks** | task | Task, Assigned to | — always a new task |
+   | **Appointments** | appointment | Customer, Date, Purpose | — always new |
+   | **Fuel expense → Petty cash** | cash entry | Date, Type, Amount, Description | — always new |
+   | **Accounts** | invoice / receipt / vendor bill / payment / voucher | Type, Date, Party (+ number for invoices / bills) | — always new; the same invoice twice is refused |
+
+   - The template's second sheet, **How to fill**, explains every column, with an example and the allowed values.
+   - The upload is **checked first**: each row shows *New*, *Update* (with the changed columns), *No change*, or the problem (e.g. "Phone: not a phone number"). **Nothing is saved until you press Save**, and nothing is saved while any row has a problem.
+   - **Who can upload:**
+     - Vendors: Manager / Admin / Super Admin.
+     - HR: Admin / Super Admin.
+     - Accounts: Accounts / Admin / Super Admin.
+     - Customers and Tasks: sales engineers too, but only for their own customers / own tasks.
+     - Petty cash: whoever has petty cash access.
+   - Blank cells keep the old value. Columns can be in any order; extra columns are ignored. Dates like 25-11-2026 or Excel dates both work.
+   - (Products, Stock, Price requests, Sales report, CPR and the vendor price lists keep their own templates.)
+2. **Alert pop-ups — Dismiss now works.**
+   - Reminders made in the browser (appointments, punch in) were only hidden by **Dismiss / Dismiss all** and came back on the next check. They are now marked read.
+   - Every dismissed alert is remembered on that device for 2 days.
+3. **Photos open — they are not downloaded.**
+   - Tapping a photo in **Chat**, the **CEO Desk** (or anywhere a page opens a photo) shows it full screen: zoom **− +**, rotate **⟲**, **⬇ Download** and **↗ Share**.
+   - **Share** offers:
+     - 💬 **Send in Chat** (pick a person, add a message)
+     - 🗂 **Send to CEO Desk** (to the CEO / Admins, with a subject and note)
+     - 📱 **Other apps** (WhatsApp, Gmail…: the phone's share sheet, needs app 1.0.14)
+4. **Customer Add / Edit — map.** A map with a draggable pin now sits under the GPS latitude / longitude.
+   - **Use my current location**, typing the numbers, tapping / dragging the pin, or pasting a Google Maps link all keep the numbers, the pin and the Google Maps link together.
+   - Before, the Maps link stayed on the **old** place after "Use my current location", so the map didn't change.
+5. **Bugs found and fixed in the full check:**
+   - **Reports → Daily movement:** km were worked out without the time of each GPS point. The check for impossible jumps could not run, so km could come out too high, and the server logged 3,420 warnings. They now use the same calculation as Attendance / Location history, including the punch-in and punch-out places.
+   - Opening a customer page without a customer (old bookmark / back after deleting) asked the server for "customer null". It now goes to the customer list.
+   - Two old copies of the attendance controller were removed (see above).
+   - Checked with no other problems: every page loaded as admin and as a sales engineer, all 22 server test suites, all screen test suites, backup / restore, and the menu links.
+
 # Update — 13 Nov (e): "504 Gateway Time-out" — lighter caching; Outlook buttons
 
 **Upload:** `crm/.htaccess` (hidden file — turn on "Show hidden files"), `crm/quote-mail.js` and `api/controllers/AccountsController.php` — or simply the whole `api/` and `crm/`. Then press **Ctrl+Shift+R** once.
