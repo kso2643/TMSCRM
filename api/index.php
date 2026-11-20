@@ -77,6 +77,7 @@ require __DIR__ . '/includes/ChangeNotice.php';  // "✎ <name> changed your …
 require __DIR__ . '/controllers/AuthController.php';
 require __DIR__ . '/controllers/UserController.php';
 require __DIR__ . '/controllers/HrController.php';
+require __DIR__ . '/controllers/BulkImportController.php';
 require __DIR__ . '/controllers/QuoteMailController.php';
 require_once __DIR__ . '/includes/Mailer.php';
 require __DIR__ . '/controllers/CustomerController.php';
@@ -967,6 +968,15 @@ try {
     }
 
     // ── Employee Ledger ──────────────────────────────────────────
+    elseif ($c0 === 'bulk') {
+        $ctrl = new BulkImportController();
+        match (true) {
+            $method === 'GET'  && $c1 === ''                         => $ctrl->index(),
+            $method === 'GET'  && $c1 !== '' && $c2 === 'template'   => $ctrl->template($c1),
+            $method === 'POST' && $c1 !== '' && $c2 === 'import'     => $ctrl->import($c1),
+            default => sendError("Route /api/bulk/$c1 not found", 404),
+        };
+    }
     elseif ($c0 === 'quote-mail') {
         $ctrl = new QuoteMailController();
         match (true) {

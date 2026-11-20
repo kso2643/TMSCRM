@@ -55,6 +55,15 @@
     sc.src = '/crm-theme.js' + (v ? '?v=' + v[1] : '');
     (document.head || document.documentElement).appendChild(sc);
   })();
+  // Excel template + upload (v11.57) on the pages that keep lists of records.
+  (function loadBulk() {
+    if (window.__bulkImport || !/^\/(vendors|customers|hr|tasks|md-desk|appointments|fuel-expense|accounts)\/?$/.test(path)) return;
+    var me = document.currentScript || document.querySelector('script[src*="crm-global.js"]');
+    var v = me && /[?&]v=([^&]+)/.exec(me.getAttribute('src') || '');
+    var sc = document.createElement('script');
+    sc.src = '/bulk-import.js' + (v ? '?v=' + v[1] : '');
+    (document.head || document.documentElement).appendChild(sc);
+  })();
   // ── Downloads inside the Android app ───────────────────────────────
   // The app can't save "blob:" files the normal way. Every way a page makes a file — a link with
   // "download", jsPDF / FileSaver saves (they click a link that is never put on the page), window.open
