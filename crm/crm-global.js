@@ -961,16 +961,28 @@
     var all = mk('button', 'a', toasts > 1 ? 'Dismiss all' : 'Dismiss');
     all.style.marginLeft = '10px';
     all.setAttribute('data-dismiss-all', '1');
-    all.addEventListener('click', function () { box.querySelectorAll('.t').forEach(function (t) { t.remove(); }); hidden = 0; markAllRead(); refreshSoundHint(); });
+    all.addEventListener('click', function () { box.querySelectorAll('.t').forEach(function (t) { closeToast(t, 'close'); t.remove(); }); hidden = 0; markAllRead(); refreshSoundHint(); });
     acts.appendChild(all);
     hintEl.appendChild(acts);
     box.insertBefore(hintEl, box.firstChild);
   }
 
+  // v11.57: alerts dismissed here stay dismissed (2 days, on this device) — reminders made in the
+  // browser (appointments, punch in) used to come straight back on the next check.
+  var DISMISS_KEY = 'crm_dismissed_alerts';
+  function dismissedMap() { try { var m = JSON.parse(lsGet(DISMISS_KEY) || '{}') || {}, now = Date.now(), out = {}; Object.keys(m).forEach(function (k) { if (now - m[k] < 2 * 864e5) out[k] = m[k]; }); return out; } catch (e) { return {}; } }
+  function rememberDismissed(id) { if (!id) return; var m = dismissedMap(); m[String(id)] = Date.now(); lsSet(DISMISS_KEY, JSON.stringify(m)); }
+  function isDismissed(id) { return !!(id && dismissedMap()[String(id)]); }
+  function closeToast(t, how) {
+    var ev = t.__ev || {};
+    rememberDismissed(ev.id);
+    try { if (how === 'open') { if (ev.onOpen) ev.onOpen(); } else if (ev.onClose) ev.onClose(); } catch (e) {}
+  }
   function toast(ev) {
     ensureBox();
     var sty = TYPE_STYLE[ev.type] || { color: '#1e3a5f', icon: '🔔' };
     var t = mk('div', 't');
+    t.__ev = ev;
     t.style.setProperty('--c', sty.color);
     t.setAttribute('data-id', ev.id);
     var h = mk('div', 'h');
@@ -981,14 +993,14 @@
     h.appendChild(txt);
     var x = mk('button', 'x', '✕');
     x.setAttribute('aria-label', 'Dismiss');
-    x.addEventListener('click', function () { leave(t); if (ev.onClose) ev.onClose(); });
+    x.addEventListener('click', function () { leave(t); closeToast(t, 'close'); });
     h.appendChild(x);
     t.appendChild(h);
     var ft = mk('div', 'ft');
     if (ev.link) {
       var a = mk('a', 'a', 'Open →');
       a.href = ev.link;
-      a.addEventListener('click', function () { t.remove(); if (ev.onOpen) ev.onOpen(); });
+      a.addEventListener('click', function () { t.remove(); closeToast(t, 'open'); });
       ft.appendChild(a);
     }
     ft.appendChild(mk('span', 'muted', fmtWhen(ev.at)));
@@ -1108,6 +1120,7 @@
       if (firstRun) { lsSet(SEEN_KEY, JSON.stringify(seen.concat(fresh.map(function (ev) { return ev.id; })).slice(-300))); return; }
       // already read (Dismiss all / Alerts page on any device) → no pop-up
       if (readAt) fresh = fresh.filter(function (ev) { return !ev.at || String(ev.at) > readAt; });
+      fresh = fresh.filter(function (ev) { return !isDismissed(ev.id); });
       if (!fresh.length) return;
       lsSet(SEEN_KEY, JSON.stringify(seen.concat(fresh.map(function (ev) { return ev.id; })).slice(-300)));
       fresh = fresh.map(applyRule).filter(Boolean);   // types turned off are dropped, templates applied
@@ -1369,6 +1382,7 @@
       if (!ev || !document.body) return false;
       ensureBox();
       if (ev.id && box.querySelector('.t[data-id="' + String(ev.id).replace(/"/g, '') + '"]')) return true;
+      if (isDismissed(ev.id)) return true;   // dismissed here already
       ev = applyRule(ev);
       if (!ev) return true;   // turned off in the notification settings
       toast(ev); desktop(ev); refreshSoundHint();
